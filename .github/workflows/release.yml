@@ -23,18 +23,6 @@ jobs:
     name: Build macOS (aarch64)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
       - name: Resolve tag
         id: tag
         env:
@@ -47,6 +35,48 @@ jobs:
           else
             echo "value=$REF_TAG" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.tag.outputs.value }}
+          fetch-depth: 0
+
+      - name: Build changelog
+        id: changelog
+        env:
+          CURRENT: ${{ steps.tag.outputs.value }}
+        run: |
+          set -euo pipefail
+          PREV=$(git describe --tags --abbrev=0 "${CURRENT}^" 2>/dev/null || true)
+          echo "current=$CURRENT" >&2
+          echo "previous=$PREV" >&2
+
+          if [ -z "$PREV" ]; then
+            HEADER="Initial release."
+            LOG=$(git log HEAD --pretty=format:'- %s (%h)' --no-merges --reverse)
+          else
+            HEADER="Commits since [${PREV}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${PREV}):"
+            LOG=$(git log "${PREV}..HEAD" --pretty=format:'- %s (%h)' --no-merges --reverse)
+          fi
+
+          # Multiline output via heredoc-style delimiter
+          {
+            echo "value<<CHANGELOG_EOF"
+            echo "$HEADER"
+            echo ""
+            echo "$LOG"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: Build and bundle
         uses: tauri-apps/tauri-action@v0
@@ -73,6 +103,10 @@ jobs:
 
             Then double-click the app in Applications. It opens normally
             from then on.
+
+            ## Changes
+
+            ${{ steps.changelog.outputs.value }}
           releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin
