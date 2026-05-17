@@ -418,9 +418,103 @@ async function renderActive({ scrollLock } = { scrollLock: true }) {
     onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
   });
 
+  annotateLinks();
+
   if (anchor) restoreAnchor(anchor);
   else previewScroll.scrollTop = 0;
 }
+
+/* ---- Link handling ---- */
+
+const URL_SCHEME = /^[a-z][a-z0-9+.\-]*:/i;
+
+function isExternalUrl(href) {
+  return URL_SCHEME.test(href);
+}
+
+function annotateLinks() {
+  for (const a of preview.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    if (!href) continue;
+    if (isExternalUrl(href)) {
+      a.title = `${href}\n(⌘-click to open in browser)`;
+    } else {
+      a.title = href;
+    }
+  }
+}
+
+/** Resolve a markdown link's href against the active tab's directory. */
+function resolveRelative(baseDir, href) {
+  let p = href.split("#")[0].split("?")[0];
+  try {
+    p = decodeURIComponent(p);
+  } catch (_) {}
+  if (p.startsWith("/")) return p;
+  const segs = baseDir.split("/").filter(Boolean);
+  for (const seg of p.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") segs.pop();
+    else segs.push(seg);
+  }
+  return "/" + segs.join("/");
+}
+
+preview.addEventListener("click", async (ev) => {
+  const a = ev.target.closest("a[href]");
+  if (!a || !preview.contains(a)) return;
+  const href = a.getAttribute("href");
+  if (!href) return;
+
+  // Always intercept; default would navigate the WebView and destroy app state.
+  ev.preventDefault();
+
+  // Fragment-only: scroll within the current document.
+  if (href.startsWith("#")) {
+    let target = null;
+    try {
+      target = preview.querySelector(href);
+    } catch (_) {}
+    if (!target) {
+      // Fragments emitted by comrak's header_id_prefix look like "md-h-foo".
+      target = preview.querySelector(`[id="${CSS.escape(href.slice(1))}"]`);
+    }
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  // Absolute URL (http, https, mailto, ftp, etc.): require ⌘ to open.
+  if (isExternalUrl(href)) {
+    if (ev.metaKey || ev.ctrlKey) {
+      try {
+        await invoke("open_url", { url: href });
+      } catch (e) {
+        console.error("open_url failed", e);
+      }
+    }
+    return;
+  }
+
+  // Relative path: resolve against the active tab's directory.
+  const tab = activeTab();
+  if (!tab) return;
+  const resolved = resolveRelative(parentDir(tab.path), href);
+
+  if (MD_EXT.test(resolved)) {
+    if (ev.metaKey || ev.ctrlKey) {
+      await openSticky(resolved);
+    } else {
+      await openPreview(resolved);
+    }
+  } else if (ev.metaKey || ev.ctrlKey) {
+    try {
+      await invoke("open_path", { path: resolved });
+    } catch (e) {
+      console.error("open_path failed", e);
+    }
+  }
+  // Plain click on a non-markdown relative path: no-op (tooltip shows path).
+});
 
 function showError(msg) {
   preview.hidden = false;

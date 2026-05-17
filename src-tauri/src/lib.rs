@@ -40,6 +40,7 @@ pub fn run(startup: Startup) {
             commands::read_source,
             commands::check_for_updates,
             commands::open_url,
+            commands::open_path,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.

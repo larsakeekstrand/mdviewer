@@ -79,6 +79,21 @@ pub fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| format!("failed to open url: {e}"))
 }
 
+/// Open a local filesystem path in the default macOS application (Cmd+click
+/// on non-markdown links in the preview).
+#[tauri::command]
+pub fn open_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("not found: {path}"));
+    }
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to open path: {e}"))
+}
+
 #[tauri::command]
 pub fn open_file(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
