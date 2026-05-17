@@ -19,16 +19,11 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 
 ## Install on macOS
 
-The app currently ships only as macOS bundles (Apple Silicon and Intel). Builds are not signed by an Apple Developer ID, so you have to remove macOS's quarantine flag once after installing.
+The app currently ships only as a macOS Apple Silicon bundle (M1 / M2 / M3 / M4). Builds are not signed by an Apple Developer ID, so you have to remove macOS's quarantine flag once after installing.
 
 ### 1. Download
 
-Grab the `.dmg` for your Mac from the [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest):
-
-| Mac model | File |
-| --- | --- |
-| Apple Silicon (M1 / M2 / M3 / M4) | `mdviewer_<version>_aarch64.dmg` |
-| Intel | `mdviewer_<version>_x64.dmg` |
+Grab `mdviewer_<version>_aarch64.dmg` from the [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest).
 
 ### 2. Install
 
@@ -120,7 +115,7 @@ CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -- -D wa
 
 ## Cut a release
 
-Push a `v*` tag to trigger `.github/workflows/release.yml`. It builds for both `aarch64-apple-darwin` and `x86_64-apple-darwin`, then attaches the `.dmg` and `.app.tar.gz` artifacts to a draft GitHub Release that you publish manually.
+Push a `v*` tag to trigger `.github/workflows/release.yml`. It builds for `aarch64-apple-darwin` and attaches the `.dmg` and `.app.tar.gz` artifacts to a draft GitHub Release that you publish manually.
 
 ```sh
 git tag v0.1.0

@@ -19,29 +19,20 @@ env:
 
 jobs:
   build-macos:
-    name: Build macOS (${{ matrix.target }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            runner: macos-14
-          - target: x86_64-apple-darwin
-            runner: macos-13
-    runs-on: ${{ matrix.runner }}
+    name: Build macOS (aarch64)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          key: ${{ matrix.target }}
 
       - name: Resolve tag
         id: tag
@@ -65,13 +56,10 @@ jobs:
           tagName: ${{ steps.tag.outputs.value }}
           releaseName: ${{ steps.tag.outputs.value }}
           releaseBody: |
-            ## Install
+            ## Install (Apple Silicon)
 
-            Download the `.dmg` matching your Mac:
-            - **Apple Silicon (M1/M2/M3/M4)** — `*_aarch64.dmg`
-            - **Intel** — `*_x64.dmg`
-
-            Open the `.dmg` and drag `mdviewer` to Applications.
+            Download `mdviewer_<version>_aarch64.dmg`, open it, and drag
+            `mdviewer.app` to Applications.
 
             ### Required: remove the quarantine flag
 
@@ -86,4 +74,4 @@ jobs:
             from then on.
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target aarch64-apple-darwin
