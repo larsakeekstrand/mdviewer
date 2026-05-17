@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A markdown viewer with a file tree and beautifully rendered preview"
 edition = "2021"
 rust-version = "1.77"
+license = "MIT"
 
 [[bin]]
 name = "mdviewer"
