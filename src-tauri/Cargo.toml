@@ -1,0 +1,41 @@
+[package]
+name = "mdviewer"
+version = "0.1.0"
+description = "A markdown viewer with a file tree and beautifully rendered preview"
+edition = "2021"
+rust-version = "1.77"
+
+[[bin]]
+name = "mdviewer"
+path = "src/main.rs"
+
+[lib]
+name = "mdviewer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Markdown rendering with syntax highlighting
+comrak = { version = "0.52", features = ["syntect"] }
+syntect = "5.3"
+
+# File-system watching
+notify = "8.2"
+notify-debouncer-full = "0.7"
+
+# Gitignore-aware directory walking
+ignore = "0.4"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,4 @@
+/src-tauri/target
+/src-tauri/gen
+**/*.rs.bk
+.DS_Store

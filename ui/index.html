@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>mdviewer</title>
+    <link rel="stylesheet" href="github-markdown.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title" id="tree-title">Files</span>
+      </div>
+      <ul class="tree" id="tree" role="tree"></ul>
+    </aside>
+    <div class="splitter" id="splitter" role="separator" aria-orientation="vertical"></div>
+    <main class="preview-pane" id="preview-pane">
+      <div class="tab-bar" id="tab-bar" hidden>
+        <div class="tabs" id="tabs" role="tablist"></div>
+        <div class="toolbar">
+          <button
+            id="toggle-raw"
+            class="toolbar-btn"
+            type="button"
+            aria-pressed="false"
+            title="Toggle raw / rendered view"
+          >
+            Raw
+          </button>
+        </div>
+      </div>
+      <div class="preview-scroll" id="preview-scroll">
+        <div class="preview-empty" id="preview-empty">
+          Select a file from the tree to preview.
+        </div>
+        <article class="markdown-body" id="preview" hidden></article>
+      </div>
+    </main>
+
+    <script src="morphdom-umd.min.js"></script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
