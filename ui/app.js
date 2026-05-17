@@ -3,6 +3,7 @@
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+const dialogApi = window.__TAURI__.dialog;
 
 const MD_EXT = /\.(md|markdown|mdown|mkd|mkdn)$/i;
 const DOUBLE_CLICK_MS = 280;
@@ -101,6 +102,10 @@ async function init() {
 
   await listen("edit-action", async (ev) => {
     await runEditAction(ev.payload);
+  });
+
+  await listen("menu-check-updates", async () => {
+    await checkForUpdates({ silent: false });
   });
 
   window
@@ -640,24 +645,42 @@ const updateBannerText = document.getElementById("update-banner-text");
 const updateBannerView = document.getElementById("update-banner-view");
 const updateBannerDismiss = document.getElementById("update-banner-dismiss");
 
-async function checkForUpdates() {
+async function checkForUpdates({ silent = true } = {}) {
   let info;
   try {
     info = await invoke("check_for_updates");
   } catch (e) {
-    // 404 (no published releases yet), network error, etc. — silent.
-    console.debug("update check skipped:", e);
+    if (silent) {
+      // 404 (no published releases yet), network error, etc.
+      console.debug("update check skipped:", e);
+      return;
+    }
+    await dialogApi.message("Couldn't check for updates.\n\n" + e, {
+      title: "mdviewer",
+      kind: "error",
+    });
     return;
   }
-  if (!info || !info.has_update) return;
 
-  let dismissed = null;
-  try {
-    dismissed = localStorage.getItem(DISMISS_KEY);
-  } catch (_) {}
-  if (dismissed === info.latest_version) return;
+  if (info && info.has_update) {
+    if (silent) {
+      let dismissed = null;
+      try {
+        dismissed = localStorage.getItem(DISMISS_KEY);
+      } catch (_) {}
+      if (dismissed === info.latest_version) return;
+    }
+    showUpdateBanner(info);
+    return;
+  }
 
-  showUpdateBanner(info);
+  if (!silent) {
+    const current = (info && info.current_version) || "this version";
+    await dialogApi.message(
+      `You're on version ${current}. This is the latest release.`,
+      { title: "mdviewer", kind: "info" },
+    );
+  }
 }
 
 function showUpdateBanner(info) {

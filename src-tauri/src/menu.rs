@@ -17,6 +17,9 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         match id.as_str() {
             "open-file" => prompt_open_file(app.clone()),
             "open-folder" => prompt_open_folder(app.clone()),
+            "check-updates" => {
+                let _ = app.emit("menu-check-updates", ());
+            }
             "edit-copy" => {
                 let _ = app.emit("edit-action", "copy");
             }
@@ -59,8 +62,12 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
 
     let recent_submenu = build_recent_submenu(app)?;
 
+    let check_updates =
+        MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+
     let app_menu = SubmenuBuilder::new(app, "mdviewer")
         .about(None)
+        .item(&check_updates)
         .separator()
         .item(&PredefinedMenuItem::hide(app, None)?)
         .item(&PredefinedMenuItem::hide_others(app, None)?)
