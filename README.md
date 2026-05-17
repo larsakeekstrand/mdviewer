@@ -28,17 +28,15 @@ Open the `.dmg` and drag `mdviewer.app` to `Applications`.
 
 ### First launch — Gatekeeper
 
-Builds are not code-signed. On first launch macOS will refuse to run the app. To get past the warning:
-
-1. Open **Applications** in Finder.
-2. Right-click `mdviewer.app` → **Open**.
-3. Confirm the prompt.
-
-Or remove the quarantine flag from Terminal:
+Builds are ad-hoc signed but not code-signed by an Apple Developer ID. macOS will refuse to open the app because the browser sets a quarantine flag on the download. Remove it from Terminal once after installing:
 
 ```sh
-xattr -d com.apple.quarantine /Applications/mdviewer.app
+sudo xattr -dr com.apple.quarantine /Applications/mdviewer.app
 ```
+
+Then double-click the app — it'll open normally from then on.
+
+> On macOS 15 (Sequoia) and later, the old right-click → Open workaround no longer works for browser-downloaded unsigned apps; macOS flat-out reports the app as "damaged". The `xattr` command above is the supported way to bypass this for software you trust.
 
 ## Build from source
 

@@ -73,18 +73,17 @@ jobs:
 
             Open the `.dmg` and drag `mdviewer` to Applications.
 
-            ### First launch
+            ### Required: remove the quarantine flag
 
-            These builds are unsigned. On first launch macOS will warn that
-            the app is from an unidentified developer. To run it:
+            Builds are ad-hoc signed but not signed by an Apple Developer ID.
+            On macOS 15 (Sequoia) and later, browser-downloaded unsigned apps
+            are reported as "damaged" by Gatekeeper. Run this once after
+            installing:
 
-            1. Open Applications in Finder.
-            2. Right-click `mdviewer.app` and choose **Open**.
-            3. Confirm the prompt.
+                sudo xattr -dr com.apple.quarantine /Applications/mdviewer.app
 
-            Or remove quarantine from a terminal:
-
-                xattr -d com.apple.quarantine /Applications/mdviewer.app
+            Then double-click the app in Applications. It opens normally
+            from then on.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
