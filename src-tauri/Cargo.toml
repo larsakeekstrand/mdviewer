@@ -35,6 +35,10 @@ notify-debouncer-full = "0.7"
 # Gitignore-aware directory walking
 ignore = "0.4"
 
+# Update check (GitHub releases API + version comparison)
+ureq = { version = "3", features = ["json"] }
+semver = "1"
+
 [profile.release]
 opt-level = "s"
 lto = true

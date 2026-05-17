@@ -16,6 +16,7 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - Custom right-click context menu (Copy / Copy Source / Show Raw·Rendered)
 - Auto light + dark theme via OS `prefers-color-scheme`
 - CLI: `mdviewer [file-or-directory]`
+- Update check on startup: if a newer release exists on GitHub, a dismissible banner offers a one-click link to the release page
 
 ## Install on macOS
 

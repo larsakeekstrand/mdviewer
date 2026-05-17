@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::{markdown, tree, AppState};
+use crate::{markdown, tree, updates, AppState};
 
 #[derive(Serialize)]
 pub struct InitialState {
@@ -57,6 +57,26 @@ pub fn render_file(
 #[tauri::command]
 pub fn read_source(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("cannot read '{path}': {e}"))
+}
+
+#[tauri::command]
+pub fn check_for_updates() -> Result<updates::UpdateInfo, String> {
+    updates::check()
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    // Restrict to http(s) so the command can't be abused to launch arbitrary
+    // local files or schemes via the system opener.
+    let lower = url.to_lowercase();
+    if !lower.starts_with("https://") && !lower.starts_with("http://") {
+        return Err("only http(s) URLs are allowed".to_string());
+    }
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to open url: {e}"))
 }
 
 #[tauri::command]

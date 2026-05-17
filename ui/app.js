@@ -632,7 +632,62 @@ previewScroll.addEventListener("scroll", hideContextMenu);
   });
 })();
 
-init().catch((e) => {
-  console.error("init failed", e);
-  document.body.innerText = "Failed to start: " + e;
-});
+/* ---- Update check ---- */
+
+const DISMISS_KEY = "mdviewer.update.dismissed_version";
+const updateBanner = document.getElementById("update-banner");
+const updateBannerText = document.getElementById("update-banner-text");
+const updateBannerView = document.getElementById("update-banner-view");
+const updateBannerDismiss = document.getElementById("update-banner-dismiss");
+
+async function checkForUpdates() {
+  let info;
+  try {
+    info = await invoke("check_for_updates");
+  } catch (e) {
+    // 404 (no published releases yet), network error, etc. — silent.
+    console.debug("update check skipped:", e);
+    return;
+  }
+  if (!info || !info.has_update) return;
+
+  let dismissed = null;
+  try {
+    dismissed = localStorage.getItem(DISMISS_KEY);
+  } catch (_) {}
+  if (dismissed === info.latest_version) return;
+
+  showUpdateBanner(info);
+}
+
+function showUpdateBanner(info) {
+  updateBannerText.textContent =
+    `mdviewer ${info.latest_version} is available — you have ${info.current_version}.`;
+
+  updateBannerView.onclick = async () => {
+    try {
+      await invoke("open_url", { url: info.release_url });
+    } catch (e) {
+      console.error("open_url failed", e);
+    }
+  };
+  updateBannerDismiss.onclick = () => {
+    try {
+      localStorage.setItem(DISMISS_KEY, info.latest_version);
+    } catch (_) {}
+    updateBanner.hidden = true;
+  };
+
+  updateBanner.hidden = false;
+}
+
+init()
+  .then(() => {
+    // Fire-and-forget — the check runs in the background and won't block
+    // anything in init. Silent if no update or if the network call fails.
+    checkForUpdates();
+  })
+  .catch((e) => {
+    console.error("init failed", e);
+    document.body.innerText = "Failed to start: " + e;
+  });

@@ -50,8 +50,68 @@ body {
 body {
   display: grid;
   grid-template-columns: var(--sidebar-width, 260px) 5px 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "banner banner banner"
+    "sidebar splitter preview";
   height: 100vh;
   user-select: none;
+}
+
+.update-banner {
+  grid-area: banner;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: linear-gradient(90deg, #4477dd, #5599ff);
+  color: #fff;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.update-banner-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-banner-btn {
+  font: inherit;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: transparent;
+  color: #fff;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.update-banner-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.update-banner-btn.primary {
+  background: rgba(255, 255, 255, 0.92);
+  color: #1a3a72;
+  border-color: rgba(255, 255, 255, 0.92);
+  font-weight: 600;
+}
+
+.update-banner-btn.primary:hover {
+  background: #fff;
+}
+
+.sidebar {
+  grid-area: sidebar;
+}
+.splitter {
+  grid-area: splitter;
+}
+.preview-pane {
+  grid-area: preview;
 }
 
 .sidebar {

@@ -8,6 +8,25 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div class="update-banner" id="update-banner" hidden role="status">
+      <span class="update-banner-text" id="update-banner-text"></span>
+      <button
+        id="update-banner-view"
+        class="update-banner-btn primary"
+        type="button"
+      >
+        View release
+      </button>
+      <button
+        id="update-banner-dismiss"
+        class="update-banner-btn"
+        type="button"
+        aria-label="Dismiss"
+        title="Dismiss"
+      >
+        ×
+      </button>
+    </div>
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <span class="sidebar-title" id="tree-title">Files</span>

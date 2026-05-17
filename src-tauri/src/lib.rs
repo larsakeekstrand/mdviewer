@@ -3,6 +3,7 @@ mod markdown;
 mod menu;
 mod recent;
 mod tree;
+mod updates;
 mod watcher;
 
 use std::path::PathBuf;
@@ -37,6 +38,8 @@ pub fn run(startup: Startup) {
             commands::render_file,
             commands::open_file,
             commands::read_source,
+            commands::check_for_updates,
+            commands::open_url,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.
