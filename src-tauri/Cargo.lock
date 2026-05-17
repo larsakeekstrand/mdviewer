@@ -2098,7 +2098,7 @@ dependencies = [
 
 [[package]]
 name = "mdviewer"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "comrak",
  "ignore",
