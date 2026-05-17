@@ -29,7 +29,9 @@ pub fn load(app: &AppHandle) -> Vec<PathBuf> {
 /// Adds `folder` to the front of the recent list. Deduplicates and caps at
 /// `MAX_RECENT`. Returns the new list.
 pub fn push(app: &AppHandle, folder: &Path) -> Vec<PathBuf> {
-    let canonical = folder.canonicalize().unwrap_or_else(|_| folder.to_path_buf());
+    let canonical = folder
+        .canonicalize()
+        .unwrap_or_else(|_| folder.to_path_buf());
     let mut list = load(app);
     list.retain(|p| p != &canonical);
     list.insert(0, canonical);

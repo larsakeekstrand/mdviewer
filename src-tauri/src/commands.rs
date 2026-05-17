@@ -42,8 +42,8 @@ pub fn render_file(
     raw: Option<bool>,
 ) -> Result<RenderedFile, String> {
     let p = PathBuf::from(&path);
-    let contents = std::fs::read_to_string(&p)
-        .map_err(|e| format!("cannot read '{}': {}", p.display(), e))?;
+    let contents =
+        std::fs::read_to_string(&p).map_err(|e| format!("cannot read '{}': {}", p.display(), e))?;
     let theme = theme.as_deref().unwrap_or("light");
     let raw = raw.unwrap_or(false);
     let html = if !raw && markdown::is_markdown_path(&p) {
@@ -60,11 +60,7 @@ pub fn read_source(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn open_file(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<(), String> {
+pub fn open_file(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
         return Err(format!("not a file: {path}"));

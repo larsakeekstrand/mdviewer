@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release as (e.g. v0.1.0). Must already exist as a git tag."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: Build macOS (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Resolve tag
+        id: tag
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_TAG: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "value=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$REF_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: src-tauri
+          tagName: ${{ steps.tag.outputs.value }}
+          releaseName: ${{ steps.tag.outputs.value }}
+          releaseBody: |
+            ## Install
+
+            Download the `.dmg` matching your Mac:
+            - **Apple Silicon (M1/M2/M3/M4)** — `*_aarch64.dmg`
+            - **Intel** — `*_x64.dmg`
+
+            Open the `.dmg` and drag `mdviewer` to Applications.
+
+            ### First launch
+
+            These builds are unsigned. On first launch macOS will warn that
+            the app is from an unidentified developer. To run it:
+
+            1. Open Applications in Finder.
+            2. Right-click `mdviewer.app` and choose **Open**.
+            3. Confirm the prompt.
+
+            Or remove quarantine from a terminal:
+
+                xattr -d com.apple.quarantine /Applications/mdviewer.app
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}

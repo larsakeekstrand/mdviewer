@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ignore::WalkBuilder;
 use serde::Serialize;
@@ -37,11 +37,10 @@ pub fn list_directory(dir: &Path) -> Result<Vec<TreeEntry>, String> {
         .filter_map(|res| res.ok())
         .filter(|entry| entry.path() != dir)
         .map(|entry| {
-            let path = entry.path().to_path_buf();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             TreeEntry {
                 name: entry.file_name().to_string_lossy().into_owned(),
-                path: path_to_string(&path),
+                path: entry.path().to_string_lossy().into_owned(),
                 is_dir,
             }
         })
@@ -54,8 +53,4 @@ pub fn list_directory(dir: &Path) -> Result<Vec<TreeEntry>, String> {
     });
 
     Ok(entries)
-}
-
-fn path_to_string(p: &PathBuf) -> String {
-    p.to_string_lossy().into_owned()
 }

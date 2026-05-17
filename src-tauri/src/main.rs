@@ -28,8 +28,8 @@ fn resolve_args() -> Result<mdviewer_lib::Startup, String> {
                 .canonicalize()
                 .map_err(|e| format!("cannot open '{raw}': {e}"))?;
 
-            let meta = std::fs::metadata(&canonical)
-                .map_err(|e| format!("cannot stat '{raw}': {e}"))?;
+            let meta =
+                std::fs::metadata(&canonical).map_err(|e| format!("cannot stat '{raw}': {e}"))?;
 
             if meta.is_dir() {
                 Ok(mdviewer_lib::Startup {

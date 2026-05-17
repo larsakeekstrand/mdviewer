@@ -82,8 +82,7 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
     let edit_copy_source =
         MenuItemBuilder::with_id("edit-copy-source", "Copy Source").build(app)?;
-    let edit_toggle_raw =
-        MenuItemBuilder::with_id("edit-toggle-raw", "Toggle Raw").build(app)?;
+    let edit_toggle_raw = MenuItemBuilder::with_id("edit-toggle-raw", "Toggle Raw").build(app)?;
 
     // Title intentionally not "Edit": macOS auto-injects Writing Tools,
     // AutoFill, Start Dictation, and Emoji & Symbols into any submenu
@@ -128,18 +127,14 @@ fn build_recent_submenu(app: &AppHandle) -> tauri::Result<tauri::menu::Submenu<W
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                MenuItemBuilder::with_id(
-                    format!("{RECENT_PREFIX}{i}"),
-                    recent::display(p),
-                )
-                .build(app)
+                MenuItemBuilder::with_id(format!("{RECENT_PREFIX}{i}"), recent::display(p))
+                    .build(app)
             })
             .collect::<Result<Vec<_>, _>>()?;
         for item in &items {
             builder = builder.item(item);
         }
-        let clear = MenuItemBuilder::with_id("clear-recent", "Clear Recent")
-            .build(app)?;
+        let clear = MenuItemBuilder::with_id("clear-recent", "Clear Recent").build(app)?;
         builder = builder.separator().item(&clear);
     }
     builder.build()
@@ -177,7 +172,7 @@ fn choose_recent_folder(app: AppHandle, path: PathBuf) {
         // Folder is gone; drop from list silently.
         let mut list = recent::load(&app);
         list.retain(|p| p != &path);
-        let _ = recent::clear(&app);
+        recent::clear(&app);
         for p in list {
             recent::push(&app, &p);
         }
