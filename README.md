@@ -24,18 +24,18 @@ The app currently ships only as a macOS Apple Silicon bundle (M1 / M2 / M3 / M4)
 
 ### 1. Download
 
-Grab `mdviewer_<version>_aarch64.dmg` from the [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest).
+Grab `MDViewer_<version>_aarch64.dmg` from the [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest).
 
 ### 2. Install
 
-Open the `.dmg` and drag `mdviewer.app` to `Applications`.
+Open the `.dmg` and drag `MDViewer.app` to `Applications`.
 
 ### 3. Remove the quarantine flag (required)
 
 When you download an unsigned app through a browser, macOS attaches a quarantine attribute. On macOS 15 (Sequoia) and newer, Gatekeeper then refuses to launch it with **"mdviewer" is damaged and cannot be opened**. That message is misleading — the app is fine; macOS is just blocking it. Clear the flag once from Terminal:
 
 ```sh
-sudo xattr -dr com.apple.quarantine /Applications/mdviewer.app
+sudo xattr -dr com.apple.quarantine /Applications/MDViewer.app
 ```
 
 You'll be prompted for your password. After this, double-click `mdviewer` in Applications — it'll open normally, and you won't have to repeat this step on future launches.
@@ -55,7 +55,7 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
   mdviewer                       # tree at current working directory
   ```
 
-  (If `mdviewer` is not on `$PATH`, invoke `/Applications/mdviewer.app/Contents/MacOS/mdviewer` directly or symlink it into `/usr/local/bin`.)
+  (If `mdviewer` is not on `$PATH`, invoke `/Applications/MDViewer.app/Contents/MacOS/MDViewer` directly or symlink it into `/usr/local/bin/mdviewer`.)
 
 ### File tree
 

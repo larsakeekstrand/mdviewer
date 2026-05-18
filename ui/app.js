@@ -750,7 +750,7 @@ async function checkForUpdates({ silent = true } = {}) {
       return;
     }
     await dialogApi.message("Couldn't check for updates.\n\n" + e, {
-      title: "mdviewer",
+      title: "MDViewer",
       kind: "error",
     });
     return;
@@ -772,14 +772,14 @@ async function checkForUpdates({ silent = true } = {}) {
     const current = (info && info.current_version) || "this version";
     await dialogApi.message(
       `You're on version ${current}. This is the latest release.`,
-      { title: "mdviewer", kind: "info" },
+      { title: "MDViewer", kind: "info" },
     );
   }
 }
 
 function showUpdateBanner(info) {
   updateBannerText.textContent =
-    `mdviewer ${info.latest_version} is available — you have ${info.current_version}.`;
+    `MDViewer ${info.latest_version} is available — you have ${info.current_version}.`;
 
   updateBannerView.onclick = async () => {
     try {

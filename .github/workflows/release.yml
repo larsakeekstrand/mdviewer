@@ -89,8 +89,8 @@ jobs:
           releaseBody: |
             ## Install (Apple Silicon)
 
-            Download `mdviewer_<version>_aarch64.dmg`, open it, and drag
-            `mdviewer.app` to Applications.
+            Download `MDViewer_<version>_aarch64.dmg`, open it, and drag
+            `MDViewer.app` to Applications.
 
             ### Required: remove the quarantine flag
 
@@ -99,7 +99,7 @@ jobs:
             are reported as "damaged" by Gatekeeper. Run this once after
             installing:
 
-                sudo xattr -dr com.apple.quarantine /Applications/mdviewer.app
+                sudo xattr -dr com.apple.quarantine /Applications/MDViewer.app
 
             Then double-click the app in Applications. It opens normally
             from then on.

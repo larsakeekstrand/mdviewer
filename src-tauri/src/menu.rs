@@ -65,7 +65,7 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let check_updates =
         MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
 
-    let app_menu = SubmenuBuilder::new(app, "mdviewer")
+    let app_menu = SubmenuBuilder::new(app, "MDViewer")
         .about(None)
         .item(&check_updates)
         .separator()
