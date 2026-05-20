@@ -6,6 +6,38 @@ pub fn markdown_path(url: &tauri::Url) -> Option<std::path::PathBuf> {
     crate::markdown::is_markdown_path(&path).then_some(path)
 }
 
+#[cfg(target_os = "macos")]
+pub fn markdown_paths(urls: &[tauri::Url]) -> Vec<std::path::PathBuf> {
+    urls.iter()
+        .filter_map(markdown_path)
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+pub fn handle_opened(handle: &tauri::AppHandle, urls: Vec<tauri::Url>) {
+    use tauri::{Emitter, Manager};
+    let paths = markdown_paths(&urls);
+    if paths.is_empty() {
+        return;
+    }
+    let state = handle.state::<crate::AppState>();
+    let mut guard = state.opens.lock().unwrap();
+    if guard.ready {
+        drop(guard);
+        for p in &paths {
+            let _ = handle.emit("open-file", p.to_string_lossy().into_owned());
+        }
+        if let Some(w) = handle.get_webview_window("main") {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    } else {
+        guard.files.extend(paths);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

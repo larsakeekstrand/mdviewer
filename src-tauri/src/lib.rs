@@ -1,7 +1,7 @@
 mod commands;
 mod markdown;
 mod menu;
-pub mod open_files;
+mod open_files;
 mod recent;
 mod tree;
 mod updates;
@@ -38,7 +38,7 @@ pub fn run(startup: Startup) {
         opens: Mutex::new(PendingOpens::default()),
     };
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -66,6 +66,15 @@ pub fn run(startup: Startup) {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running mdviewer");
+        .build(tauri::generate_context!())
+        .expect("error while building mdviewer");
+
+    app.run(move |_handle, _event| {
+        #[cfg(target_os = "macos")]
+        {
+            if let tauri::RunEvent::Opened { urls } = _event {
+                open_files::handle_opened(_handle, urls);
+            }
+        }
+    });
 }
