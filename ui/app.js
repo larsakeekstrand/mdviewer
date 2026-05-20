@@ -145,16 +145,9 @@ function singleOrDouble(onSingle, onDouble, delay = DOUBLE_CLICK_MS) {
 async function init() {
   initMermaid();
   const initial = await invoke("get_initial_state");
-  treeRoot = initial.tree_root;
-  treeTitle.textContent = basename(treeRoot) || treeRoot;
-  treeTitle.title = treeRoot;
 
-  await renderRoot();
-
-  if (initial.initial_file) {
-    await openSticky(initial.initial_file);
-  }
-
+  // Register listeners before the readiness handshake so a file opened the
+  // instant the app becomes ready isn't missed.
   await listen("file-changed", async (ev) => {
     const tab = activeTab();
     if (tab && ev.payload === tab.path) {
@@ -188,6 +181,28 @@ async function init() {
     });
 
   rawBtn.addEventListener("click", onToggleRaw);
+
+  // Drain files Finder buffered during a cold launch; afterwards, files opened
+  // while running arrive live via the "open-file" listener above.
+  let pending = [];
+  try {
+    pending = await invoke("frontend_ready");
+  } catch (e) {
+    console.error("frontend_ready failed", e);
+  }
+
+  // A cold Finder launch (no argv file) starts the sidebar at the file's folder.
+  treeRoot =
+    !initial.initial_file && pending.length
+      ? parentDir(pending[0])
+      : initial.tree_root;
+  treeTitle.textContent = basename(treeRoot) || treeRoot;
+  treeTitle.title = treeRoot;
+
+  await renderRoot();
+
+  if (initial.initial_file) await openSticky(initial.initial_file);
+  for (const p of pending) await openSticky(p);
 }
 
 /* ---- Tree ---- */
