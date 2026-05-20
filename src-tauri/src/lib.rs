@@ -1,6 +1,7 @@
 mod commands;
 mod markdown;
 mod menu;
+pub mod open_files;
 mod recent;
 mod tree;
 mod updates;
