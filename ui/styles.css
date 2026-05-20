@@ -427,6 +427,44 @@ body {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* Mermaid diagrams: strip the code-block chrome and center the SVG. */
+.markdown-body pre.mermaid {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 16px 0;
+  text-align: center;
+  overflow-x: auto;
+}
+
+/* Hide raw mermaid source until the block is rendered or errored. */
+.markdown-body pre.mermaid:not([data-mv-state]) {
+  visibility: hidden;
+}
+
+.markdown-body pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body pre.mermaid .mermaid-error {
+  text-align: left;
+}
+
+.markdown-body pre.mermaid .mermaid-error-msg {
+  color: #cf222e;
+  font-size: 0.9em;
+  margin-bottom: 8px;
+}
+
+.markdown-body pre.mermaid .mermaid-error-src {
+  margin: 0;
+  padding: 12px;
+  background: rgba(127, 127, 127, 0.08);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
 /* ---- Custom context menu (replaces WKWebView default) ---- */
 
 .ctx-menu {

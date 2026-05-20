@@ -40,6 +40,75 @@ function colorScheme() {
     : "light";
 }
 
+function mermaidTheme(theme) {
+  return theme === "dark" ? "dark" : "default";
+}
+
+function initMermaid() {
+  if (!window.mermaid) return;
+  window.mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: mermaidTheme(currentTheme),
+  });
+}
+
+function mermaidSource(el) {
+  return (el.textContent || "").trim();
+}
+
+/** Insert via a parsed node rather than a raw HTML string so nothing in the
+ *  SVG can execute even if it slipped past mermaid's strict sanitization. */
+function setSvg(el, svg) {
+  const node = new DOMParser().parseFromString(svg, "text/html").body
+    .firstElementChild;
+  if (!node) throw new Error("mermaid produced no SVG element");
+  el.replaceChildren(node);
+}
+
+let mermaidIdSeq = 0;
+
+async function renderMermaid({ force = false } = {}) {
+  if (!window.mermaid) return;
+  for (const el of preview.querySelectorAll("pre.mermaid")) {
+    // Already-rendered/errored blocks that morphdom preserved keep their
+    // state; only (re)render fresh, changed, or force-reset ones.
+    if (!force && el.dataset.mvState) continue;
+    const src = mermaidSource(el);
+    const id = "mmd-" + mermaidIdSeq++;
+    try {
+      const { svg } = await window.mermaid.render(id, src);
+      setSvg(el, svg);
+      el.dataset.mvState = "ok";
+      el.dataset.mermaidSrc = src;
+    } catch (e) {
+      const orphan =
+        document.getElementById("d" + id) || document.getElementById(id);
+      if (orphan) orphan.remove();
+      el.replaceChildren(buildMermaidError(src, e));
+      el.dataset.mvState = "err";
+      el.dataset.mermaidSrc = src;
+    }
+  }
+}
+
+function buildMermaidError(src, err) {
+  const wrap = document.createElement("div");
+  wrap.className = "mermaid-error";
+  const msg = document.createElement("div");
+  msg.className = "mermaid-error-msg";
+  msg.textContent =
+    "Mermaid diagram error: " + (err && err.message ? err.message : String(err));
+  const pre = document.createElement("pre");
+  pre.className = "mermaid-error-src";
+  const code = document.createElement("code");
+  code.textContent = src;
+  pre.appendChild(code);
+  wrap.appendChild(msg);
+  wrap.appendChild(pre);
+  return wrap;
+}
+
 function basename(path) {
   const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return i === -1 ? path : path.slice(i + 1);
@@ -74,6 +143,7 @@ function singleOrDouble(onSingle, onDouble, delay = DOUBLE_CLICK_MS) {
 }
 
 async function init() {
+  initMermaid();
   const initial = await invoke("get_initial_state");
   treeRoot = initial.tree_root;
   treeTitle.textContent = basename(treeRoot) || treeRoot;
@@ -112,7 +182,9 @@ async function init() {
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", async () => {
       currentTheme = colorScheme();
-      if (activeTab()) await renderActive({ scrollLock: false });
+      initMermaid();
+      if (activeTab())
+        await renderActive({ scrollLock: false, forceMermaid: true });
     });
 
   rawBtn.addEventListener("click", onToggleRaw);
@@ -384,7 +456,9 @@ function showEmptyState() {
   preview.classList.remove("raw-body");
 }
 
-async function renderActive({ scrollLock } = { scrollLock: true }) {
+async function renderActive(
+  { scrollLock = true, forceMermaid = false } = {},
+) {
   const t = activeTab();
   if (!t) {
     showEmptyState();
@@ -415,10 +489,24 @@ async function renderActive({ scrollLock } = { scrollLock: true }) {
   incoming.innerHTML = result.html;
 
   window.morphdom(preview, incoming, {
-    onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
+    onBeforeElUpdated: (fromEl, toEl) => {
+      // Keep an already-rendered diagram if its source is unchanged, so
+      // editing nearby prose doesn't re-render (and flicker) the SVG.
+      if (
+        !forceMermaid &&
+        fromEl.dataset.mvState &&
+        fromEl.classList.contains("mermaid") &&
+        fromEl.dataset.mermaidSrc === mermaidSource(toEl)
+      ) {
+        return false;
+      }
+      return !fromEl.isEqualNode(toEl);
+    },
   });
 
   annotateLinks();
+
+  if (!result.raw) await renderMermaid({ force: forceMermaid });
 
   if (anchor) restoreAnchor(anchor);
   else previewScroll.scrollTop = 0;
