@@ -17,10 +17,17 @@ pub struct Startup {
     pub initial_file: Option<PathBuf>,
 }
 
+#[derive(Default)]
+pub struct PendingOpens {
+    pub ready: bool,
+    pub files: Vec<PathBuf>,
+}
+
 pub struct AppState {
     pub tree_root: PathBuf,
     pub initial_file: Option<PathBuf>,
     pub watcher: Mutex<watcher::WatcherSlot>,
+    pub opens: Mutex<PendingOpens>,
 }
 
 pub fn run(startup: Startup) {
@@ -28,6 +35,7 @@ pub fn run(startup: Startup) {
         tree_root: startup.tree_root,
         initial_file: startup.initial_file,
         watcher: Mutex::new(watcher::WatcherSlot::default()),
+        opens: Mutex::new(PendingOpens::default()),
     };
 
     tauri::Builder::default()
@@ -42,6 +50,7 @@ pub fn run(startup: Startup) {
             commands::check_for_updates,
             commands::open_url,
             commands::open_path,
+            commands::frontend_ready,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.

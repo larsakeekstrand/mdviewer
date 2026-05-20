@@ -106,3 +106,14 @@ pub fn open_file(app: AppHandle, state: State<'_, AppState>, path: String) -> Re
         .map_err(|_| "watcher mutex poisoned".to_string())?;
     slot.watch_file(&app, &p)
 }
+
+#[tauri::command]
+pub fn frontend_ready(state: State<'_, AppState>) -> Vec<String> {
+    let mut guard = state.opens.lock().unwrap();
+    guard.ready = true;
+    guard
+        .files
+        .drain(..)
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
+}
