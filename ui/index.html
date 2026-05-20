@@ -58,6 +58,9 @@
     </main>
 
     <script src="morphdom-umd.min.js"></script>
+    <!-- mermaid 11.15.0 dist/mermaid.min.js; sets window.mermaid. Classic
+         script so it runs before the deferred app.js module. -->
+    <script src="mermaid.min.js"></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>
