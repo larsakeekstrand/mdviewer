@@ -1,9 +1,9 @@
 # CLAUDE.md — mdviewer project guide
 
 A macOS markdown viewer in Rust on Tauri 2. VS Code–style file tree + tabbed
-preview, GitHub-flavored markdown rendering, live reload, an Open Recent
-menu, an in-app update check against GitHub Releases, and a custom right-click
-context menu.
+preview, GitHub-flavored markdown rendering, Mermaid diagrams, live reload, an
+Open Recent menu, an in-app update check against GitHub Releases, and a custom
+right-click context menu.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
 
@@ -17,9 +17,10 @@ Repo: https://github.com/larsakeekstrand/mdviewer
   - `tauri-plugin-dialog` for Open File / Open Folder native pickers and the
     Check-for-Updates result dialogs.
 - **Frontend** (`ui/`): vanilla HTML / CSS / JS, no build step, no framework.
-  Vendored `morphdom` for scroll-preserving diffs, vendored
-  `github-markdown.css` for typography. `withGlobalTauri: true` in
-  `tauri.conf.json` exposes the IPC API at `window.__TAURI__`.
+  Vendored `morphdom` for scroll-preserving diffs, vendored `mermaid` for
+  diagram rendering, and vendored `github-markdown.css` for typography.
+  `withGlobalTauri: true` in `tauri.conf.json` exposes the IPC API at
+  `window.__TAURI__`.
 
 ## File layout (each file's purpose in one line)
 
@@ -30,7 +31,8 @@ src-tauri/
     lib.rs        — Tauri builder, AppState, command registration, setup hook
     commands.rs   — #[tauri::command]: list_dir, render_file, open_file,
                     read_source, check_for_updates, open_url, open_path
-    markdown.rs   — comrak + syntect; sourcepos enabled for scroll anchoring
+    markdown.rs   — comrak + syntect; sourcepos for scroll anchoring;
+                    mermaid fences → <pre class="mermaid"> (codefence renderer)
     tree.rs       — ignore::WalkBuilder depth-1, hides node_modules / target
     watcher.rs    — notify-debouncer-full, 200 ms debounce, watches PARENT dir
     menu.rs       — native menu bar; on_menu_event handler emits JS events
@@ -41,9 +43,10 @@ src-tauri/
   icons/          — 32, 128, 128@2x PNG + icon.icns (built from icon.svg)
 ui/
   index.html      — banner + sidebar + splitter + tab-bar + preview-scroll
-  app.js          — tabs model, tree, IPC, scroll-anchor, link interception
-  styles.css      — grid layout, CSS variables for light/dark
-  github-markdown.css, morphdom-umd.min.js  — vendored
+  app.js          — tabs model, tree, IPC, scroll-anchor, link interception,
+                    mermaid render (renderMermaid) + live-reload preservation
+  styles.css      — grid layout, CSS variables for light/dark, pre.mermaid
+  github-markdown.css, morphdom-umd.min.js, mermaid.min.js  — vendored
 icon.svg          — source for icon regeneration
 .github/workflows/
   ci.yml          — fmt, clippy -D warnings, test, debug build on push/PR
@@ -62,6 +65,11 @@ icon.svg          — source for icon regeneration
   watchers on macOS.
 - **Live reload**: backend emits `file-changed`; JS re-renders the active tab
   and restores scroll position via comrak's `data-sourcepos` attributes.
+- **Mermaid**: `markdown.rs` emits ` ```mermaid ` fences as
+  `<pre class="mermaid">` (a comrak `codefence_renderers` entry, not syntect);
+  the frontend's `renderMermaid()` turns them into SVG after each morphdom
+  patch — theme-aware, with unchanged diagrams preserved across live reloads
+  and a per-diagram inline error fallback. Skipped in raw view.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw), `open-file`, `open-folder`,
   `menu-check-updates`.
@@ -99,6 +107,23 @@ icon.svg          — source for icon regeneration
   - `Options<'static>` lifetime is required because `Options` borrows the
     header-id prefix string slice.
   - `comrak::Plugins` is deprecated; use `comrak::options::Plugins`.
+- **Mermaid** (mostly frontend; pinned mermaid 11.x):
+  - Backend uses comrak's per-language `codefence_renderers` for `mermaid`, NOT
+    a `SyntaxHighlighterAdapter` wrapper — comrak appends `</code></pre>` after
+    the highlighter path (stray tag). A codefence renderer returns early, so we
+    emit the exact `<pre class="mermaid">…escaped source…</pre>`.
+  - Only lowercase ` ```mermaid ` matches (comrak preserves the info string),
+    consistent with GitHub.
+  - `mermaid.min.js` is the single self-contained `dist/mermaid.min.js` IIFE
+    whose last line sets `window.mermaid`. The split ESM build pulls in
+    `./chunks/*` and can't be vendored without a bundler. Loaded as a classic
+    `<script>` BEFORE the `app.js` module so `window.mermaid` exists at `init()`.
+  - `mermaid.initialize({ securityLevel: "strict" })` (markdown may be
+    untrusted); SVG is inserted via `DOMParser` + `replaceChildren`, never as a
+    raw HTML string.
+  - Live reload preserves an already-rendered diagram when its source is
+    unchanged (morphdom `onBeforeElUpdated`); a `forceMermaid` flag re-renders
+    all diagrams on theme change.
 - **Icons**: macOS Big Sur+ uses a "squircle" (superellipse). We approximate
   with `rx=230` on a 1024×1024 (~22.5 %). Regenerate from `icon.svg` with
   `rsvg-convert` (see "Icon regeneration").
