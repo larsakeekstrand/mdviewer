@@ -2,8 +2,8 @@
 
 A macOS markdown viewer in Rust on Tauri 2. VS Code–style file tree + tabbed
 preview, GitHub-flavored markdown rendering, Mermaid diagrams, live reload, an
-Open Recent menu, an in-app update check against GitHub Releases, and a custom
-right-click context menu.
+Open Recent menu, an in-app update check against GitHub Releases, a custom
+right-click context menu, and a default-app file association for markdown files.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
 
@@ -28,9 +28,13 @@ Repo: https://github.com/larsakeekstrand/mdviewer
 src-tauri/
   src/
     main.rs       — CLI parse (argv[1] → tree root / initial file)
-    lib.rs        — Tauri builder, AppState, command registration, setup hook
+    lib.rs        — Tauri builder, AppState, command registration, setup hook;
+                    app.run handles macOS RunEvent::Opened (files from Finder)
     commands.rs   — #[tauri::command]: list_dir, render_file, open_file,
-                    read_source, check_for_updates, open_url, open_path
+                    read_source, check_for_updates, open_url, open_path,
+                    frontend_ready (drains the Finder-open buffer)
+    open_files.rs — file:// URL → markdown path; RunEvent::Opened handler:
+                    emit open-file + focus window, or buffer until ready
     markdown.rs   — comrak + syntect; sourcepos for scroll anchoring;
                     mermaid fences → <pre class="mermaid"> (codefence renderer)
     tree.rs       — ignore::WalkBuilder depth-1, hides node_modules / target
@@ -70,6 +74,15 @@ icon.svg          — source for icon regeneration
   the frontend's `renderMermaid()` turns them into SVG after each morphdom
   patch — theme-aware, with unchanged diagrams preserved across live reloads
   and a per-diagram inline error fallback. Skipped in raw view.
+- **File associations / open from Finder**: `tauri.conf.json`
+  `bundle.fileAssociations` declares the markdown extensions
+  (`CFBundleDocumentTypes`, Viewer role) so MDViewer is selectable as the
+  default `.md` app. Finder opens arrive as `RunEvent::Opened` (not argv);
+  `open_files::handle_opened` emits `open-file` + focuses the window when the UI
+  is ready, else buffers into `AppState.opens`. On startup the frontend calls
+  the `frontend_ready` command, which drains the buffer under the same lock:
+  cold double-click opens the file (sidebar → its folder); warm opens add a tab
+  and keep the current folder.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw), `open-file`, `open-folder`,
   `menu-check-updates`.
@@ -124,6 +137,24 @@ icon.svg          — source for icon regeneration
   - Live reload preserves an already-rendered diagram when its source is
     unchanged (morphdom `onBeforeElUpdated`); a `forceMermaid` flag re-renders
     all diagrams on theme change.
+- **File associations / Finder open** are two separate problems:
+  - Declaring `bundle.fileAssociations` (→ `CFBundleDocumentTypes`) is what
+    lets macOS offer MDViewer as the default; it exists ONLY in a
+    `cargo tauri build` bundle, never under `cargo run`.
+  - Finder opens a file via an Apple Event, surfaced as `RunEvent::Opened`
+    (macOS-gated), NOT `argv` — so `lib.rs` uses `.build()? + app.run(cb)` to
+    catch it. `main.rs`'s `argv` path still works for the CLI.
+  - The cold double-click fires `Opened` before the webview is ready, so files
+    are buffered in `Mutex<PendingOpens>` and drained by the `frontend_ready`
+    command. Set `ready` and drain under the SAME lock `handle_opened` takes,
+    or a file can be lost between the ready-check and the push.
+  - Testing needs the built `.app` + Launch Services: copy to `/Applications`,
+    `lsregister -f …/MDViewer.app`, then set the default via Finder Get Info →
+    Open With → Change All. A locally-built `.app` is NOT quarantined
+    (quarantine only marks downloaded files), so the `xattr` step is only for
+    downloaded DMGs.
+  - The bundler warns that `com.mdviewer.app` ends in `.app` — ignore it; the
+    id must not change (see the bundle-identifier note above).
 - **Icons**: macOS Big Sur+ uses a "squircle" (superellipse). We approximate
   with `rx=230` on a 1024×1024 (~22.5 %). Regenerate from `icon.svg` with
   `rsvg-convert` (see "Icon regeneration").
