@@ -5,6 +5,8 @@
 
 A markdown viewer with a VS Code–style file tree and a beautifully rendered preview, built in Rust on Tauri 2.
 
+![MDViewer rendering Markdown — prose, a syntax-highlighted Rust code block, and a Mermaid flowchart — in dark mode](docs/screenshot.png)
+
 ## Features
 
 - VS Code–style file tree (lazy expansion, respects `.gitignore`, hides dotfiles)
