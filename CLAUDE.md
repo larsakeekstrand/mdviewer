@@ -40,7 +40,7 @@ src-tauri/
     tree.rs       — ignore::WalkBuilder depth-1, hides node_modules / target
     watcher.rs    — notify-debouncer-full, 200 ms debounce, watches PARENT dir
     menu.rs       — native menu bar; on_menu_event handler emits JS events
-    recent.rs     — JSON-persisted recent-folders list (app_data_dir)
+    recent.rs     — JSON-persisted recent-folders list + last_folder (app_data_dir)
     updates.rs    — GitHub /releases/latest probe, semver compare
   tauri.conf.json — productName MDViewer, withGlobalTauri true, ad-hoc signing
   Cargo.toml      — bin name "mdviewer" (lowercase, CLI convention)
@@ -83,6 +83,12 @@ icon.svg          — source for icon regeneration
   the `frontend_ready` command, which drains the buffer under the same lock:
   cold double-click opens the file (sidebar → its folder); warm opens add a tab
   and keep the current folder.
+- **Last directory restore**: `recent.json` carries a `last_folder` alongside
+  the recent list. The frontend calls the `remember_folder` command whenever it
+  sets the sidebar root (`setTreeRoot`, and the cold-Finder branch of `init`).
+  On a plain launch (`Startup.tree_root == None`), `get_initial_state` resolves
+  the root as explicit argv → `last_folder` (if still a dir) → cwd, persisting
+  all but the bare cwd fallback. `recent::clear` keeps `last_folder`.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw), `open-file`, `open-folder`,
   `menu-check-updates`.
