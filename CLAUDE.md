@@ -155,6 +155,16 @@ icon.svg          — source for icon regeneration
   auto-injects the nonces/sources its IPC needs, so don't hand-add IPC origins.
   `img-src` allows `http(s):`/`data:` so remote images render; tighten to
   `'self' data:` to block tracking pixels in untrusted docs.
+- **Local images** in markdown (`![](docs/x.png)`, absolute paths) are served
+  through Tauri's **asset protocol** — a bare path can't be fetched from the
+  `tauri://localhost` origin. Three pieces must stay in sync: (1)
+  `tauri.conf.json` `app.security.assetProtocol` (`enable: true` + `scope`,
+  currently `["**"]`); (2) the `protocol-asset` feature on the `tauri` crate in
+  `Cargo.toml` (the build hard-errors without it); (3) `asset:` in the CSP
+  `img-src`. The frontend's `resolveImages()` rewrites local `<img src>` to
+  `convertFileSrc(path)` after each render (remote / `data:` / already-`asset:`
+  srcs are left alone), and morphdom preserves an already-resolved image so
+  live reload doesn't re-fetch it.
 - **File associations / Finder open** are two separate problems:
   - Declaring `bundle.fileAssociations` (→ `CFBundleDocumentTypes`) is what
     lets macOS offer MDViewer as the default; it exists ONLY in a

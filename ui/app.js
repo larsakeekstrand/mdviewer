@@ -1,7 +1,7 @@
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
 
-const { invoke } = window.__TAURI__.core;
+const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const dialogApi = window.__TAURI__.dialog;
 
@@ -524,11 +524,19 @@ async function renderActive(
       ) {
         return false;
       }
+      // Keep an already-resolved image whose source file is unchanged, so the
+      // asset:// rewrite below isn't undone (and the image re-fetched) on every
+      // live reload.
+      if (fromEl.tagName === "IMG" && toEl.tagName === "IMG") {
+        const want = localImageUrl(parentDir(t.path), toEl.getAttribute("src"));
+        if (want && fromEl.src === want) return false;
+      }
       return !fromEl.isEqualNode(toEl);
     },
   });
 
   annotateLinks();
+  resolveImages(parentDir(t.path));
 
   if (!result.raw) await renderMermaid({ force: forceMermaid });
 
@@ -553,6 +561,24 @@ function annotateLinks() {
     } else {
       a.title = href;
     }
+  }
+}
+
+/** Asset-protocol URL for a local (relative or absolute) image path, resolved
+ *  against the document's directory. Returns null for remote/data/already-asset
+ *  srcs, which the WebView loads as-is. */
+function localImageUrl(baseDir, src) {
+  if (!src || isExternalUrl(src)) return null;
+  return convertFileSrc(resolveRelative(baseDir, src));
+}
+
+/** Rewrite local <img> sources to asset:// URLs so the WebView can load files
+ *  next to the document (a bare relative/absolute path is not fetchable from
+ *  the tauri://localhost origin). */
+function resolveImages(baseDir) {
+  for (const img of preview.querySelectorAll("img[src]")) {
+    const url = localImageUrl(baseDir, img.getAttribute("src"));
+    if (url) img.src = url;
   }
 }
 
