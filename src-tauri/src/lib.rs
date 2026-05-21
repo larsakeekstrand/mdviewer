@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 pub struct Startup {
-    pub tree_root: PathBuf,
+    pub tree_root: Option<PathBuf>,
     pub initial_file: Option<PathBuf>,
 }
 
@@ -24,7 +24,7 @@ pub struct PendingOpens {
 }
 
 pub struct AppState {
-    pub tree_root: PathBuf,
+    pub tree_root: Option<PathBuf>,
     pub initial_file: Option<PathBuf>,
     pub watcher: Mutex<watcher::WatcherSlot>,
     pub opens: Mutex<PendingOpens>,
@@ -51,6 +51,7 @@ pub fn run(startup: Startup) {
             commands::open_url,
             commands::open_path,
             commands::frontend_ready,
+            commands::remember_folder,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.
@@ -59,7 +60,9 @@ pub fn run(startup: Startup) {
             });
             let handle = app.handle().clone();
             let state = handle.state::<AppState>();
-            recent::push(&handle, &state.tree_root);
+            if let Some(root) = &state.tree_root {
+                recent::push(&handle, root);
+            }
             menu::install(&handle)?;
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

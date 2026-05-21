@@ -76,12 +76,10 @@ pub fn clear(app: &AppHandle) {
     write_store(app, &store);
 }
 
-#[allow(dead_code)]
 pub fn load_last(app: &AppHandle) -> Option<PathBuf> {
     load_store(app).last_folder
 }
 
-#[allow(dead_code)]
 pub fn save_last(app: &AppHandle, folder: &Path) {
     let mut store = load_store(app);
     store.last_folder = Some(canonical_or_keep(folder));

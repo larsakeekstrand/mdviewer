@@ -19,7 +19,7 @@ fn resolve_args() -> Result<mdviewer_lib::Startup, String> {
 
     match arg {
         None => Ok(mdviewer_lib::Startup {
-            tree_root: cwd,
+            tree_root: None,
             initial_file: None,
         }),
         Some(raw) => {
@@ -38,7 +38,7 @@ fn resolve_args() -> Result<mdviewer_lib::Startup, String> {
 
             if meta.is_dir() {
                 Ok(mdviewer_lib::Startup {
-                    tree_root: canonical,
+                    tree_root: Some(canonical),
                     initial_file: None,
                 })
             } else {
@@ -47,7 +47,7 @@ fn resolve_args() -> Result<mdviewer_lib::Startup, String> {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| cwd.clone());
                 Ok(mdviewer_lib::Startup {
-                    tree_root: parent,
+                    tree_root: Some(parent),
                     initial_file: Some(canonical),
                 })
             }

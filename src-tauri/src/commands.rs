@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::{markdown, tree, updates, AppState};
+use crate::{markdown, recent, tree, updates, AppState};
 
 #[derive(Serialize)]
 pub struct InitialState {
@@ -12,9 +12,20 @@ pub struct InitialState {
 }
 
 #[tauri::command]
-pub fn get_initial_state(state: State<'_, AppState>) -> InitialState {
+pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialState {
+    let tree_root = match &state.tree_root {
+        Some(p) => {
+            recent::save_last(&app, p);
+            p.clone()
+        }
+        // A restored folder is already stored as last_folder; only fall back to
+        // cwd (unpersisted) when there's nothing valid to restore.
+        None => recent::load_last(&app)
+            .filter(|p| p.is_dir())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
+    };
     InitialState {
-        tree_root: state.tree_root.to_string_lossy().into_owned(),
+        tree_root: tree_root.to_string_lossy().into_owned(),
         initial_file: state
             .initial_file
             .as_ref()
@@ -116,4 +127,15 @@ pub fn frontend_ready(state: State<'_, AppState>) -> Vec<String> {
         .drain(..)
         .map(|p| p.to_string_lossy().into_owned())
         .collect()
+}
+
+/// Records the folder the sidebar is currently showing so the next plain
+/// launch can restore it. Best-effort: a non-directory or vanished path is a
+/// no-op, and persistence errors are swallowed (UI state, never user-facing).
+#[tauri::command]
+pub fn remember_folder(app: AppHandle, path: String) {
+    let p = PathBuf::from(path);
+    if p.is_dir() {
+        recent::save_last(&app, &p);
+    }
 }
