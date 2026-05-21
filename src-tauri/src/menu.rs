@@ -7,6 +7,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::recent;
 
 const RECENT_PREFIX: &str = "recent-folder-";
+const SOURCE_URL: &str = "https://github.com/larsakeekstrand/mdviewer";
 
 /// Installs the menu and registers the global menu event handler.
 /// Subsequent recent-list changes call `rebuild` to update the bar.
@@ -19,6 +20,9 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "open-folder" => prompt_open_folder(app.clone()),
             "check-updates" => {
                 let _ = app.emit("menu-check-updates", ());
+            }
+            "github-source" => {
+                let _ = crate::commands::open_url(SOURCE_URL.to_string());
             }
             "edit-copy" => {
                 let _ = app.emit("edit-action", "copy");
@@ -64,9 +68,12 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
 
     let check_updates =
         MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+    let github_source =
+        MenuItemBuilder::with_id("github-source", "View Source on GitHub").build(app)?;
 
     let app_menu = SubmenuBuilder::new(app, "MDViewer")
         .about(None)
+        .item(&github_source)
         .item(&check_updates)
         .separator()
         .item(&PredefinedMenuItem::hide(app, None)?)
