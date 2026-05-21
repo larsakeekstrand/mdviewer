@@ -90,6 +90,63 @@ pub fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| format!("failed to open url: {e}"))
 }
 
+/// Extensions that macOS `open` (Launch Services) would *execute* or use to
+/// redirect to an arbitrary target, rather than passively display. A markdown
+/// document is untrusted input, so a relative link pointing at one of these
+/// must not be handed to `open` — otherwise a co-located payload Cmd-clicked
+/// from a deceptive link becomes local code execution.
+const UNSAFE_OPEN_EXTS: &[&str] = &[
+    // Executable bundles / things launched directly
+    "app",
+    "command",
+    "terminal",
+    "tool",
+    "action",
+    "workflow",
+    "shortcut",
+    // AppleScript
+    "scpt",
+    "scptd",
+    "applescript",
+    "osascript",
+    // Shells / interpreters
+    "sh",
+    "bash",
+    "zsh",
+    "csh",
+    "ksh",
+    "fish",
+    "py",
+    "rb",
+    "pl",
+    "php",
+    // Location files that redirect `open` to an arbitrary URL/path
+    "webloc",
+    "fileloc",
+    "inetloc",
+    "url",
+    // Installers and loadable code bundles
+    "pkg",
+    "mpkg",
+    "prefpane",
+    "qlgenerator",
+    "saver",
+    "appex",
+    "plugin",
+    "kext",
+    "bundle",
+    "framework",
+    "dylib",
+    "so",
+];
+
+fn is_unsafe_to_open(path: &Path) -> bool {
+    match path.extension().and_then(|s| s.to_str()) {
+        Some(ext) => UNSAFE_OPEN_EXTS.contains(&ext.to_ascii_lowercase().as_str()),
+        None => false,
+    }
+}
+
 /// Open a local filesystem path in the default macOS application (Cmd+click
 /// on non-markdown links in the preview).
 #[tauri::command]
@@ -97,6 +154,9 @@ pub fn open_path(path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
     if !p.exists() {
         return Err(format!("not found: {path}"));
+    }
+    if is_unsafe_to_open(p) {
+        return Err(format!("refusing to launch executable file type: {path}"));
     }
     std::process::Command::new("open")
         .arg(&path)
@@ -137,5 +197,52 @@ pub fn remember_folder(app: AppHandle, path: String) {
     let p = PathBuf::from(path);
     if p.is_dir() {
         recent::save_last(&app, &p);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flags_launchable_extensions() {
+        for name in [
+            "setup.command",
+            "Foo.app",
+            "redirect.webloc",
+            "thing.inetloc",
+            "auto.workflow",
+            "script.scpt",
+            "go.pkg",
+        ] {
+            assert!(
+                is_unsafe_to_open(Path::new(name)),
+                "{name} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn flags_extensions_case_insensitively() {
+        assert!(is_unsafe_to_open(Path::new("/x/RUN.SH")));
+        assert!(is_unsafe_to_open(Path::new("/x/App.App")));
+    }
+
+    #[test]
+    fn allows_viewable_files() {
+        for name in [
+            "photo.png",
+            "scan.PDF",
+            "notes.txt",
+            "data.csv",
+            "sheet.xlsx",
+            "Makefile",
+            "archive.zip",
+        ] {
+            assert!(
+                !is_unsafe_to_open(Path::new(name)),
+                "{name} should be allowed"
+            );
+        }
     }
 }

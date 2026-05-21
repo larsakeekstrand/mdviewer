@@ -143,6 +143,18 @@ icon.svg          — source for icon regeneration
   - Live reload preserves an already-rendered diagram when its source is
     unchanged (morphdom `onBeforeElUpdated`); a `forceMermaid` flag re-renders
     all diagrams on theme change.
+- **Content-Security-Policy** lives in `tauri.conf.json` `app.security.csp`
+  (must NOT be `null` — that disables it). `script-src 'self'` is the
+  load-bearing defense: the app ships no inline `<script>` or `on*=` handlers,
+  so injected markup can't run JS even if comrak's escaping
+  (`render.unsafe = false`) is ever bypassed. Do NOT add
+  `'unsafe-inline'`/`'unsafe-eval'` to `script-src`. `style-src` DOES need
+  `'unsafe-inline'` — syntect emits inline `style=` on code blocks and mermaid
+  injects a `<style>`; drop it and code blocks go monochrome and diagrams
+  break. Mermaid 11 needs NO `'unsafe-eval'` (verified at runtime). Tauri
+  auto-injects the nonces/sources its IPC needs, so don't hand-add IPC origins.
+  `img-src` allows `http(s):`/`data:` so remote images render; tighten to
+  `'self' data:` to block tracking pixels in untrusted docs.
 - **File associations / Finder open** are two separate problems:
   - Declaring `bundle.fileAssociations` (→ `CFBundleDocumentTypes`) is what
     lets macOS offer MDViewer as the default; it exists ONLY in a
@@ -231,8 +243,13 @@ rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon_1024.png
 - Update banner respects `localStorage.mdviewer.update.dismissed_version` —
   if the user dismissed v0.1.x, the silent startup check stays hidden until
   a newer version appears. The menu-driven check ignores this dismissal.
-- `open_url` (Rust) is restricted to `http(s)://` schemes; `open_path` opens
-  any existing local path via the macOS `open` command.
+- `open_url` (Rust) is restricted to `http(s)://` schemes. `open_path` opens an
+  existing local path via the macOS `open` command, but **refuses launchable /
+  executable types** (`UNSAFE_OPEN_EXTS` in `commands.rs`: `.app`, `.command`,
+  `.webloc`/`.inetloc` redirect files, `.pkg`, AppleScript, shells, loadable
+  bundles, …). Markdown is untrusted, and a Cmd-clicked relative link to a
+  co-located payload would otherwise be local code execution. Keep the denylist
+  if you add new open targets.
 
 ## When in doubt
 
