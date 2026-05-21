@@ -192,12 +192,14 @@ async function init() {
   }
 
   // A cold Finder launch (no argv file) starts the sidebar at the file's folder.
-  treeRoot =
-    !initial.initial_file && pending.length
-      ? parentDir(pending[0])
-      : initial.tree_root;
+  const coldFinder = !initial.initial_file && pending.length > 0;
+  treeRoot = coldFinder ? parentDir(pending[0]) : initial.tree_root;
   treeTitle.textContent = basename(treeRoot) || treeRoot;
   treeTitle.title = treeRoot;
+  // Explicit-arg and restored roots are already persisted by get_initial_state;
+  // only the cold-Finder folder needs persisting here. The bare cwd default is
+  // intentionally not persisted.
+  if (coldFinder) rememberFolder(treeRoot);
 
   await renderRoot();
 
@@ -215,12 +217,19 @@ async function renderRoot() {
   }
 }
 
+function rememberFolder(path) {
+  invoke("remember_folder", { path }).catch((e) =>
+    console.error("remember_folder failed", e),
+  );
+}
+
 async function setTreeRoot(path) {
   treeRoot = path;
   treeTitle.textContent = basename(path) || path;
   treeTitle.title = path;
   childCache.clear();
   await renderRoot();
+  rememberFolder(path);
   const tab = activeTab();
   if (tab) highlightSelectedByPath(tab.path);
 }
