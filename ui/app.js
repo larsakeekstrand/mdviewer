@@ -1,3 +1,5 @@
+import { findMatches } from "./search.js";
+
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
 
@@ -542,6 +544,8 @@ async function renderActive(
 
   if (anchor) restoreAnchor(anchor);
   else previewScroll.scrollTop = 0;
+
+  if (findOpen()) runFind({ keepCurrent: true, scroll: false });
 }
 
 /* ---- Link handling ---- */
@@ -736,6 +740,9 @@ async function runEditAction(name) {
     case "toggle-raw":
       onToggleRaw();
       break;
+    case "find":
+      openFind();
+      break;
   }
 }
 
@@ -868,6 +875,221 @@ previewScroll.addEventListener("scroll", hideContextMenu);
     }
   });
 })();
+
+/* ---- In-document find ---- */
+
+const findBar = document.getElementById("find-bar");
+const findInput = document.getElementById("find-input");
+const findCount = document.getElementById("find-count");
+const findCaseBtn = document.getElementById("find-case");
+const findWordBtn = document.getElementById("find-word");
+const findPrevBtn = document.getElementById("find-prev");
+const findNextBtn = document.getElementById("find-next");
+const findCloseBtn = document.getElementById("find-close");
+
+const HIGHLIGHT_SUPPORTED =
+  typeof CSS !== "undefined" &&
+  CSS.highlights &&
+  typeof Highlight !== "undefined";
+
+const findState = {
+  caseSensitive: false,
+  wholeWord: false,
+  matches: [], // Range[]
+  current: -1,
+};
+
+function findOpen() {
+  return !findBar.hidden;
+}
+
+function openFind() {
+  if (!activeTab()) return;
+  const sel = selectedText();
+  if (sel && sel.length <= 200 && !sel.includes("\n")) {
+    findInput.value = sel;
+  }
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+  runFind({ keepCurrent: false });
+}
+
+function closeFind() {
+  findBar.hidden = true;
+  clearFindHighlights();
+  findState.matches = [];
+  findState.current = -1;
+}
+
+function clearFindHighlights() {
+  if (!HIGHLIGHT_SUPPORTED) return;
+  CSS.highlights.delete("search-match");
+  CSS.highlights.delete("search-current");
+}
+
+/** Flatten the preview's text into one string plus an offset→node map,
+ *  skipping rendered mermaid diagrams. */
+function collectFindSegments() {
+  const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
+      if (node.parentElement && node.parentElement.closest("pre.mermaid")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let text = "";
+  const segs = []; // { node, start } — start is the offset of node within text
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    segs.push({ node: n, start: text.length });
+    text += n.nodeValue;
+  }
+  return { text, segs };
+}
+
+/** Map a global text offset to its containing node and local offset. */
+function locateFindOffset(segs, offset) {
+  let lo = 0;
+  let hi = segs.length - 1;
+  let found = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (segs[mid].start <= offset) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const seg = segs[found];
+  return { node: seg.node, offset: offset - seg.start };
+}
+
+function findRangeFor(segs, start, end) {
+  const a = locateFindOffset(segs, start);
+  const b = locateFindOffset(segs, end);
+  const range = document.createRange();
+  range.setStart(a.node, a.offset);
+  range.setEnd(b.node, b.offset);
+  return range;
+}
+
+function runFind({ keepCurrent = true, scroll = true } = {}) {
+  const query = findInput.value;
+  const { text, segs } = collectFindSegments();
+  const spans = segs.length
+    ? findMatches(text, query, {
+        caseSensitive: findState.caseSensitive,
+        wholeWord: findState.wholeWord,
+      })
+    : [];
+  const prev = keepCurrent ? findState.current : -1;
+  findState.matches = spans.map(([s, e]) => findRangeFor(segs, s, e));
+  if (findState.matches.length === 0) {
+    findState.current = -1;
+  } else {
+    findState.current = Math.min(
+      Math.max(prev, 0),
+      findState.matches.length - 1,
+    );
+  }
+  paintFindHighlights();
+  updateFindCount(query);
+  if (scroll && findState.current >= 0) scrollToFindCurrent();
+}
+
+function paintFindHighlights() {
+  if (!HIGHLIGHT_SUPPORTED) return;
+  CSS.highlights.delete("search-match");
+  CSS.highlights.delete("search-current");
+  if (findState.matches.length === 0) return;
+  CSS.highlights.set("search-match", new Highlight(...findState.matches));
+  if (findState.current >= 0) {
+    const cur = new Highlight(findState.matches[findState.current]);
+    cur.priority = 1;
+    CSS.highlights.set("search-current", cur);
+  }
+}
+
+function updateFindCount(query) {
+  const n = findState.matches.length;
+  if (!query) {
+    findCount.textContent = "";
+    findBar.classList.remove("no-match");
+    return;
+  }
+  if (n === 0) {
+    findCount.textContent = "No results";
+    findBar.classList.add("no-match");
+    return;
+  }
+  findBar.classList.remove("no-match");
+  findCount.textContent = `${findState.current + 1} / ${n}`;
+}
+
+function scrollToFindCurrent() {
+  const range = findState.matches[findState.current];
+  if (!range) return;
+  const rect = range.getBoundingClientRect();
+  const paneRect = previewScroll.getBoundingClientRect();
+  if (rect.top < paneRect.top || rect.bottom > paneRect.bottom) {
+    const target =
+      previewScroll.scrollTop +
+      (rect.top - paneRect.top) -
+      paneRect.height / 3;
+    previewScroll.scrollTop = Math.max(0, target);
+  }
+}
+
+function findStep(delta) {
+  const n = findState.matches.length;
+  if (n === 0) return;
+  findState.current = (findState.current + delta + n) % n;
+  paintFindHighlights();
+  updateFindCount(findInput.value);
+  scrollToFindCurrent();
+}
+
+function toggleFindOption(key, btn) {
+  findState[key] = !findState[key];
+  btn.setAttribute("aria-pressed", findState[key] ? "true" : "false");
+  runFind({ keepCurrent: false });
+  findInput.focus();
+}
+
+findInput.addEventListener("input", () => runFind({ keepCurrent: false }));
+findCaseBtn.addEventListener("click", () =>
+  toggleFindOption("caseSensitive", findCaseBtn),
+);
+findWordBtn.addEventListener("click", () =>
+  toggleFindOption("wholeWord", findWordBtn),
+);
+findPrevBtn.addEventListener("click", () => findStep(-1));
+findNextBtn.addEventListener("click", () => findStep(1));
+findCloseBtn.addEventListener("click", () => closeFind());
+
+findInput.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    findStep(ev.shiftKey ? -1 : 1);
+  }
+});
+
+// ⌘G / ⇧⌘G navigate and Esc closes while the bar is open. (⌘F is delivered by
+// the native Find… menu accelerator, not here.)
+document.addEventListener("keydown", (ev) => {
+  if (!findOpen()) return;
+  const meta = ev.metaKey || ev.ctrlKey;
+  if (meta && (ev.key === "g" || ev.key === "G")) {
+    ev.preventDefault();
+    findStep(ev.shiftKey ? -1 : 1);
+  } else if (ev.key === "Escape") {
+    ev.preventDefault();
+    closeFind();
+  }
+});
 
 /* ---- Update check ---- */
 
