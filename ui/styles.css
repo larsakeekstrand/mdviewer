@@ -241,6 +241,7 @@ body {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .preview-scroll {
@@ -550,4 +551,95 @@ body {
 .sidebar::-webkit-scrollbar-track,
 .preview-pane::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ---- In-document find bar ---- */
+
+.find-bar {
+  position: absolute;
+  top: 42px;
+  right: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--sidebar-bg);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.find-input {
+  font: inherit;
+  font-size: 13px;
+  width: 180px;
+  padding: 3px 6px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+}
+
+.find-input:focus {
+  border-color: #5599ff;
+}
+
+.find-bar.no-match .find-input {
+  border-color: #cf222e;
+}
+
+.find-count {
+  font-size: 12px;
+  color: var(--sidebar-muted);
+  min-width: 56px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.find-toggle,
+.find-btn {
+  font: inherit;
+  font-size: 12px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--sidebar-muted);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.find-toggle:hover,
+.find-btn:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-fg);
+}
+
+.find-toggle[aria-pressed="true"] {
+  background: #5599ff;
+  color: #fff;
+  border-color: #5599ff;
+}
+
+/* Match highlighting via the CSS Custom Highlight API (no DOM mutation). */
+::highlight(search-match) {
+  background-color: rgba(255, 214, 0, 0.4);
+}
+
+::highlight(search-current) {
+  background-color: #ff9632;
+  color: #1f2328;
+}
+
+@media (prefers-color-scheme: dark) {
+  ::highlight(search-match) {
+    background-color: rgba(255, 214, 0, 0.3);
+  }
+  ::highlight(search-current) {
+    background-color: #d2691e;
+    color: #ffffff;
+  }
 }

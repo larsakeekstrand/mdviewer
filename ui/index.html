@@ -55,6 +55,63 @@
         </div>
         <article class="markdown-body" id="preview" hidden></article>
       </div>
+      <div class="find-bar" id="find-bar" hidden role="search">
+        <input
+          id="find-input"
+          class="find-input"
+          type="text"
+          placeholder="Find"
+          aria-label="Find in document"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <span class="find-count" id="find-count" aria-live="polite"></span>
+        <button
+          id="find-case"
+          class="find-toggle"
+          type="button"
+          aria-pressed="false"
+          title="Match case"
+        >
+          Aa
+        </button>
+        <button
+          id="find-word"
+          class="find-toggle"
+          type="button"
+          aria-pressed="false"
+          title="Whole word"
+        >
+          \b
+        </button>
+        <button
+          id="find-prev"
+          class="find-btn"
+          type="button"
+          title="Previous match (⇧⏎)"
+          aria-label="Previous match"
+        >
+          ↑
+        </button>
+        <button
+          id="find-next"
+          class="find-btn"
+          type="button"
+          title="Next match (⏎)"
+          aria-label="Next match"
+        >
+          ↓
+        </button>
+        <button
+          id="find-close"
+          class="find-btn"
+          type="button"
+          title="Close (Esc)"
+          aria-label="Close find"
+        >
+          ×
+        </button>
+      </div>
     </main>
 
     <script src="morphdom-umd.min.js"></script>
