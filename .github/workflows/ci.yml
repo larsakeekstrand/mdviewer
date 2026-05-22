@@ -41,3 +41,6 @@ jobs:
       - name: build (debug)
         working-directory: src-tauri
         run: cargo build
+
+      - name: js unit tests
+        run: node --test ui/*.test.js
