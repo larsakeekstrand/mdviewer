@@ -19,7 +19,7 @@
 - **Modify** `ui/styles.css` — find-bar chrome, `::highlight()` rules, `.preview-pane { position: relative }`.
 - **Modify** `ui/app.js` — import `findMatches`; add the find module (text walk, Range building, Highlight registration, UI wiring, keys); add the `"find"` case to `runEditAction`; re-run search after `renderActive` when the bar is open.
 - **Modify** `src-tauri/src/menu.rs` — add the **Find…** (⌘F) item to the *Actions* submenu, emitting `edit-action` `"find"`.
-- **Modify** `.github/workflows/ci.yml` — add a `node --test ui/` step.
+- **Modify** `.github/workflows/ci.yml` — add a `node --test 'ui/*.test.js'` step.
 
 Why a separate module: `app.js` reads `window.__TAURI__` at load, so it can't be imported under Node. Splitting the pure matching logic into `ui/search.js` makes the bug-prone part (case folding, whole-word boundaries, non-overlapping matches) unit-testable while the DOM-touching parts are verified by running the app.
 
@@ -114,7 +114,7 @@ test("isWordChar recognizes letters, digits, and underscore", () => {
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `node --test ui/`
+Run: `node --test 'ui/*.test.js'`
 Expected: FAIL — `Cannot find module` / `Cannot find package` for `./search.js` (the module does not exist yet).
 
 - [ ] **Step 4: Implement the matching module**
@@ -169,7 +169,7 @@ export function findMatches(text, query, opts = {}) {
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `node --test ui/`
+Run: `node --test 'ui/*.test.js'`
 Expected: PASS — `# pass 9`, `# fail 0`.
 
 - [ ] **Step 6: Commit**
@@ -870,12 +870,12 @@ Append a new step after it (runs from the repo root; the `macos-14` runner has N
         run: cargo build
 
       - name: js unit tests
-        run: node --test ui/
+        run: node --test ui/*.test.js
 ```
 
 - [ ] **Step 2: Verify locally**
 
-Run: `node --test ui/`
+Run: `node --test 'ui/*.test.js'`
 Expected: PASS — `# pass 9`, `# fail 0`.
 
 - [ ] **Step 3: Commit**
