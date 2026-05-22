@@ -557,7 +557,7 @@ body {
 
 .find-bar {
   position: absolute;
-  top: 42px;
+  top: 42px; /* below the 34px tab bar + 8px gap */
   right: 16px;
   z-index: 50;
   display: flex;
