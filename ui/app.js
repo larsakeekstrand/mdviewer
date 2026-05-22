@@ -480,6 +480,7 @@ function showEmptyState() {
   previewEmpty.hidden = false;
   preview.replaceChildren();
   preview.classList.remove("raw-body");
+  if (findOpen()) closeFind();
 }
 
 async function renderActive(
