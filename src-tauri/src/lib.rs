@@ -1,4 +1,5 @@
 mod commands;
+mod git;
 mod markdown;
 mod menu;
 mod open_files;
@@ -44,6 +45,7 @@ pub fn run(startup: Startup) {
         .invoke_handler(tauri::generate_handler![
             commands::get_initial_state,
             commands::list_dir,
+            commands::git_status,
             commands::render_file,
             commands::open_file,
             commands::read_source,

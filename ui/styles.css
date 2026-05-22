@@ -225,6 +225,56 @@ body {
   color: var(--sidebar-muted);
 }
 
+/* ---- Git decoration badges ---- */
+
+:root {
+  --git-modified: #c69026;
+  --git-added: #4f9d4a;
+  --git-deleted: #c25450;
+  --git-untracked: #4f9d4a;
+  --git-conflict: #c25450;
+  --git-ignored: var(--sidebar-muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --git-modified: #e2c08d;
+    --git-added: #7bc97a;
+    --git-deleted: #f48771;
+    --git-untracked: #7bc97a;
+    --git-conflict: #f48771;
+  }
+}
+
+.tree .row .badge {
+  margin-left: auto;
+  padding: 0 6px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.tree .row .badge.git-modified { color: var(--git-modified); }
+.tree .row .badge.git-added { color: var(--git-added); }
+.tree .row .badge.git-deleted { color: var(--git-deleted); }
+.tree .row .badge.git-untracked { color: var(--git-untracked); }
+.tree .row .badge.git-conflict { color: var(--git-conflict); }
+.tree .row .badge.git-renamed { color: var(--git-modified); }
+.tree .row .badge.git-copied { color: var(--git-modified); }
+.tree .row .badge.git-ignored { color: var(--git-ignored); opacity: 0.6; }
+
+/* Tint the file name to match the badge so the change is legible at a glance,
+   even with a narrow sidebar where the badge alone might be missed. */
+.tree .row.git-decorated.file .name { color: var(--sidebar-fg); }
+.tree .row.git-decorated .badge.git-modified ~ .name,
+.tree .row.git-decorated:has(.badge.git-modified) .name { color: var(--git-modified); }
+.tree .row.git-decorated:has(.badge.git-added) .name { color: var(--git-added); }
+.tree .row.git-decorated:has(.badge.git-untracked) .name { color: var(--git-untracked); }
+.tree .row.git-decorated:has(.badge.git-deleted) .name { color: var(--git-deleted); }
+.tree .row.git-decorated:has(.badge.git-conflict) .name { color: var(--git-conflict); }
+
 .splitter {
   cursor: col-resize;
   background: var(--splitter);

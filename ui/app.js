@@ -24,6 +24,15 @@ let treeRoot = null;
 let currentTheme = colorScheme();
 const childCache = new Map();
 
+/* ---- Git decoration state ---- */
+
+// Plain object map: absolute path → 2-char porcelain code. Empty when the
+// current folder isn't inside a git working tree.
+let gitEntries = Object.create(null);
+let gitRepoRoot = null;
+let gitRefreshTimer = null;
+const GIT_REFRESH_DEBOUNCE_MS = 200;
+
 // Tabs model
 const tabs = []; // [{ path, sticky, raw }]
 let activeIdx = -1;
@@ -155,6 +164,7 @@ async function init() {
     if (tab && ev.payload === tab.path) {
       await renderActive({ scrollLock: true });
     }
+    scheduleGitRefresh();
   });
 
   await listen("open-file", async (ev) => {
@@ -204,9 +214,140 @@ async function init() {
   if (coldFinder) rememberFolder(treeRoot);
 
   await renderRoot();
+  refreshGitStatus();
 
   if (initial.initial_file) await openSticky(initial.initial_file);
   for (const p of pending) await openSticky(p);
+}
+
+/* ---- Git decoration ---- */
+
+/** Map a porcelain XY code to { label, cls } or null for "no badge".
+ *  Worktree column (Y) wins for display when present — that's what the
+ *  user is actively editing. Otherwise show the staged column (X). */
+function gitDecoration(code) {
+  if (!code || code.length < 2) return null;
+  const x = code[0];
+  const y = code[1];
+  if (x === "?" && y === "?") return { label: "U", cls: "git-untracked" };
+  if (x === "!" && y === "!") return { label: "!", cls: "git-ignored" };
+  if (x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D")) {
+    return { label: "C", cls: "git-conflict" };
+  }
+  const c = y !== " " ? y : x;
+  switch (c) {
+    case "M":
+      return { label: "M", cls: "git-modified" };
+    case "A":
+      return { label: "A", cls: "git-added" };
+    case "D":
+      return { label: "D", cls: "git-deleted" };
+    case "R":
+      return { label: "R", cls: "git-renamed" };
+    case "C":
+      return { label: "C", cls: "git-copied" };
+    case "T":
+      return { label: "T", cls: "git-modified" };
+    default:
+      return null;
+  }
+}
+
+/** TODO(user): decide how a directory rolls up its descendants' statuses.
+ *
+ * `codes` is the list of porcelain codes for every changed descendant. Return
+ * a single code string to show as the directory's badge, or null for none.
+ *
+ * Trade-offs to weigh:
+ *   - VS Code shows "M" if anything inside is modified, dropping untracked-only
+ *     dirs to a dimmer dot. Calmer, but hides new files.
+ *   - You could surface "U" so an untracked subfolder still draws the eye —
+ *     better for "what's new" but noisier in repos with many untracked.
+ *   - You could return null entirely so only files get badges (least visual
+ *     noise, but loses the "something inside changed" cue).
+ *
+ * Default below: prefer modified > added > deleted > conflict > untracked.
+ * Swap the priority array (or the whole function body) to taste.
+ */
+function aggregateDirStatus(codes) {
+  if (codes.length === 0) return null;
+  const priority = ["UU", "DD", "AA", "M", "A", "D", "R", "C", "T", "?"];
+  for (const want of priority) {
+    for (const code of codes) {
+      if (code.includes(want[0]) || code === want) return code;
+    }
+  }
+  return codes[0];
+}
+
+/** Set or clear the `.badge` element on a tree row according to `code`. */
+function applyBadge(row, code) {
+  let badge = row.querySelector(":scope > .badge");
+  const deco = gitDecoration(code);
+  if (!deco) {
+    if (badge) badge.remove();
+    row.classList.remove("git-decorated");
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "badge";
+    row.appendChild(badge);
+  }
+  badge.textContent = deco.label;
+  badge.className = "badge " + deco.cls;
+  row.classList.add("git-decorated");
+}
+
+/** For a directory's absolute path, collect codes of every entry inside it. */
+function codesUnder(dirPath) {
+  const prefix = dirPath.endsWith("/") ? dirPath : dirPath + "/";
+  const out = [];
+  for (const [p, code] of Object.entries(gitEntries)) {
+    if (p.startsWith(prefix)) out.push(code);
+  }
+  return out;
+}
+
+/** Walk every rendered tree row and (re)apply its badge. Idempotent. */
+function applyGitDecorations(scope = tree) {
+  const lis = scope === tree ? tree.querySelectorAll("li[data-path]")
+                              : scope.querySelectorAll(":scope li[data-path], :scope[data-path]");
+  for (const li of lis) {
+    const row = li.querySelector(":scope > .row");
+    if (!row) continue;
+    const path = li.dataset.path;
+    const isDir = li.dataset.isDir === "1";
+    let code = gitEntries[path] || null;
+    if (!code && isDir) {
+      code = aggregateDirStatus(codesUnder(path));
+    }
+    applyBadge(row, code);
+  }
+}
+
+async function refreshGitStatus() {
+  if (!treeRoot) return;
+  try {
+    const report = await invoke("git_status", { path: treeRoot });
+    gitRepoRoot = report.repo_root;
+    gitEntries = report.entries || Object.create(null);
+  } catch (e) {
+    // Not in a repo, git unavailable, or another transient error. Treat as
+    // "no decorations" rather than surfacing — git status is a nice-to-have.
+    console.debug("git_status skipped:", e);
+    gitRepoRoot = null;
+    gitEntries = Object.create(null);
+  }
+  applyGitDecorations();
+}
+
+function scheduleGitRefresh() {
+  if (gitRefreshTimer != null) clearTimeout(gitRefreshTimer);
+  gitRefreshTimer = setTimeout(() => {
+    gitRefreshTimer = null;
+    refreshGitStatus();
+  }, GIT_REFRESH_DEBOUNCE_MS);
 }
 
 /* ---- Tree ---- */
@@ -217,6 +358,7 @@ async function renderRoot() {
   for (const entry of children) {
     tree.appendChild(makeNode(entry, 1));
   }
+  applyGitDecorations();
 }
 
 function rememberFolder(path) {
@@ -231,6 +373,7 @@ async function setTreeRoot(path) {
   treeTitle.title = path;
   childCache.clear();
   await renderRoot();
+  refreshGitStatus();
   rememberFolder(path);
   const tab = activeTab();
   if (tab) highlightSelectedByPath(tab.path);
@@ -310,6 +453,7 @@ async function onDirClick(entry, li, row, depth) {
     ul.appendChild(makeNode(child, depth + 1));
   }
   li.appendChild(ul);
+  applyGitDecorations(ul);
 }
 
 async function onTreeFileSingle(path) {

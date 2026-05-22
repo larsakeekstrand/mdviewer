@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::{markdown, recent, tree, updates, AppState};
+use crate::{git, markdown, recent, tree, updates, AppState};
 
 #[derive(Serialize)]
 pub struct InitialState {
@@ -37,6 +37,11 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialS
 pub fn list_dir(path: String) -> Result<Vec<tree::TreeEntry>, String> {
     let p = Path::new(&path);
     tree::list_directory(p)
+}
+
+#[tauri::command]
+pub fn git_status(path: String) -> Result<git::GitStatusReport, String> {
+    git::status(Path::new(&path))
 }
 
 #[derive(Serialize)]
