@@ -82,6 +82,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: src-tauri
           tagName: ${{ steps.tag.outputs.value }}
@@ -103,6 +105,14 @@ jobs:
 
             Then double-click the app in Applications. It opens normally
             from then on.
+
+            ## Updating
+
+            MDViewer 1.5.0+ updates itself: when a newer version is published,
+            the in-app banner offers **Update now**, which downloads and installs
+            in place — no quarantine step needed. The manual DMG above is only
+            for a first install or to move a pre-1.5.0 build onto the
+            auto-updating track.
 
             ## Changes
 
