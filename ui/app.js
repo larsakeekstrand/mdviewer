@@ -7,6 +7,11 @@ import {
   forceLightCss,
   buildHtmlDocument,
 } from "./export.js";
+import {
+  releaseUrlFor,
+  bannerMessage,
+  progressText,
+} from "./update.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -1752,21 +1757,48 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
-/* ---- Update check ---- */
+/* ---- Update check & auto-update ---- */
 
+const REPO = "larsakeekstrand/mdviewer";
 const DISMISS_KEY = "mdviewer.update.dismissed_version";
+const updaterApi = window.__TAURI__.updater;
+
 const updateBanner = document.getElementById("update-banner");
 const updateBannerText = document.getElementById("update-banner-text");
+const updateBannerUpdate = document.getElementById("update-banner-update");
+const updateBannerRestart = document.getElementById("update-banner-restart");
 const updateBannerView = document.getElementById("update-banner-view");
 const updateBannerDismiss = document.getElementById("update-banner-dismiss");
 
+function setUpdateButtons({
+  update = false,
+  restart = false,
+  view = false,
+  dismiss = false,
+} = {}) {
+  updateBannerUpdate.hidden = !update;
+  updateBannerRestart.hidden = !restart;
+  updateBannerView.hidden = !view;
+  updateBannerDismiss.hidden = !dismiss;
+}
+
+function openReleasePage(version) {
+  return async () => {
+    try {
+      await invoke("open_url", { url: releaseUrlFor(REPO, version) });
+    } catch (e) {
+      console.error("open_url failed", e);
+    }
+  };
+}
+
 async function checkForUpdates({ silent = true } = {}) {
-  let info;
+  let update;
   try {
-    info = await invoke("check_for_updates");
+    update = await updaterApi.check();
   } catch (e) {
     if (silent) {
-      // 404 (no published releases yet), network error, etc.
+      // No published release yet, network error, etc.
       console.debug("update check skipped:", e);
       return;
     }
@@ -1777,46 +1809,86 @@ async function checkForUpdates({ silent = true } = {}) {
     return;
   }
 
-  if (info && info.has_update) {
+  if (update) {
     if (silent) {
       let dismissed = null;
       try {
         dismissed = localStorage.getItem(DISMISS_KEY);
       } catch (_) {}
-      if (dismissed === info.latest_version) return;
+      if (dismissed === update.version) return;
     }
-    showUpdateBanner(info);
+    showUpdateAvailable(update);
     return;
   }
 
   if (!silent) {
-    const current = (info && info.current_version) || "this version";
-    await dialogApi.message(
-      `You're on version ${current}. This is the latest release.`,
-      { title: "MDViewer", kind: "info" },
-    );
+    await dialogApi.message("You're on the latest version.", {
+      title: "MDViewer",
+      kind: "info",
+    });
   }
 }
 
-function showUpdateBanner(info) {
-  updateBannerText.textContent =
-    `MDViewer ${info.latest_version} is available — you have ${info.current_version}.`;
+function showUpdateAvailable(update) {
+  updateBannerText.textContent = bannerMessage(
+    update.version,
+    update.currentVersion,
+  );
+  setUpdateButtons({ update: true, view: true, dismiss: true });
 
-  updateBannerView.onclick = async () => {
-    try {
-      await invoke("open_url", { url: info.release_url });
-    } catch (e) {
-      console.error("open_url failed", e);
-    }
-  };
+  updateBannerUpdate.onclick = () => runUpdate(update);
+  updateBannerView.onclick = openReleasePage(update.version);
   updateBannerDismiss.onclick = () => {
     try {
-      localStorage.setItem(DISMISS_KEY, info.latest_version);
+      localStorage.setItem(DISMISS_KEY, update.version);
     } catch (_) {}
     updateBanner.hidden = true;
   };
 
   updateBanner.hidden = false;
+}
+
+async function runUpdate(update) {
+  setUpdateButtons();
+  let downloaded = 0;
+  let contentLength = 0;
+  updateBannerText.textContent = "Downloading…";
+
+  try {
+    await update.downloadAndInstall((event) => {
+      switch (event.event) {
+        case "Started":
+          contentLength = event.data.contentLength ?? 0;
+          break;
+        case "Progress":
+          downloaded += event.data.chunkLength;
+          updateBannerText.textContent = progressText(downloaded, contentLength);
+          break;
+        case "Finished":
+          updateBannerText.textContent = "Installing…";
+          break;
+      }
+    });
+  } catch (e) {
+    console.error("update failed", e);
+    updateBannerText.textContent = "Update failed: " + e;
+    setUpdateButtons({ view: true, dismiss: true });
+    updateBannerView.onclick = openReleasePage(update.version);
+    updateBannerDismiss.onclick = () => {
+      updateBanner.hidden = true;
+    };
+    return;
+  }
+
+  updateBannerText.textContent = "Update installed.";
+  setUpdateButtons({ restart: true });
+  updateBannerRestart.onclick = async () => {
+    try {
+      await invoke("restart");
+    } catch (e) {
+      console.error("restart failed", e);
+    }
+  };
 }
 
 init()
