@@ -1,8 +1,9 @@
 # CLAUDE.md — mdviewer project guide
 
 A macOS markdown viewer in Rust on Tauri 2. VS Code–style file tree + tabbed
-preview, GitHub-flavored markdown rendering, Mermaid diagrams, live reload, an
-Open Recent menu, an in-app update check against GitHub Releases, a custom
+preview, GitHub-flavored markdown rendering, Mermaid diagrams, KaTeX math,
+copy-button on code blocks, git status decoration in the tree, live reload,
+an Open Recent menu, an in-app update check against GitHub Releases, a custom
 right-click context menu, and a default-app file association for markdown files.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
@@ -18,7 +19,8 @@ Repo: https://github.com/larsakeekstrand/mdviewer
     Check-for-Updates result dialogs.
 - **Frontend** (`ui/`): vanilla HTML / CSS / JS, no build step, no framework.
   Vendored `morphdom` for scroll-preserving diffs, vendored `mermaid` for
-  diagram rendering, and vendored `github-markdown.css` for typography.
+  diagram rendering, vendored `katex` for math (`ui/katex/`, ~600K including
+  woff2 fonts), and vendored `github-markdown.css` for typography.
   `withGlobalTauri: true` in `tauri.conf.json` exposes the IPC API at
   `window.__TAURI__`.
 
@@ -74,6 +76,17 @@ icon.svg          — source for icon regeneration
   the frontend's `renderMermaid()` turns them into SVG after each morphdom
   patch — theme-aware, with unchanged diagrams preserved across live reloads
   and a per-diagram inline error fallback. Skipped in raw view.
+- **Math (KaTeX)**: `markdown.rs` enables comrak's `extension.math_dollars`,
+  which emits `<span data-math-style="inline|display">SRC</span>` from `$..$`
+  / `$$..$$` using the strict GFM delimiter rules (no whitespace inside, no
+  digit after closing `$`, code spans excluded, `\$` escapes). The frontend's
+  `renderMath()` hands each span to `katex.render()` with `throwOnError:false`
+  (parse errors render in red inline). Same morphdom preservation pattern as
+  mermaid (`data-math-state` / `data-math-src`). Skipped in raw view.
+- **`postRender()`**: single seam that runs after every morphdom patch —
+  `annotateLinks` → `resolveImages` → `addCopyButtons` → `renderMath` →
+  `renderMermaid`. Order matters: math/mermaid change element heights and
+  must run before `restoreAnchor`. New post-render hooks go here.
 - **File associations / open from Finder**: `tauri.conf.json`
   `bundle.fileAssociations` declares the markdown extensions
   (`CFBundleDocumentTypes`, Viewer role) so MDViewer is selectable as the

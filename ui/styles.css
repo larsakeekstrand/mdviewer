@@ -523,6 +523,25 @@ body {
   display: none;
 }
 
+/* ---- KaTeX math ---- */
+
+/* Display math: comrak wraps $$..$$ as <p><span data-math-style="display">…</span></p>.
+   The wrapping span is inline by default — promoting it to block lets KaTeX's
+   own .katex-display centering/margin work, and gives long equations a
+   horizontal scrollbar instead of overflowing the column. */
+.markdown-body span[data-math-style="display"] {
+  display: block;
+  overflow-x: auto;
+}
+
+/* Fallback styling for unexpected katex.render exceptions. KaTeX renders
+   parse errors inline (red) on its own with throwOnError:false, so this
+   only kicks in for engine-level failures. */
+.markdown-body .math-error {
+  color: #cf222e;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
 /* Mermaid diagrams: strip the code-block chrome and center the SVG. */
 .markdown-body pre.mermaid {
   background: none;

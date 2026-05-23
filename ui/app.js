@@ -671,6 +671,16 @@ async function renderActive(
       ) {
         return false;
       }
+      // Keep an already-rendered math span if its source is unchanged — same
+      // reasoning as mermaid. Comrak re-emits the bare LaTeX on every render.
+      if (
+        fromEl.dataset.mathState === "ok" &&
+        toEl.hasAttribute &&
+        toEl.hasAttribute("data-math-style") &&
+        (toEl.textContent || "").trim() === fromEl.dataset.mathSrc
+      ) {
+        return false;
+      }
       // Keep an already-resolved image whose source file is unchanged, so the
       // asset:// rewrite below isn't undone (and the image re-fetched) on every
       // live reload.
@@ -692,15 +702,47 @@ async function renderActive(
 
 /* ---- Post-render hooks ---- */
 
-/** Runs after each morphdom patch. New hooks (KaTeX, etc.) go here so the
- *  call site in renderActive stays one line and the ordering — link
- *  annotation, image resolution, copy buttons, then diagram rendering which
- *  changes element heights — lives in one place. */
+/** Runs after each morphdom patch. New hooks go here so the call site in
+ *  renderActive stays one line and the ordering — link annotation, image
+ *  resolution, copy buttons, then math/diagram rendering (both of which
+ *  change element heights) — lives in one place. */
 async function postRender(t, { raw = false, forceMermaid = false } = {}) {
   annotateLinks();
   resolveImages(parentDir(t.path));
   addCopyButtons();
-  if (!raw) await renderMermaid({ force: forceMermaid });
+  if (!raw) {
+    renderMath();
+    await renderMermaid({ force: forceMermaid });
+  }
+}
+
+/** Render every comrak math span via KaTeX. Each span starts as
+ *  <span data-math-style="inline|display">SRC</span>; after render it has
+ *  KaTeX HTML inside plus a dataset.mathState marker that the morphdom
+ *  diff uses to skip unchanged spans on live reload (mirrors the mermaid
+ *  preservation pattern). */
+function renderMath() {
+  if (!window.katex) return;
+  for (const el of preview.querySelectorAll("span[data-math-style]")) {
+    if (el.dataset.mathState) continue;
+    const source = (el.textContent || "").trim();
+    const displayMode = el.getAttribute("data-math-style") === "display";
+    try {
+      window.katex.render(source, el, {
+        displayMode,
+        // Render parse errors inline (red) instead of throwing — one bad
+        // expression must not break the rest of the document.
+        throwOnError: false,
+        output: "html",
+      });
+    } catch (e) {
+      console.error("KaTeX render failed", e);
+      el.classList.add("math-error");
+      el.textContent = source;
+    }
+    el.dataset.mathState = "ok";
+    el.dataset.mathSrc = source;
+  }
 }
 
 /** Attach a hover-revealed "Copy" button to every code block. Idempotent:
@@ -1126,9 +1168,10 @@ function collectFindSegments() {
   const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
-      if (node.parentElement && node.parentElement.closest("pre.mermaid")) {
-        return NodeFilter.FILTER_REJECT;
-      }
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_ACCEPT;
+      if (parent.closest("pre.mermaid")) return NodeFilter.FILTER_REJECT;
+      if (parent.closest("[data-math-style]")) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
     },
   });

@@ -28,6 +28,11 @@ fn build_options() -> Options<'static> {
     opts.extension.footnotes = true;
     opts.extension.tagfilter = true;
     opts.extension.header_id_prefix = Some("md-h-".to_string());
+    // GFM math syntax: $..$ inline and $$..$$ display, with the strict GFM
+    // delimiter rules (no whitespace inside, no digit after closing $, code
+    // spans excluded, \$ escapes). Output is <span data-math-style="..">..</span>
+    // which the frontend hands to KaTeX.
+    opts.extension.math_dollars = true;
     // Source positions enable scroll-anchor preservation across live reload.
     opts.render.sourcepos = true;
     // Block raw inline HTML in markdown.
@@ -124,6 +129,34 @@ mod tests {
             "mermaid block should bypass syntect, got: {html}"
         );
         assert!(!html.contains("language-mermaid"), "got: {html}");
+    }
+
+    #[test]
+    fn inline_math_emits_math_span() {
+        let html = render_markdown("Pythagoras: $a^2 + b^2 = c^2$.\n", "light");
+        assert!(
+            html.contains(r#"data-math-style="inline""#)
+                && html.contains("a^2 + b^2 = c^2"),
+            "expected inline math span, got: {html}"
+        );
+    }
+
+    #[test]
+    fn display_math_emits_display_span() {
+        let html = render_markdown("Energy: $$E = mc^2$$.\n", "light");
+        assert!(
+            html.contains(r#"data-math-style="display""#),
+            "expected display math span, got: {html}"
+        );
+    }
+
+    #[test]
+    fn dollar_currency_is_not_math() {
+        let html = render_markdown("It costs $5 and $10.\n", "light");
+        assert!(
+            !html.contains("data-math-style"),
+            "currency dollars must not be treated as math, got: {html}"
+        );
     }
 
     #[test]
