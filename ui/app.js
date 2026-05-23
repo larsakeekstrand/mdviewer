@@ -1762,6 +1762,7 @@ document.addEventListener("keydown", (ev) => {
 const REPO = "larsakeekstrand/mdviewer";
 const DISMISS_KEY = "mdviewer.update.dismissed_version";
 const updaterApi = window.__TAURI__.updater;
+let updateInProgress = false;
 
 const updateBanner = document.getElementById("update-banner");
 const updateBannerText = document.getElementById("update-banner-text");
@@ -1793,6 +1794,7 @@ function openReleasePage(version) {
 }
 
 async function checkForUpdates({ silent = true } = {}) {
+  if (updateInProgress) return;
   let update;
   try {
     update = await updaterApi.check();
@@ -1849,6 +1851,7 @@ function showUpdateAvailable(update) {
 }
 
 async function runUpdate(update) {
+  updateInProgress = true;
   setUpdateButtons();
   let downloaded = 0;
   let contentLength = 0;
@@ -1870,6 +1873,7 @@ async function runUpdate(update) {
       }
     });
   } catch (e) {
+    updateInProgress = false;
     console.error("update failed", e);
     updateBannerText.textContent = "Update failed: " + e;
     setUpdateButtons({ view: true, dismiss: true });
