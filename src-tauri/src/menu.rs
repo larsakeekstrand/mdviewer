@@ -18,6 +18,9 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         match id.as_str() {
             "open-file" => prompt_open_file(app.clone()),
             "open-folder" => prompt_open_folder(app.clone()),
+            "export-html" => {
+                let _ = app.emit("export", "html");
+            }
             "check-updates" => {
                 let _ = app.emit("menu-check-updates", ());
             }
@@ -69,6 +72,8 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
 
     let recent_submenu = build_recent_submenu(app)?;
 
+    let export_html = MenuItemBuilder::with_id("export-html", "Export as HTML…").build(app)?;
+
     let check_updates =
         MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
     let github_source =
@@ -90,6 +95,8 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .item(&open_file)
         .item(&open_folder)
         .item(&recent_submenu)
+        .separator()
+        .item(&export_html)
         .separator()
         .close_window()
         .build()?;

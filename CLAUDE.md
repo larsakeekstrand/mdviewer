@@ -83,6 +83,17 @@ icon.svg          — source for icon regeneration
   `renderMath()` hands each span to `katex.render()` with `throwOnError:false`
   (parse errors render in red inline). Same morphdom preservation pattern as
   mermaid (`data-math-state` / `data-math-src`). Skipped in raw view.
+- **Export (HTML)**: `ui/export.js` holds pure helpers (filename derivation,
+  `forceLightCss`, `inlineFontUrls`, `buildHtmlDocument`, `documentNeedsKatex`),
+  unit-tested under `node --test`. The frontend's `exportDocument()` snapshots
+  view state, forces a **light** render through `renderActive` (so code/math/
+  Mermaid are light and theme-stable), serializes `#preview` (stripping injected
+  buttons, disabling task checkboxes, inlining local images and the
+  github-markdown/KaTeX CSS + woff2 fonts as `data:` URLs), and writes via the
+  existing `save_export` command. Triggered by **File ▸ Export as HTML…**
+  (`menu.rs` emits an `export` event with the format). Export errors use the
+  transient banner (`showTransientError`), not `showError` (which clears the
+  preview). PDF is a planned second format (see `docs/superpowers/specs/`).
 - **`postRender()`**: single seam that runs after every morphdom patch —
   `annotateLinks` → `resolveImages` → `addCopyButtons` → `renderMath` →
   `renderMermaid`. Order matters: math/mermaid change element heights and
@@ -253,6 +264,13 @@ icon.svg          — source for icon regeneration
 - **GitHub macos-13 (Intel) runners** routinely queue 30–60+ min. We dropped
   x86_64 from `release.yml`. Don't add it back without a queue-management
   plan.
+- **Export must force light CSS**: `github-markdown.css` gates its light color
+  variables behind `@media (prefers-color-scheme: light)`. Simply deleting the
+  dark block leaves a dark-OS viewer with *no* variables (broken colors). The
+  export's `forceLightCss` both removes the dark block AND unwraps the light
+  block so its rules apply unconditionally. KaTeX fonts must be inlined as
+  `data:` URLs too, or the `.html` references font files that don't travel with
+  it.
 
 ## Build / develop / release
 

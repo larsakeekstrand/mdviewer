@@ -1,4 +1,12 @@
 import { findMatches } from "./search.js";
+import {
+  exportFilename,
+  baseName,
+  documentNeedsKatex,
+  inlineFontUrls,
+  forceLightCss,
+  buildHtmlDocument,
+} from "./export.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -177,6 +185,10 @@ async function init() {
 
   await listen("edit-action", async (ev) => {
     await runEditAction(ev.payload);
+  });
+
+  await listen("export", async (ev) => {
+    await onExport(ev.payload);
   });
 
   await listen("menu-check-updates", async () => {
@@ -769,14 +781,17 @@ async function onTaskCheckboxClick(ev, input, t) {
   } catch (e) {
     console.error("toggle_task failed", e);
     input.checked = expectedCurrent;
-    showTaskError(String(e));
+    showTransientError(String(e));
   } finally {
     pendingToggles.delete(key);
   }
 }
 
-let taskErrorTimer = null;
-function showTaskError(msg) {
+let transientErrorTimer = null;
+/** Show a short-lived error banner without disturbing the rendered document
+ *  (unlike showError, which clears the preview). Used for transient operation
+ *  failures — task-list toggles and export. */
+function showTransientError(msg) {
   let banner = document.getElementById("task-error-banner");
   if (!banner) {
     banner = document.createElement("div");
@@ -786,10 +801,158 @@ function showTaskError(msg) {
   }
   banner.textContent = msg;
   banner.hidden = false;
-  if (taskErrorTimer) clearTimeout(taskErrorTimer);
-  taskErrorTimer = setTimeout(() => {
+  if (transientErrorTimer) clearTimeout(transientErrorTimer);
+  transientErrorTimer = setTimeout(() => {
     banner.hidden = true;
   }, 3000);
+}
+
+/* ---- Document export ---- */
+
+let exportInProgress = false;
+
+const EXPORT_PAGE_CSS = `
+html { color-scheme: light; }
+body { margin: 0; background: #ffffff; }
+.markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 32px 24px; }
+`;
+
+/** Menu entry point: pick a destination, then export. */
+async function onExport(format) {
+  const t = activeTab();
+  if (!t) {
+    showTransientError("Open a document before exporting.");
+    return;
+  }
+  const ext = format === "pdf" ? "pdf" : "html";
+  const filters =
+    ext === "pdf"
+      ? [{ name: "PDF document", extensions: ["pdf"] }]
+      : [{ name: "HTML document", extensions: ["html"] }];
+  const path = await dialogApi.save({
+    defaultPath: exportFilename(t.path, ext),
+    filters,
+  });
+  if (!path) return;
+  await exportDocument(format, path);
+}
+
+/** Snapshot view state, force a light rendered view, run the format-specific
+ *  export, then restore. The light re-render reuses the real renderActive
+ *  pipeline so math/Mermaid/code come out light and faithful. */
+async function exportDocument(format, path) {
+  if (exportInProgress) return;
+  const t = activeTab();
+  if (!t) return;
+  exportInProgress = true;
+  const prevTheme = currentTheme;
+  const prevRaw = t.raw;
+  const prevScroll = previewScroll.scrollTop;
+  try {
+    currentTheme = "light";
+    t.raw = false;
+    initMermaid();
+    await renderActive({ scrollLock: false, forceMermaid: true });
+
+    if (format === "html") {
+      await exportHtml(t, path);
+    }
+    // PDF is Plan 2.
+  } catch (e) {
+    console.error("export failed", e);
+    showTransientError("Export failed: " + e);
+  } finally {
+    // Clear the lock first so a throw while restoring the view can't leave
+    // export permanently disabled for the session.
+    exportInProgress = false;
+    currentTheme = prevTheme;
+    t.raw = prevRaw;
+    initMermaid();
+    await renderActive({ scrollLock: false, forceMermaid: true });
+    previewScroll.scrollTop = prevScroll;
+  }
+}
+
+/** Serialize the (already light-rendered) preview into one standalone HTML file
+ *  and write it via the save_export command. */
+async function exportHtml(t, path) {
+  const clone = preview.cloneNode(true);
+  // Drop UI chrome injected after render (copy buttons, mermaid export buttons).
+  clone
+    .querySelectorAll(".export-btn-group, .copy-btn")
+    .forEach((el) => el.remove());
+  // The live checkboxes were made interactive by hookTaskListCheckboxes; the
+  // exported file has no JS, so render them disabled like GitHub does.
+  clone
+    .querySelectorAll('input[type="checkbox"]')
+    .forEach((cb) => cb.setAttribute("disabled", ""));
+  await inlineImages(clone);
+  const bodyHtml = clone.innerHTML;
+
+  let css = forceLightCss(await fetchText("github-markdown.css"));
+  if (documentNeedsKatex(bodyHtml)) {
+    let katexCss = await fetchText("katex/katex.min.css");
+    katexCss = inlineFontUrls(katexCss, await buildKatexFontMap(katexCss));
+    css += "\n" + katexCss;
+  }
+  css += "\n" + EXPORT_PAGE_CSS;
+
+  const html = buildHtmlDocument({
+    title: baseName(t.path),
+    css,
+    bodyHtml,
+  });
+  await invoke("save_export", { path, data: html, base64Encoded: false });
+}
+
+async function fetchText(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fetch ${url} failed: ${res.status}`);
+  return await res.text();
+}
+
+/** Replace local (asset:// or relative) <img> sources with data: URLs so the
+ *  exported file is standalone. Remote (http/https) and existing data: srcs are
+ *  left as-is. Per-image failures are logged and skipped (the original src
+ *  stays, still valid online). macOS asset URLs use the asset:// scheme, so the
+ *  http(s) check below correctly leaves only true remote images alone. */
+async function inlineImages(root) {
+  const imgs = [...root.querySelectorAll("img")];
+  await Promise.all(
+    imgs.map(async (img) => {
+      const src = img.getAttribute("src") || "";
+      if (!src || src.startsWith("data:") || /^https?:/i.test(src)) return;
+      try {
+        const blob = await (await fetch(src)).blob();
+        const mime = blob.type || "image/png";
+        img.setAttribute(
+          "src",
+          `data:${mime};base64,` + (await blobToBase64(blob)),
+        );
+      } catch (e) {
+        console.warn("image inline failed:", src, e);
+      }
+    }),
+  );
+}
+
+/** Build { "fonts/X.woff2": "data:font/woff2;base64,…" } for every woff2 the
+ *  KaTeX CSS references. Only woff2 exists on disk; woff/ttf fallbacks are left
+ *  untouched (browsers prefer the inlined woff2 via its format() hint). */
+async function buildKatexFontMap(katexCss) {
+  const refs = [
+    ...new Set(
+      [...katexCss.matchAll(/url\((fonts\/[^)]+\.woff2)\)/g)].map((m) => m[1]),
+    ),
+  ];
+  const map = {};
+  await Promise.all(
+    refs.map(async (ref) => {
+      const blob = await (await fetch("katex/" + ref)).blob();
+      map[ref] = "data:font/woff2;base64," + (await blobToBase64(blob));
+    }),
+  );
+  return map;
 }
 
 /** Add hover-revealed SVG / PNG export buttons to each rendered mermaid block.
