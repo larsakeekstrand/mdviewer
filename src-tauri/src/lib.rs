@@ -52,6 +52,7 @@ pub fn run(startup: Startup) {
             commands::check_for_updates,
             commands::open_url,
             commands::open_path,
+            commands::save_export,
             commands::frontend_ready,
             commands::remember_folder,
         ])

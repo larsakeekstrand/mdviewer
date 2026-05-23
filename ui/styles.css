@@ -523,6 +523,51 @@ body {
   display: none;
 }
 
+/* ---- Mermaid export buttons (SVG / PNG) ---- */
+
+.markdown-body pre.mermaid > .export-btn-group {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.markdown-body pre.mermaid:hover > .export-btn-group {
+  opacity: 1;
+}
+
+.markdown-body pre.mermaid .export-btn {
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    sans-serif;
+  color: var(--fg);
+  background: rgba(127, 127, 127, 0.14);
+  border: 1px solid rgba(127, 127, 127, 0.22);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.markdown-body pre.mermaid .export-btn:hover {
+  background: rgba(127, 127, 127, 0.24);
+}
+
+.markdown-body pre.mermaid .export-btn:focus-visible {
+  outline: 2px solid #5599ff;
+  outline-offset: 1px;
+}
+
+.markdown-body pre.mermaid .export-btn.ok {
+  background: rgba(80, 200, 120, 0.22);
+  border-color: rgba(80, 200, 120, 0.45);
+}
+
 /* ---- KaTeX math ---- */
 
 /* Display math: comrak wraps $$..$$ as <p><span data-math-style="display">…</span></p>.

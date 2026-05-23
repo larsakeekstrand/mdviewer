@@ -713,7 +713,192 @@ async function postRender(t, { raw = false, forceMermaid = false } = {}) {
   if (!raw) {
     renderMath();
     await renderMermaid({ force: forceMermaid });
+    addMermaidExportButtons();
   }
+}
+
+/** Add hover-revealed SVG / PNG export buttons to each rendered mermaid block.
+ *  Only attaches once renderMermaid has produced an SVG; idempotent across
+ *  morphdom updates via the :scope > .export-btn-group existence check. */
+function addMermaidExportButtons() {
+  for (const pre of preview.querySelectorAll("pre.mermaid")) {
+    if (pre.dataset.mvState !== "ok") continue;
+    if (pre.querySelector(":scope > .export-btn-group")) continue;
+    const group = document.createElement("div");
+    group.className = "export-btn-group";
+    group.appendChild(makeExportButton("SVG", (btn) => exportMermaidSvg(pre, btn)));
+    group.appendChild(makeExportButton("PNG", (btn) => exportMermaidPng(pre, btn)));
+    pre.appendChild(group);
+  }
+}
+
+function makeExportButton(label, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "export-btn";
+  btn.textContent = label;
+  btn.title = `Save diagram as ${label}`;
+  btn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    onClick(btn);
+  });
+  return btn;
+}
+
+function flashButton(btn, msg, durationMs = 1200) {
+  const original = btn.textContent;
+  btn.textContent = msg;
+  btn.classList.add("ok");
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove("ok");
+  }, durationMs);
+}
+
+/** Re-render the mermaid source with a guaranteed-portable config: light
+ *  theme (so exports look right pasted into any document) and HTML labels
+ *  disabled (mermaid's default uses <foreignObject>, which WebKit can't
+ *  reliably rasterize to canvas — that was the cause of silent PNG failures).
+ *  The viewing diagrams' config is restored on the way out. */
+async function renderMermaidForExport(src) {
+  const exportConfig = {
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "default",
+    flowchart: { htmlLabels: false },
+    sequence: { htmlLabels: false },
+    class: { htmlLabels: false },
+    state: { htmlLabels: false },
+  };
+  window.mermaid.initialize(exportConfig);
+  try {
+    const id = "mmd-export-" + mermaidIdSeq++;
+    const { svg } = await window.mermaid.render(id, src);
+    return svg;
+  } finally {
+    // Restore the on-screen config so subsequent live-reload renders keep
+    // the user's current theme.
+    initMermaid();
+  }
+}
+
+async function exportMermaidSvg(pre, btn) {
+  const src = pre.dataset.mermaidSrc;
+  if (!src) return;
+  try {
+    const path = await dialogApi.save({
+      defaultPath: "diagram.svg",
+      filters: [{ name: "SVG image", extensions: ["svg"] }],
+    });
+    if (!path) return;
+    const svg = await renderMermaidForExport(src);
+    const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + svg;
+    await invoke("save_export", { path, data: xml, base64Encoded: false });
+    flashButton(btn, "Saved");
+  } catch (e) {
+    console.error("SVG export failed", e);
+    flashButton(btn, "Failed");
+  }
+}
+
+async function exportMermaidPng(pre, btn) {
+  const src = pre.dataset.mermaidSrc;
+  if (!src) return;
+  try {
+    const path = await dialogApi.save({
+      defaultPath: "diagram.png",
+      filters: [{ name: "PNG image", extensions: ["png"] }],
+    });
+    if (!path) return;
+    const svgStr = await renderMermaidForExport(src);
+    const base64 = await rasterizeSvgStringToPng(svgStr, 2);
+    await invoke("save_export", { path, data: base64, base64Encoded: true });
+    flashButton(btn, "Saved");
+  } catch (e) {
+    console.error("PNG export failed", e);
+    flashButton(btn, "Failed");
+  }
+}
+
+/** Rasterize an SVG (as a string) to a PNG, returning base64. The SVG's
+ *  viewBox (or width/height attributes) sets the natural pixel size; `scale`
+ *  multiplies for Retina crispness. A white fill is laid down first so the
+ *  PNG isn't transparent (most viewers show transparent PNGs on black/checker
+ *  backgrounds, which makes mermaid diagrams unreadable).
+ *
+ *  Uses a data: URL rather than blob: — blob: would require adding `blob:`
+ *  to the CSP's img-src, which we'd rather not broaden for one feature. The
+ *  size overhead for a typical mermaid SVG (a few KB) is negligible. */
+async function rasterizeSvgStringToPng(svgStr, scale = 2) {
+  const { width: naturalW, height: naturalH } = readSvgNaturalSize(svgStr);
+  const dataUrl = svgStringToDataUrl(svgStr);
+  const img = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(naturalW * scale));
+  canvas.height = Math.max(1, Math.ceil(naturalH * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("canvas.toBlob returned null"))),
+      "image/png",
+    );
+  });
+  return await blobToBase64(blob);
+}
+
+function svgStringToDataUrl(svgStr) {
+  // UTF-8 → byte array → binary string → base64. TextEncoder handles BMP
+  // and non-BMP correctly; btoa alone would mishandle multi-byte chars.
+  const bytes = new TextEncoder().encode(svgStr);
+  let s = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    s += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return "data:image/svg+xml;base64," + btoa(s);
+}
+
+function readSvgNaturalSize(svgStr) {
+  const doc = new DOMParser().parseFromString(svgStr, "image/svg+xml");
+  const root = doc.documentElement;
+  const vb = (root.getAttribute("viewBox") || "").trim();
+  if (vb) {
+    const parts = vb.split(/[\s,]+/).map(Number);
+    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+      return { width: parts[2], height: parts[3] };
+    }
+  }
+  const w = parseFloat(root.getAttribute("width"));
+  const h = parseFloat(root.getAttribute("height"));
+  return {
+    width: Number.isFinite(w) && w > 0 ? w : 800,
+    height: Number.isFinite(h) && h > 0 ? h : 600,
+  };
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image load failed"));
+    img.src = src;
+  });
+}
+
+async function blobToBase64(blob) {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  // String.fromCharCode(...big_array) blows the stack; chunk into 32K windows.
+  let s = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    s += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(s);
 }
 
 /** Render every comrak math span via KaTeX. Each span starts as

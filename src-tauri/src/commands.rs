@@ -183,6 +183,24 @@ pub fn open_file(app: AppHandle, state: State<'_, AppState>, path: String) -> Re
     slot.watch_file(&app, &p)
 }
 
+/// Writes export data (SVG text or base64-encoded PNG bytes) to a user-picked
+/// path. Path is supplied by the frontend after going through the native save
+/// dialog, so we trust it — the dialog is the consent boundary.
+#[tauri::command]
+pub fn save_export(path: String, data: String, base64_encoded: bool) -> Result<(), String> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+
+    let bytes = if base64_encoded {
+        STANDARD
+            .decode(&data)
+            .map_err(|e| format!("invalid base64 payload: {e}"))?
+    } else {
+        data.into_bytes()
+    };
+    std::fs::write(&path, bytes).map_err(|e| format!("failed to write '{path}': {e}"))
+}
+
 #[tauri::command]
 pub fn frontend_ready(state: State<'_, AppState>) -> Vec<String> {
     let mut guard = state.opens.lock().unwrap();

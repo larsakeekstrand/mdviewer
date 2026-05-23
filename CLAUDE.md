@@ -156,6 +156,20 @@ icon.svg          — source for icon regeneration
   - Live reload preserves an already-rendered diagram when its source is
     unchanged (morphdom `onBeforeElUpdated`); a `forceMermaid` flag re-renders
     all diagrams on theme change.
+  - **Export (SVG/PNG)**: `renderMermaidForExport` re-renders the source with
+    `theme:"default"` (so embedded PNGs aren't dark) AND `htmlLabels:false`
+    for flowchart/sequence/class/state — labels become plain `<text>` instead
+    of `<foreignObject>`. WebKit can't reliably rasterize foreignObject content
+    to canvas; with HTML labels enabled, `canvas.toBlob` silently produced
+    null (button flashed "Failed" with no further signal). Restored to the
+    on-screen config in a `finally` block so future renders use the user's
+    theme again.
+  - **PNG rasterizer uses a `data:` URL, not `blob:`** for the `<img>` step.
+    The CSP's `img-src` allows `data:` but not `blob:`; loading `blob:`
+    rejects via `img.onerror` and the whole export silently fails. Adding
+    `blob:` to img-src would also work but unnecessarily widens the CSP.
+  - PNG canvas is filled white before `drawImage` — transparent PNGs render
+    against black/checker in many viewers, making the diagram unreadable.
 - **Content-Security-Policy** lives in `tauri.conf.json` `app.security.csp`
   (must NOT be `null` — that disables it). `script-src 'self'` is the
   load-bearing defense: the app ships no inline `<script>` or `on*=` handlers,
