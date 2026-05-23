@@ -43,3 +43,15 @@ test("progressText degrades without a total", () => {
   assert.equal(progressText(50, 200), "Downloading… 25%");
   assert.equal(progressText(50, 0), "Downloading…");
 });
+
+test("progressPercent returns null for negative totals", () => {
+  assert.equal(progressPercent(10, -5), null);
+});
+
+test("bannerMessage omits the current version when null", () => {
+  assert.equal(bannerMessage("1.5.0", null), "MDViewer 1.5.0 is available.");
+});
+
+test("progressText clamps to 100%", () => {
+  assert.equal(progressText(300, 200), "Downloading… 100%");
+});
