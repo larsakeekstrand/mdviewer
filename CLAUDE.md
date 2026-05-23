@@ -135,6 +135,13 @@ icon.svg          — source for icon regeneration
 - **Update check** runs after `init()` on every launch (silent on failure /
   current). The menu entry **MDViewer ▸ Check for Updates…** triggers the same
   function with `silent: false` so it surfaces a native dialog when current.
+- **Auto-update**: `tauri-plugin-updater` (registered in `lib.rs`, capability
+  `updater:default`). The banner's **Update now** downloads the signed
+  `.app.tar.gz` in-process, verifies the minisign signature against
+  `plugins.updater.pubkey`, swaps the bundle, and **Restart now** relaunches via
+  the `restart` command. Because the download is in-process, the new bundle is
+  never quarantined — no `xattr` step on update (unlike the first manual DMG
+  install).
 
 ## Things that took hours and shouldn't again
 
@@ -302,6 +309,16 @@ icon.svg          — source for icon regeneration
     `100vh`/`height:100%` shell to natural flow, so there's no on-screen flash;
     flatten the WHOLE chain (`html, body, .preview-pane, .preview-scroll,
     #preview`), not just `body`.
+- **Auto-update signing key is operational state**: the minisign keypair
+  (`cargo tauri signer generate`) is separate from Apple signing. The public key
+  lives in `tauri.conf.json` `plugins.updater.pubkey`; the private key + password
+  are CI secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+  Lose the private key and existing installs reject all future updates (recovery
+  = new pubkey = forced manual reinstall). Back it up. `latest/download/latest.json`
+  only resolves to the *published* release, so `gh release edit --draft=false` is
+  the auto-update go-live trigger. The updater needs a built `.app` — it does
+  nothing under `cargo run`. Users on ≤1.4.0 (pre-updater) need one last manual
+  DMG hop onto the first updater-enabled release.
 
 ## Build / develop / release
 
@@ -331,6 +348,11 @@ cargo tauri build
    **draft** Release.
 6. `gh release edit v0.x.y --draft=false` to publish.
 
+The release workflow signs the `.app.tar.gz` and attaches `latest.json` when the
+`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are
+set (one-time setup). Publishing the draft (step 6) is what makes the update
+reach existing installs.
+
 ### Icon regeneration
 
 ```sh
@@ -357,11 +379,19 @@ rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon_1024.png
 
 ## Update check internals
 
-- `updates::check()` hits `https://api.github.com/repos/larsakeekstrand/mdviewer/releases/latest`
-  and parses tag_name. `env!("CARGO_PKG_VERSION")` is the baseline.
+- Update detection is `tauri-plugin-updater`'s `check()` (frontend
+  `window.__TAURI__.updater.check()`), which fetches the `latest.json` manifest
+  from `releases/latest/download/latest.json`, compares against
+  `CARGO_PKG_VERSION`, and verifies a minisign signature on download. There is
+  no hand-rolled HTTP probe anymore (the old `updates.rs` + `ureq`/`semver` were
+  removed).
 - Update banner respects `localStorage.mdviewer.update.dismissed_version` —
-  if the user dismissed v0.1.x, the silent startup check stays hidden until
-  a newer version appears. The menu-driven check ignores this dismissal.
+  the silent startup check stays hidden for a dismissed version until a newer
+  one appears. The menu-driven check ignores this dismissal. The banner is a
+  state machine (available → downloading → installed/error); **Update now**
+  calls `downloadAndInstall`, **Restart now** calls the `restart` command
+  (`app.restart()`), and **View release** opens the reconstructed
+  `releases/tag/v<version>` page via `open_url`.
 - `open_url` (Rust) is restricted to `http(s)://` schemes. `open_path` opens an
   existing local path via the macOS `open` command, but **refuses launchable /
   executable types** (`UNSAFE_OPEN_EXTS` in `commands.rs`: `.app`, `.command`,
