@@ -93,7 +93,14 @@ icon.svg          — source for icon regeneration
   existing `save_export` command. Triggered by **File ▸ Export as HTML…**
   (`menu.rs` emits an `export` event with the format). Export errors use the
   transient banner (`showTransientError`), not `showError` (which clears the
-  preview). PDF is a planned second format (see `docs/superpowers/specs/`).
+  preview). PDF reuses the same `exportDocument` light re-render, then calls the
+  native `export_pdf` command (`src-tauri/src/export.rs`, macOS-only):
+  `with_webview` → `WKWebView.printOperationWithPrintInfo` with a save-to-file
+  `NSPrintInfo` and the print/progress panels suppressed (objc2 0.3 bindings) —
+  WebKit's paginated print engine written straight to the dialog-chosen path.
+  The `@media print` block in `styles.css` hides the app chrome and reflows the
+  preview; because the native print renders through the print pipeline, those
+  rules apply during capture and never flash on screen.
 - **`postRender()`**: single seam that runs after every morphdom patch —
   `annotateLinks` → `resolveImages` → `addCopyButtons` → `renderMath` →
   `renderMermaid`. Order matters: math/mermaid change element heights and
@@ -271,6 +278,30 @@ icon.svg          — source for icon regeneration
   block so its rules apply unconditionally. KaTeX fonts must be inlined as
   `data:` URLs too, or the `.html` references font files that don't travel with
   it.
+- **PDF export is native objc2 FFI** (`export.rs`), and the print invocation is
+  the load-bearing part:
+  - `WKWebView` print rendering is **asynchronous**. `[op runOperation]` captures
+    before it finishes and produces a giant pile of BLANK pages (we shipped a
+    230 MB / ~889k-page un-openable PDF this way). Use
+    `runOperationModalForWindow:delegate:didRunSelector:contextInfo:` instead
+    (with panels off it shows no UI; a nil delegate is fine), and set
+    `op.view().setFrame(paperSize)` first — without the frame it blanks/crashes.
+    (See Apple DTS forum thread 705138 / WebKit bug 151386.)
+  - That makes the print **async on the main runloop**, so `export_pdf` must be
+    an **async** command (runs off-main) that does NOT block the main thread:
+    the `with_webview` closure only *starts* the print; completion is detected by
+    polling the output file for a trailing `%%EOF` (which also gates the
+    frontend's view-restore until capture is done). A sync command blocking on
+    the closure's result would deadlock.
+  - `printOperationWithPrintInfo` (paginated, save disposition via
+    `NSPrintSaveJob` + `NSPrintJobSavingURL`), NOT `createPDF` (screen media,
+    captures chrome, one oversized page).
+  - objc2 crates are pinned to the 0.3 framework generation Tauri 2.11 uses
+    (core `objc2` is 0.6); mismatched versions break the `inner()`-pointer cast.
+  - `@media print` (not a screen class) hides the chrome and flattens the app's
+    `100vh`/`height:100%` shell to natural flow, so there's no on-screen flash;
+    flatten the WHOLE chain (`html, body, .preview-pane, .preview-scroll,
+    #preview`), not just `body`.
 
 ## Build / develop / release
 

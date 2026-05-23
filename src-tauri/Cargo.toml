@@ -42,6 +42,20 @@ semver = "1"
 # Decode PNG export payloads from the frontend (canvas → base64 → bytes)
 base64 = "0.22"
 
+# macOS-only: native WKWebView print-to-PDF (paginated, silent save).
+# objc2 0.6 core with the 0.3 framework wrappers Tauri 2.11 uses internally.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSDictionary"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSPrintInfo",
+    "NSPrintOperation",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "objc2-app-kit"] }
+
 [profile.release]
 opt-level = "s"
 lto = true

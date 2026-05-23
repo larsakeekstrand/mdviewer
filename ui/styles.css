@@ -831,3 +831,55 @@ body {
     color: #ffffff;
   }
 }
+
+/* Print / PDF export: WKWebView.printOperationWithPrintInfo renders through the
+   print pipeline, so these rules apply during PDF capture (and never on screen).
+   Hide the app chrome and let the preview flow across pages. */
+@media print {
+  #update-banner,
+  #sidebar,
+  #splitter,
+  #tab-bar,
+  #find-bar,
+  #task-error-banner,
+  .export-btn-group,
+  .copy-btn {
+    display: none !important;
+  }
+
+  /* Flatten the whole viewport/scroll chain to natural document flow. The app
+     uses html/body { height: 100% } + body { height: 100vh } + a flex scroll
+     container; WKWebView's print engine mis-resolves that height chain into an
+     unbounded "document height", tiling endless blank pages. Resetting height/
+     min-height/overflow/position on the entire chain (html included) makes the
+     print paginate the real content height. */
+  html,
+  body,
+  .preview-pane,
+  .preview-scroll,
+  #preview {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+
+  /* Avoid splitting atomic blocks across page boundaries. */
+  pre,
+  table,
+  img,
+  pre.mermaid,
+  .katex-display {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 16mm;
+  }
+}

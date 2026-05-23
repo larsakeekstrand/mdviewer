@@ -1,4 +1,5 @@
 mod commands;
+mod export;
 mod git;
 mod markdown;
 mod menu;
@@ -58,6 +59,7 @@ pub fn run(startup: Startup) {
             commands::open_url,
             commands::open_path,
             commands::save_export,
+            export::export_pdf,
             commands::toggle_task,
             commands::frontend_ready,
             commands::remember_folder,

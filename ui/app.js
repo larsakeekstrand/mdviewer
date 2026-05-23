@@ -856,8 +856,11 @@ async function exportDocument(format, path) {
 
     if (format === "html") {
       await exportHtml(t, path);
+    } else if (format === "pdf") {
+      // The native print uses WebKit's print pipeline, so the @media print
+      // stylesheet (chrome hidden, preview reflowed) applies during capture.
+      await invoke("export_pdf", { path });
     }
-    // PDF is Plan 2.
   } catch (e) {
     console.error("export failed", e);
     showTransientError("Export failed: " + e);
