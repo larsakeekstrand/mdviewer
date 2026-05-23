@@ -4,6 +4,7 @@ mod markdown;
 mod menu;
 mod open_files;
 mod recent;
+mod tasklist;
 mod tree;
 mod updates;
 mod watcher;
@@ -29,6 +30,9 @@ pub struct AppState {
     pub initial_file: Option<PathBuf>,
     pub watcher: Mutex<watcher::WatcherSlot>,
     pub opens: Mutex<PendingOpens>,
+    /// Serializes task-list write-backs. Held only for the read-verify-write
+    /// critical section so two rapid clicks can't interleave reads.
+    pub tasklist_lock: Mutex<()>,
 }
 
 pub fn run(startup: Startup) {
@@ -37,6 +41,7 @@ pub fn run(startup: Startup) {
         initial_file: startup.initial_file,
         watcher: Mutex::new(watcher::WatcherSlot::default()),
         opens: Mutex::new(PendingOpens::default()),
+        tasklist_lock: Mutex::new(()),
     };
 
     let app = tauri::Builder::default()
@@ -53,6 +58,7 @@ pub fn run(startup: Startup) {
             commands::open_url,
             commands::open_path,
             commands::save_export,
+            commands::toggle_task,
             commands::frontend_ready,
             commands::remember_folder,
         ])

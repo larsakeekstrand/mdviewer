@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::{git, markdown, recent, tree, updates, AppState};
+use crate::{git, markdown, recent, tasklist, tree, updates, AppState};
 
 #[derive(Serialize)]
 pub struct InitialState {
@@ -199,6 +199,80 @@ pub fn save_export(path: String, data: String, base64_encoded: bool) -> Result<(
         data.into_bytes()
     };
     std::fs::write(&path, bytes).map_err(|e| format!("failed to write '{path}': {e}"))
+}
+
+/// Toggle a GFM task-list checkbox at the given (1-indexed) line.
+///
+/// `expected_current` is the state the frontend believes the box is in
+/// BEFORE the click. If the file's actual state diverges, the command
+/// refuses to write — typically because the file changed on disk between
+/// render and click. A soft "already in requested state" is reported as
+/// success (covers stale watcher-driven re-renders racing a click).
+#[tauri::command]
+pub fn toggle_task(
+    state: State<'_, AppState>,
+    path: String,
+    line: usize,
+    new_state: bool,
+    expected_current: bool,
+) -> Result<(), String> {
+    let _guard = state
+        .tasklist_lock
+        .lock()
+        .map_err(|_| "tasklist mutex poisoned".to_string())?;
+
+    // The toggle is well-defined: original_state == !new_state. If the
+    // caller's expectation diverges from that invariant, something is
+    // already inconsistent — refuse before touching disk.
+    if expected_current == new_state {
+        return Err("file changed on disk".to_string());
+    }
+
+    let p = PathBuf::from(&path);
+    let content =
+        std::fs::read_to_string(&p).map_err(|e| format!("cannot read '{}': {}", p.display(), e))?;
+
+    let next = match tasklist::toggle_checkbox_at_line(&content, line, new_state) {
+        Ok(s) => s,
+        Err(tasklist::ToggleError::AlreadyInRequestedState) => {
+            // Soft no-op: a stale watcher-driven re-render races with a
+            // click on the same checkbox. Reporting success keeps the UI
+            // calm; the file is already in the requested state.
+            return Ok(());
+        }
+        Err(tasklist::ToggleError::LineOutOfRange) => {
+            return Err("line out of range".to_string());
+        }
+        Err(tasklist::ToggleError::NotATaskListLine) => {
+            return Err("file changed on disk".to_string());
+        }
+    };
+
+    write_atomically(&p, next.as_bytes())
+        .map_err(|e| format!("cannot write '{}': {}", p.display(), e))
+}
+
+/// Write `bytes` to `target` via a same-directory temp file + rename so a
+/// crash mid-write can't truncate the user's file. Same-directory is load-
+/// bearing on macOS — a cross-filesystem rename copies and isn't atomic.
+fn write_atomically(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let dir = target.parent().unwrap_or_else(|| Path::new("."));
+    let stem = target
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("tasklist");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(".{stem}.tasklist-{nanos}.tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, target)
 }
 
 #[tauri::command]

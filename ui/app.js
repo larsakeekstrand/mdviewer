@@ -710,11 +710,86 @@ async function postRender(t, { raw = false, forceMermaid = false } = {}) {
   annotateLinks();
   resolveImages(parentDir(t.path));
   addCopyButtons();
+  hookTaskListCheckboxes(t);
   if (!raw) {
     renderMath();
     await renderMermaid({ force: forceMermaid });
     addMermaidExportButtons();
   }
+}
+
+// Keys "path|line" for toggles currently in flight. Prevents wasted IPC
+// from rapid double-clicks and avoids overlapping read-modify-write races
+// on the same checkbox before the watcher delivers the final state.
+const pendingToggles = new Set();
+
+/** comrak's tasklist extension emits <input type="checkbox" disabled> inside
+ *  an <li> with data-sourcepos. Strip disabled and attach a click handler.
+ *  Morphdom may re-add the disabled attribute on the next live reload (the
+ *  incoming HTML has it), but this function runs again from postRender and
+ *  is idempotent via the dataset marker. */
+function hookTaskListCheckboxes(t) {
+  for (const input of preview.querySelectorAll(
+    "li[data-sourcepos] > input[type=checkbox]",
+  )) {
+    input.removeAttribute("disabled");
+    if (input.dataset.mvTaskHook === "1") continue;
+    input.dataset.mvTaskHook = "1";
+    input.addEventListener("click", (ev) => {
+      onTaskCheckboxClick(ev, input, t);
+    });
+  }
+}
+
+async function onTaskCheckboxClick(ev, input, t) {
+  const li = input.closest("li[data-sourcepos]");
+  if (!li) return;
+  const line = parseStartLine(li.getAttribute("data-sourcepos"));
+  if (line == null) return;
+  // input.checked has ALREADY been flipped by the browser to the new state.
+  const newState = input.checked;
+  const expectedCurrent = !newState;
+
+  const key = `${t.path}|${line}`;
+  if (pendingToggles.has(key)) {
+    ev.preventDefault();
+    input.checked = expectedCurrent;
+    return;
+  }
+  pendingToggles.add(key);
+  try {
+    await invoke("toggle_task", {
+      path: t.path,
+      line,
+      newState,
+      expectedCurrent,
+    });
+    // Success: file watcher fires file-changed and re-renders. The browser-
+    // flipped state already matches what's now on disk so there's no flicker.
+  } catch (e) {
+    console.error("toggle_task failed", e);
+    input.checked = expectedCurrent;
+    showTaskError(String(e));
+  } finally {
+    pendingToggles.delete(key);
+  }
+}
+
+let taskErrorTimer = null;
+function showTaskError(msg) {
+  let banner = document.getElementById("task-error-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "task-error-banner";
+    banner.className = "task-error-banner";
+    document.body.appendChild(banner);
+  }
+  banner.textContent = msg;
+  banner.hidden = false;
+  if (taskErrorTimer) clearTimeout(taskErrorTimer);
+  taskErrorTimer = setTimeout(() => {
+    banner.hidden = true;
+  }, 3000);
 }
 
 /** Add hover-revealed SVG / PNG export buttons to each rendered mermaid block.

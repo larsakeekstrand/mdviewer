@@ -135,8 +135,7 @@ mod tests {
     fn inline_math_emits_math_span() {
         let html = render_markdown("Pythagoras: $a^2 + b^2 = c^2$.\n", "light");
         assert!(
-            html.contains(r#"data-math-style="inline""#)
-                && html.contains("a^2 + b^2 = c^2"),
+            html.contains(r#"data-math-style="inline""#) && html.contains("a^2 + b^2 = c^2"),
             "expected inline math span, got: {html}"
         );
     }

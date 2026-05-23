@@ -568,6 +568,35 @@ body {
   border-color: rgba(80, 200, 120, 0.45);
 }
 
+/* ---- Interactive task-list checkboxes ---- */
+
+.markdown-body li > input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.markdown-body li > input[type="checkbox"]:focus-visible {
+  outline: 2px solid #5599ff;
+  outline-offset: 1px;
+}
+
+/* Transient error banner for failed task toggles (file changed on disk,
+   write failed, etc.). Positioned fixed-top so it's visible regardless of
+   scroll position; auto-hidden by showTaskError after 3 s. */
+.task-error-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99998;
+  max-width: 480px;
+  padding: 8px 14px;
+  background: #cf222e;
+  color: #fff;
+  font-size: 13px;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
 /* ---- KaTeX math ---- */
 
 /* Display math: comrak wraps $$..$$ as <p><span data-math-style="display">…</span></p>.

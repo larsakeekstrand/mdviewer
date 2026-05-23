@@ -87,6 +87,15 @@ icon.svg          — source for icon regeneration
   `annotateLinks` → `resolveImages` → `addCopyButtons` → `renderMath` →
   `renderMermaid`. Order matters: math/mermaid change element heights and
   must run before `restoreAnchor`. New post-render hooks go here.
+- **Interactive task lists**: `commands::toggle_task` (Rust) toggles a `[ ]`
+  / `[x]` checkbox at a sourcepos-derived line under a process-wide
+  `tasklist_lock` mutex. The pure rewrite lives in `tasklist.rs` and is
+  unit-tested without I/O. Atomic write via temp-file + rename in the same
+  directory. The frontend (`hookTaskListCheckboxes`) strips comrak's
+  `disabled` attribute, attaches click handlers, and gates concurrent
+  clicks with a `pendingToggles` set keyed on `${path}|${line}`. The
+  watcher → live-reload path delivers the final on-screen state; the
+  optimistic browser-flip of the checkbox means there's no flicker.
 - **File associations / open from Finder**: `tauri.conf.json`
   `bundle.fileAssociations` declares the markdown extensions
   (`CFBundleDocumentTypes`, Viewer role) so MDViewer is selectable as the
@@ -170,6 +179,30 @@ icon.svg          — source for icon regeneration
     `blob:` to img-src would also work but unnecessarily widens the CSP.
   - PNG canvas is filled white before `drawImage` — transparent PNGs render
     against black/checker in many viewers, making the diagram unreadable.
+- **Task list write-back**:
+  - Comrak's `data-sourcepos` is the ONLY reliable way to map a clicked
+    checkbox back to a source line. Walking the input's text content or
+    sibling positions doesn't survive embedded formatting (`**bold**`,
+    nested inline code, etc.).
+  - The toggle command MUST be `read → verify → write`, not blind write.
+    The verify step rejects when the file changed on disk between render
+    and click. Without it, a stale click after an external edit silently
+    overwrites the user's change.
+  - Atomic write via tempfile + `std::fs::rename` in the same directory
+    (a different directory crosses filesystems on macOS and rename loses
+    atomicity). Filename is `.<stem>.tasklist-<nanos>.tmp` so it's both
+    hidden and unmistakably temporary.
+  - Watcher feedback loop is intentional: our write fires `file-changed`,
+    the frontend re-renders, the checkbox visually matches what we wrote.
+    The 200 ms watcher debounce smooths multiple rapid writes into one
+    re-render so the UI doesn't thrash.
+  - Editor conflict: if VS Code (or any editor) has the file open, its
+    "file changed on disk" prompt fires on every toggle. Not fixable from
+    our side; users with always-open editors should know.
+  - `pendingToggles` set in the frontend AND the `tasklist_lock` mutex in
+    the backend BOTH matter: the set prevents wasted IPC for rapid double-
+    clicks; the mutex prevents two distinct clicks (on different
+    checkboxes) from racing each other's read-modify-write.
 - **Content-Security-Policy** lives in `tauri.conf.json` `app.security.csp`
   (must NOT be `null` — that disables it). `script-src 'self'` is the
   load-bearing defense: the app ships no inline `<script>` or `on*=` handlers,
