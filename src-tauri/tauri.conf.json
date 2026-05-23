@@ -30,6 +30,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "fileAssociations": [
       {
@@ -47,6 +48,14 @@
     ],
     "macOS": {
       "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_GENERATED_PUBKEY",
+      "endpoints": [
+        "https://github.com/larsakeekstrand/mdviewer/releases/latest/download/latest.json"
+      ]
     }
   }
 }

@@ -21,6 +21,7 @@ tauri-build = { version = "2.6", features = [] }
 [dependencies]
 tauri = { version = "2.11", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -34,10 +35,6 @@ notify-debouncer-full = "0.7"
 
 # Gitignore-aware directory walking
 ignore = "0.4"
-
-# Update check (GitHub releases API + version comparison)
-ureq = { version = "3", features = ["json"] }
-semver = "1"
 
 # Decode PNG export payloads from the frontend (canvas → base64 → bytes)
 base64 = "0.22"

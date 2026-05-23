@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::{git, markdown, recent, tasklist, tree, updates, AppState};
+use crate::{git, markdown, recent, tasklist, tree, AppState};
 
 #[derive(Serialize)]
 pub struct InitialState {
@@ -76,8 +76,8 @@ pub fn read_source(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn check_for_updates() -> Result<updates::UpdateInfo, String> {
-    updates::check()
+pub fn restart(app: AppHandle) {
+    app.restart();
 }
 
 #[tauri::command]

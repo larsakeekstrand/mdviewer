@@ -7,7 +7,6 @@ mod open_files;
 mod recent;
 mod tasklist;
 mod tree;
-mod updates;
 mod watcher;
 
 use std::path::PathBuf;
@@ -47,6 +46,7 @@ pub fn run(startup: Startup) {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_initial_state,
@@ -55,7 +55,7 @@ pub fn run(startup: Startup) {
             commands::render_file,
             commands::open_file,
             commands::read_source,
-            commands::check_for_updates,
+            commands::restart,
             commands::open_url,
             commands::open_path,
             commands::save_export,

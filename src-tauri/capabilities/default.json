@@ -8,6 +8,7 @@
     "core:window:default",
     "core:event:default",
     "core:webview:default",
-    "dialog:default"
+    "dialog:default",
+    "updater:default"
   ]
 }
