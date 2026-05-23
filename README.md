@@ -10,7 +10,13 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 ## Features
 
 - VS Code–style file tree (lazy expansion, respects `.gitignore`, hides dotfiles)
+- **Git status decoration** — `M` / `A` / `U` / `D` badges on modified, added, untracked, and deleted files when the folder is a git repo, with directory roll-up
 - GitHub-flavored markdown rendering with syntax-highlighted code blocks
+- **Mermaid diagrams** rendered inline, with hover-revealed **SVG / PNG export** buttons on each diagram (Retina-quality PNG with white background)
+- **LaTeX math** via KaTeX — inline `$…$` and display `$$…$$`, with the strict GFM delimiter rules (so `$5 and $10` stays as text)
+- **Copy button** on every fenced code block (hover to reveal)
+- **Interactive task lists** — click a `- [ ]` / `- [x]` checkbox in the rendered view and the change is written back to the source file atomically
+- **In-document find** (⌘F) with case-sensitive and whole-word toggles, match count, and next/previous navigation
 - Live reload when the open file changes on disk
 - Tabs with VS Code–style sticky/preview behavior (single-click replaces preview, double-click sticks)
 - Per-tab raw / rendered toggle
