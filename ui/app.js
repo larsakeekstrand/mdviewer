@@ -682,15 +682,62 @@ async function renderActive(
     },
   });
 
-  annotateLinks();
-  resolveImages(parentDir(t.path));
-
-  if (!result.raw) await renderMermaid({ force: forceMermaid });
+  await postRender(t, { raw: result.raw, forceMermaid });
 
   if (anchor) restoreAnchor(anchor);
   else previewScroll.scrollTop = 0;
 
   if (findOpen()) runFind({ keepCurrent: true, scroll: false });
+}
+
+/* ---- Post-render hooks ---- */
+
+/** Runs after each morphdom patch. New hooks (KaTeX, etc.) go here so the
+ *  call site in renderActive stays one line and the ordering — link
+ *  annotation, image resolution, copy buttons, then diagram rendering which
+ *  changes element heights — lives in one place. */
+async function postRender(t, { raw = false, forceMermaid = false } = {}) {
+  annotateLinks();
+  resolveImages(parentDir(t.path));
+  addCopyButtons();
+  if (!raw) await renderMermaid({ force: forceMermaid });
+}
+
+/** Attach a hover-revealed "Copy" button to every code block. Idempotent:
+ *  morphdom strips the button on each render (it isn't in the incoming HTML),
+ *  so we just re-attach. Mermaid blocks are skipped — their textContent is
+ *  source code, but the user already sees a rendered diagram and would expect
+ *  a different affordance there. */
+function addCopyButtons() {
+  for (const pre of preview.querySelectorAll("pre")) {
+    if (pre.classList.contains("mermaid")) continue;
+    if (pre.querySelector(":scope > .copy-btn")) continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-btn";
+    btn.setAttribute("aria-label", "Copy code");
+    btn.textContent = "Copy";
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      onCopyButtonClick(btn, pre);
+    });
+    pre.appendChild(btn);
+  }
+}
+
+async function onCopyButtonClick(btn, pre) {
+  const code = pre.querySelector(":scope > code");
+  // textContent gives the raw source: syntect's <span> tokens flatten back to
+  // the original characters, and the newlines between them are real text nodes.
+  const text = (code || pre).textContent || "";
+  await copyText(text);
+  btn.textContent = "Copied";
+  btn.classList.add("ok");
+  setTimeout(() => {
+    btn.textContent = "Copy";
+    btn.classList.remove("ok");
+  }, 1200);
 }
 
 /* ---- Link handling ---- */

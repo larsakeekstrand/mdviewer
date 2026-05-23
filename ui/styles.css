@@ -469,13 +469,58 @@ body {
   font-size: 12.5px;
 }
 
-/* syntect emits inline styles for the active theme; ensure code blocks fit. */
+/* syntect emits inline styles for the active theme; ensure code blocks fit.
+   position: relative anchors the in-block .copy-btn below. */
 .markdown-body pre {
   overflow-x: auto;
+  position: relative;
 }
 
 .markdown-body code {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* ---- Copy button on code blocks ---- */
+
+.markdown-body pre > .copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    sans-serif;
+  color: var(--fg);
+  background: rgba(127, 127, 127, 0.14);
+  border: 1px solid rgba(127, 127, 127, 0.22);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  user-select: none;
+}
+
+.markdown-body pre:hover > .copy-btn,
+.markdown-body pre > .copy-btn:focus-visible {
+  opacity: 1;
+}
+
+.markdown-body pre > .copy-btn:hover {
+  background: rgba(127, 127, 127, 0.24);
+}
+
+.markdown-body pre > .copy-btn.ok {
+  background: rgba(80, 200, 120, 0.22);
+  border-color: rgba(80, 200, 120, 0.45);
+  opacity: 1;
+}
+
+/* Mermaid blocks are skipped by addCopyButtons(); belt-and-suspenders rule
+   keeps a stray button from showing if that ever changes. */
+.markdown-body pre.mermaid > .copy-btn {
+  display: none;
 }
 
 /* Mermaid diagrams: strip the code-block chrome and center the SVG. */
