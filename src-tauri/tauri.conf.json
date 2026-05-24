@@ -52,7 +52,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_GENERATED_PUBKEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI0NjE1QjEwNjFCQUQ5NzcKUldSMzJicGhFRnRodEhBMms1MHowemljVnZYOG15VHphcEpnRHlybm1KSzJ3U2ZEWERPY2pLRloK",
       "endpoints": [
         "https://github.com/larsakeekstrand/mdviewer/releases/latest/download/latest.json"
       ]
