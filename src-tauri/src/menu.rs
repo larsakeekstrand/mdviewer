@@ -27,6 +27,9 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "check-updates" => {
                 let _ = app.emit("menu-check-updates", ());
             }
+            "install-cli" => {
+                let _ = app.emit("menu-install-cli", ());
+            }
             "github-source" => {
                 let _ = crate::commands::open_url(SOURCE_URL.to_string());
             }
@@ -80,6 +83,8 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
 
     let check_updates =
         MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+    let install_cli =
+        MenuItemBuilder::with_id("install-cli", "Install Command Line Tool…").build(app)?;
     let github_source =
         MenuItemBuilder::with_id("github-source", "View Source on GitHub").build(app)?;
 
@@ -87,6 +92,7 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .about(None)
         .item(&github_source)
         .item(&check_updates)
+        .item(&install_cli)
         .separator()
         .item(&PredefinedMenuItem::hide(app, None)?)
         .item(&PredefinedMenuItem::hide_others(app, None)?)

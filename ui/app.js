@@ -201,6 +201,10 @@ async function init() {
     await checkForUpdates({ silent: false });
   });
 
+  await listen("menu-install-cli", async () => {
+    await installCli();
+  });
+
   window
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", async () => {
@@ -1858,6 +1862,25 @@ async function checkForUpdates({ silent = true } = {}) {
       kind: "info",
     });
   }
+}
+
+async function installCli() {
+  let outcome;
+  try {
+    outcome = await invoke("install_cli");
+  } catch (e) {
+    await dialogApi.message("Couldn't install the command line tool.\n\n" + e, {
+      title: "MDViewer",
+      kind: "error",
+    });
+    return;
+  }
+  if (outcome === "cancelled") return;
+  const msg =
+    outcome === "already_installed"
+      ? "The mdviewer command line tool is already installed."
+      : "Installed. You can now run mdviewer from a terminal.";
+  await dialogApi.message(msg, { title: "MDViewer", kind: "info" });
 }
 
 function showUpdateAvailable(update) {
