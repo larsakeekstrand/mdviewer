@@ -17,14 +17,17 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - **Copy button** on every fenced code block (hover to reveal)
 - **Interactive task lists** — click a `- [ ]` / `- [x]` checkbox in the rendered view and the change is written back to the source file atomically
 - **In-document find** (⌘F) with case-sensitive and whole-word toggles, match count, and next/previous navigation
+- **Document export** — export the rendered page to **self-contained HTML** (CSS, fonts, and local images inlined; always light-themed) or **PDF** (native WebKit print pipeline)
 - Live reload when the open file changes on disk
 - Tabs with VS Code–style sticky/preview behavior (single-click replaces preview, double-click sticks)
+- **Session restore** — the last folder you opened and your open tabs are reopened on the next launch
 - Per-tab raw / rendered toggle
+- **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
 - File menu with **Open File…**, **Open Folder…**, and **Open Recent** (persisted)
 - Custom right-click context menu (Copy / Copy Source / Show Raw·Rendered)
 - Auto light + dark theme via OS `prefers-color-scheme`
 - CLI: `mdviewer [file-or-directory]`
-- Update check on startup: if a newer release exists on GitHub, a dismissible banner offers a one-click link to the release page
+- **One-click auto-update** — when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app
 
 ## Install on macOS
 
@@ -50,11 +53,14 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
 
 > The older right-click → Open workaround that some guides mention no longer works on Sequoia+ for browser-downloaded apps. The `xattr` command is the supported way to bypass Gatekeeper for software you trust.
 
+> You only need the `xattr` step for this initial manual install. Later releases arrive through the in-app **one-click auto-update** banner, which downloads and swaps the bundle in-process — those updates are never quarantined, so you won't have to clear the flag again.
+
 ## Usage
 
 ### Launching
 
-- **From Applications**: double-click `mdviewer`. The tree is rooted at your home directory; preview is empty until you pick a file.
+- **From Applications**: double-click `mdviewer`. The tree is rooted at the last folder you had open (the current working directory on a first-ever launch), and the tabs from your previous session are reopened.
+- **By double-clicking a `.md` file in Finder**: once MDViewer is set as the default app for Markdown (Finder ▸ *Get Info* ▸ *Open With* ▸ select MDViewer ▸ *Change All…*), double-clicking any `.md` file opens it in MDViewer with the tree rooted at the file's folder.
 - **From the command line**: pass a file or a directory. Files open rendered with the tree rooted at the file's parent; directories just root the tree there.
 
   ```sh
@@ -85,10 +91,12 @@ Each tab can be viewed rendered (default) or raw. Toggle with the **Raw** button
 
 ### Menus
 
+- **MDViewer ▸ Check for Updates…** — manually checks GitHub for a newer release (the same check also runs silently on startup). **View Source on GitHub** opens the repository.
 - **File ▸ Open File…** (⌘O) — opens any markdown file. The tree stays where it is; the file opens as a sticky tab.
 - **File ▸ Open Folder…** (⇧⌘O) — re-roots the tree at any folder.
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
-- **Actions** — Copy (⌘C), Copy Source, Toggle Raw.
+- **File ▸ Export as HTML…** / **Export as PDF…** — exports the active tab's rendered document. HTML is fully self-contained; both are always rendered light-themed regardless of your OS appearance.
+- **Actions** — Copy (⌘C), Find… (⌘F), Copy Source, Toggle Raw.
 
 ### Right-click
 

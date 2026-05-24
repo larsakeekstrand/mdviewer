@@ -339,18 +339,22 @@ cargo tauri build
 
 ### Cutting a release
 
-1. Bump version in `src-tauri/Cargo.toml` AND `src-tauri/tauri.conf.json`.
-2. `cd src-tauri && cargo update -p mdviewer` to refresh `Cargo.lock`.
-3. Commit (`Bump to 0.x.y` or include the user-facing change).
-4. `git tag v0.x.y && git push && git push origin v0.x.y`.
-5. Release workflow auto-builds aarch64, generates the changelog from
+1. Update `README.md` to cover any user-facing features added since the last
+   release (Features list, Usage, Menus), and fix any now-stale claims. The
+   README is the user-facing source of truth and drifts silently otherwise —
+   every release must leave it accurate.
+2. Bump version in `src-tauri/Cargo.toml` AND `src-tauri/tauri.conf.json`.
+3. `cd src-tauri && cargo update -p mdviewer` to refresh `Cargo.lock`.
+4. Commit (`Bump to 0.x.y` or include the user-facing change).
+5. `git tag v0.x.y && git push && git push origin v0.x.y`.
+6. Release workflow auto-builds aarch64, generates the changelog from
    commits since the previous tag, attaches `.dmg` + `.app.tar.gz` to a
    **draft** Release.
-6. `gh release edit v0.x.y --draft=false` to publish.
+7. `gh release edit v0.x.y --draft=false` to publish.
 
 The release workflow signs the `.app.tar.gz` and attaches `latest.json` when the
 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are
-set (one-time setup). Publishing the draft (step 6) is what makes the update
+set (one-time setup). Publishing the draft (step 7) is what makes the update
 reach existing installs.
 
 ### Icon regeneration
