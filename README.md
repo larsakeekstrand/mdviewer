@@ -27,6 +27,7 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - Custom right-click context menu (Copy / Copy Source / Show Raw·Rendered)
 - Auto light + dark theme via OS `prefers-color-scheme`
 - CLI: `mdviewer [file-or-directory]`
+- **Install Command Line Tool** — one menu click symlinks `mdviewer` into `/usr/local/bin` so you can launch it from any terminal
 - **One-click auto-update** — when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app
 
 ## Install on macOS
@@ -69,7 +70,7 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
   mdviewer                       # tree at current working directory
   ```
 
-  (If `mdviewer` is not on `$PATH`, invoke `/Applications/MDViewer.app/Contents/MacOS/MDViewer` directly or symlink it into `/usr/local/bin/mdviewer`.)
+  (To run `mdviewer` from a terminal, use **MDViewer ▸ Install Command Line Tool…** — it symlinks the app's binary into `/usr/local/bin`, which is already on your `$PATH`, prompting for your password if that directory needs admin rights. To do it by hand instead: `sudo ln -s /Applications/MDViewer.app/Contents/MacOS/mdviewer /usr/local/bin/mdviewer`.)
 
 ### File tree
 
@@ -92,6 +93,7 @@ Each tab can be viewed rendered (default) or raw. Toggle with the **Raw** button
 ### Menus
 
 - **MDViewer ▸ Check for Updates…** — manually checks GitHub for a newer release (the same check also runs silently on startup). **View Source on GitHub** opens the repository.
+- **MDViewer ▸ Install Command Line Tool…** — symlinks `mdviewer` into `/usr/local/bin` so you can launch it from a terminal (prompts for your password if the directory needs admin rights).
 - **File ▸ Open File…** (⌘O) — opens any markdown file. The tree stays where it is; the file opens as a sticky tab.
 - **File ▸ Open Folder…** (⇧⌘O) — re-roots the tree at any folder.
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
