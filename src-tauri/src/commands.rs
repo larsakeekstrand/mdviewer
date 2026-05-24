@@ -335,7 +335,7 @@ enum InstallAction {
     RefuseNonSymlink,
 }
 
-/// Pure decision: maps the on-disk state to the action. Unit-tested.
+/// Pure decision: maps the on-disk state to the action.
 fn decide(state: LinkState) -> InstallAction {
     match state {
         LinkState::Absent | LinkState::SymlinkElsewhere => InstallAction::Create,
@@ -373,8 +373,9 @@ fn classify_link(link: &Path, target: &Path) -> LinkState {
 /// password prompt; escalates only on a permission or missing-directory error.
 fn create_cli_symlink(target: &Path, link: &Path) -> Result<InstallOutcome, String> {
     if link.is_symlink() {
-        // Best-effort: on a root-owned dir this fails and we fall through to
-        // the elevated `ln -sf`, which replaces the stale link itself.
+        // Best-effort: a root-owned dir will reject this, and the following
+        // symlink() call will also get PermissionDenied, triggering the admin
+        // escalation path which replaces the stale link via `ln -sf`.
         let _ = std::fs::remove_file(link);
     }
     match std::os::unix::fs::symlink(target, link) {
@@ -416,8 +417,10 @@ fn install_with_admin(target: &Path) -> Result<InstallOutcome, String> {
         return Ok(InstallOutcome::Installed);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // AppleScript reports a dismissed auth dialog as error -128 ("User canceled").
-    if stderr.contains("-128") {
+    // AppleScript reports a dismissed auth dialog as error -128, written
+    // parenthesized (e.g. "User canceled. (-128)"); match the parens so a
+    // code like -1280 can't false-positive.
+    if stderr.contains("(-128)") {
         return Ok(InstallOutcome::Cancelled);
     }
     Err(format!(
