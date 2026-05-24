@@ -9,6 +9,8 @@ use crate::{git, markdown, recent, tasklist, tree, AppState};
 pub struct InitialState {
     pub tree_root: String,
     pub initial_file: Option<String>,
+    pub restore_tabs: Vec<String>,
+    pub active_tab: Option<usize>,
 }
 
 #[tauri::command]
@@ -24,12 +26,19 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialS
             .filter(|p| p.is_dir())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
     };
+    let (saved_tabs, saved_active) = recent::load_session(&app);
+    let (tabs, active_tab) = recent::restore_session(saved_tabs, saved_active, |p| p.is_file());
     InitialState {
         tree_root: tree_root.to_string_lossy().into_owned(),
         initial_file: state
             .initial_file
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned()),
+        restore_tabs: tabs
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+        active_tab,
     }
 }
 
@@ -295,6 +304,12 @@ pub fn remember_folder(app: AppHandle, path: String) {
     if p.is_dir() {
         recent::save_last(&app, &p);
     }
+}
+
+#[tauri::command]
+pub fn save_session(app: AppHandle, tabs: Vec<String>, active: Option<usize>) {
+    let paths: Vec<PathBuf> = tabs.into_iter().map(PathBuf::from).collect();
+    recent::save_session(&app, &paths, active);
 }
 
 #[cfg(test)]

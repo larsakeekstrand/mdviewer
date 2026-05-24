@@ -63,6 +63,7 @@ pub fn run(startup: Startup) {
             commands::toggle_task,
             commands::frontend_ready,
             commands::remember_folder,
+            commands::save_session,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.

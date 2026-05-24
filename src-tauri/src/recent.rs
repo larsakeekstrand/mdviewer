@@ -11,6 +11,10 @@ struct Store {
     folders: Vec<PathBuf>,
     #[serde(default)]
     last_folder: Option<PathBuf>,
+    #[serde(default)]
+    open_tabs: Vec<PathBuf>,
+    #[serde(default)]
+    active_tab: Option<usize>,
 }
 
 impl Store {
@@ -86,6 +90,37 @@ pub fn save_last(app: &AppHandle, folder: &Path) {
     write_store(app, &store);
 }
 
+/// Returns the persisted open-tab paths and the active index, unfiltered.
+pub fn load_session(app: &AppHandle) -> (Vec<PathBuf>, Option<usize>) {
+    let store = load_store(app);
+    (store.open_tabs, store.active_tab)
+}
+
+/// Persists the open-tab paths and active index, preserving `folders` and
+/// `last_folder`. Paths are stored as-is (NOT canonicalized) so they keep
+/// string-identity with the frontend's live tab model.
+pub fn save_session(app: &AppHandle, tabs: &[PathBuf], active: Option<usize>) {
+    let mut store = load_store(app);
+    store.open_tabs = tabs.to_vec();
+    store.active_tab = active;
+    write_store(app, &store);
+}
+
+/// Filters `tabs` to the paths satisfying `exists` (order preserved) and remaps
+/// `active` by tracking the active path: the result's active index is that
+/// path's position in the filtered list, or `None` if the active file is gone
+/// or the list is empty. Pure — no I/O, so it is unit-testable.
+pub fn restore_session(
+    tabs: Vec<PathBuf>,
+    active: Option<usize>,
+    exists: impl Fn(&Path) -> bool,
+) -> (Vec<PathBuf>, Option<usize>) {
+    let active_path = active.and_then(|i| tabs.get(i)).cloned();
+    let kept: Vec<PathBuf> = tabs.into_iter().filter(|p| exists(p)).collect();
+    let new_active = active_path.and_then(|ap| kept.iter().position(|p| *p == ap));
+    (kept, new_active)
+}
+
 /// Replaces `$HOME` with `~` for menu display.
 pub fn display(p: &Path) -> String {
     let s = p.to_string_lossy().into_owned();
@@ -146,5 +181,84 @@ mod tests {
         let back: Store = serde_json::from_str(r#"{"folders":["/a"]}"#).unwrap();
         assert_eq!(back.folders, vec![PathBuf::from("/a")]);
         assert_eq!(back.last_folder, None);
+    }
+
+    #[test]
+    fn store_round_trips_session_fields() {
+        let s = Store {
+            open_tabs: vec![PathBuf::from("/a"), PathBuf::from("/b")],
+            active_tab: Some(1),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let back: Store = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back.open_tabs,
+            vec![PathBuf::from("/a"), PathBuf::from("/b")]
+        );
+        assert_eq!(back.active_tab, Some(1));
+    }
+
+    #[test]
+    fn deserializes_legacy_store_without_session_fields() {
+        let back: Store = serde_json::from_str(r#"{"folders":["/a"],"last_folder":"/x"}"#).unwrap();
+        assert!(back.open_tabs.is_empty());
+        assert_eq!(back.active_tab, None);
+    }
+
+    #[test]
+    fn restore_session_keeps_all_when_all_exist() {
+        let (kept, active) = restore_session(
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/c"),
+            ],
+            Some(1),
+            |_| true,
+        );
+        assert_eq!(
+            kept,
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/c")
+            ]
+        );
+        assert_eq!(active, Some(1));
+    }
+
+    #[test]
+    fn restore_session_drops_missing_and_shifts_active() {
+        // "/a" is gone; active was index 1 ("/b"), which becomes index 0.
+        let (kept, active) = restore_session(
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/c"),
+            ],
+            Some(1),
+            |p| p != Path::new("/a"),
+        );
+        assert_eq!(kept, vec![PathBuf::from("/b"), PathBuf::from("/c")]);
+        assert_eq!(active, Some(0));
+    }
+
+    #[test]
+    fn restore_session_active_file_missing_returns_none() {
+        let (kept, active) = restore_session(
+            vec![PathBuf::from("/a"), PathBuf::from("/b")],
+            Some(1),
+            |p| p != Path::new("/b"),
+        );
+        assert_eq!(kept, vec![PathBuf::from("/a")]);
+        assert_eq!(active, None);
+    }
+
+    #[test]
+    fn restore_session_empty_input_yields_none_active() {
+        let (kept, active) = restore_session(vec![], Some(0), |_| true);
+        assert!(kept.is_empty());
+        assert_eq!(active, None);
     }
 }
