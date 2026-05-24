@@ -261,4 +261,15 @@ mod tests {
         assert!(kept.is_empty());
         assert_eq!(active, None);
     }
+
+    #[test]
+    fn restore_session_out_of_bounds_active_returns_none() {
+        let (kept, active) = restore_session(
+            vec![PathBuf::from("/a"), PathBuf::from("/b")],
+            Some(5),
+            |_| true,
+        );
+        assert_eq!(kept, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(active, None);
+    }
 }
