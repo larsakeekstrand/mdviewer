@@ -49,6 +49,7 @@ const GIT_REFRESH_DEBOUNCE_MS = 200;
 // Tabs model
 const tabs = []; // [{ path, sticky, raw }]
 let activeIdx = -1;
+let restoring = true; // suppress session persistence until init() finishes restoring
 
 function activeTab() {
   return activeIdx >= 0 && activeIdx < tabs.length ? tabs[activeIdx] : null;
@@ -233,8 +234,16 @@ async function init() {
   await renderRoot();
   refreshGitStatus();
 
-  if (initial.initial_file) await openSticky(initial.initial_file);
-  for (const p of pending) await openSticky(p);
+  const plainLaunch = !initial.initial_file && pending.length === 0;
+  if (plainLaunch) {
+    await restoreSession(initial.restore_tabs, initial.active_tab);
+  } else {
+    if (initial.initial_file) await openSticky(initial.initial_file);
+    for (const p of pending) await openSticky(p);
+  }
+
+  restoring = false;
+  persistSession();
 }
 
 /* ---- Git decoration ---- */
@@ -528,6 +537,24 @@ async function openSticky(path) {
   await setActiveTab(tabs.length - 1);
 }
 
+function persistSession() {
+  if (restoring) return;
+  invoke("save_session", {
+    tabs: tabs.map((t) => t.path),
+    active: activeIdx >= 0 ? activeIdx : null,
+  }).catch((e) => console.error("save_session failed", e));
+}
+
+async function restoreSession(paths, active) {
+  for (const p of paths) {
+    tabs.push({ path: p, sticky: true, raw: false });
+  }
+  if (tabs.length === 0) return;
+  const idx =
+    active != null && active >= 0 && active < tabs.length ? active : 0;
+  await setActiveTab(idx);
+}
+
 async function setActiveTab(idx, { forceRender = false } = {}) {
   if (idx < 0 || idx >= tabs.length) {
     activeIdx = -1;
@@ -538,6 +565,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   const same = idx === activeIdx;
   activeIdx = idx;
   renderTabBar();
+  persistSession();
   highlightSelectedByPath(tabs[idx].path);
   try {
     await invoke("open_file", { path: tabs[idx].path });
@@ -561,6 +589,7 @@ function closeTab(idx) {
     activeIdx = -1;
     renderTabBar();
     showEmptyState();
+    persistSession();
     return;
   }
   let next;
