@@ -53,6 +53,7 @@ pub fn run(startup: Startup) {
             commands::list_dir,
             commands::git_status,
             commands::render_file,
+            commands::render_notes,
             commands::open_file,
             commands::read_source,
             commands::restart,

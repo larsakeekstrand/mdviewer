@@ -80,6 +80,12 @@ pub fn render_file(
 }
 
 #[tauri::command]
+pub fn render_notes(source: String, theme: Option<String>) -> Result<String, String> {
+    let theme = theme.as_deref().unwrap_or("light");
+    Ok(markdown::render_markdown(&source, theme))
+}
+
+#[tauri::command]
 pub fn read_source(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("cannot read '{path}': {e}"))
 }
@@ -516,5 +522,12 @@ mod tests {
             decide(LinkState::NonSymlink),
             InstallAction::RefuseNonSymlink
         );
+    }
+
+    #[test]
+    fn render_notes_renders_markdown_to_html() {
+        let html = render_notes("# Hello".to_string(), None).unwrap();
+        assert!(html.contains("<h1"), "expected an h1, got: {html}");
+        assert!(html.contains("Hello"));
     }
 }
