@@ -20,6 +20,7 @@ import {
   nextTheme,
   themeButtonFace,
 } from "./theme.js";
+import { isImagePath } from "./filetype.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -43,6 +44,8 @@ const themeBtn = document.getElementById("toggle-theme");
 const splitter = document.getElementById("splitter");
 
 let treeRoot = null;
+// path → reload counter; bumped on file-changed so the asset: URL cache-busts.
+const imageVersions = new Map();
 let currentTheme = resolveTheme(localStorage.getItem(THEME_KEY), colorScheme());
 // Set as early as the CSP allows (no inline <head> script) to minimize the
 // first-paint flash before the rest of the module runs.
@@ -188,6 +191,9 @@ async function init() {
   await listen("file-changed", async (ev) => {
     const tab = activeTab();
     if (tab && ev.payload === tab.path) {
+      if (isImagePath(tab.path)) {
+        imageVersions.set(tab.path, (imageVersions.get(tab.path) || 0) + 1);
+      }
       await renderActive({ scrollLock: true });
     }
     scheduleGitRefresh();
@@ -630,8 +636,12 @@ function renderTabBar() {
   }
   const t = activeTab();
   if (t) {
-    rawBtn.textContent = t.raw ? "Rendered" : "Raw";
-    rawBtn.setAttribute("aria-pressed", t.raw ? "true" : "false");
+    const image = isImagePath(t.path);
+    rawBtn.hidden = image;
+    if (!image) {
+      rawBtn.textContent = t.raw ? "Rendered" : "Raw";
+      rawBtn.setAttribute("aria-pressed", t.raw ? "true" : "false");
+    }
   }
 }
 
@@ -732,6 +742,10 @@ async function renderActive(
     showEmptyState();
     return;
   }
+  if (isImagePath(t.path)) {
+    renderImage(t, { scrollLock });
+    return;
+  }
   let result;
   try {
     result = await invoke("render_file", {
@@ -795,6 +809,41 @@ async function renderActive(
   else previewScroll.scrollTop = 0;
 
   if (findOpen()) runFind({ keepCurrent: true, scroll: false });
+}
+
+/** Render a standalone image file via the asset protocol, at natural size.
+ *  Preserves scroll only when the same image is re-rendered (live reload),
+ *  not when switching to a different image. */
+function renderImage(t, { scrollLock = true } = {}) {
+  previewEmpty.hidden = true;
+  preview.hidden = false;
+  if (findOpen()) closeFind();
+
+  const base = convertFileSrc(t.path);
+  const existing = preview.querySelector("img");
+  const sameImage =
+    preview.classList.contains("image-view") &&
+    existing &&
+    existing.src.split("?")[0] === base.split("?")[0];
+  const top = sameImage && scrollLock ? previewScroll.scrollTop : 0;
+  const left = sameImage && scrollLock ? previewScroll.scrollLeft : 0;
+
+  preview.className = "image-view";
+
+  const v = imageVersions.get(t.path) || 0;
+  const img = document.createElement("img");
+  img.alt = basename(t.path);
+  img.onerror = () => {
+    const err = document.createElement("div");
+    err.className = "image-error";
+    err.textContent = "Can't display this image.";
+    preview.replaceChildren(err);
+  };
+  img.src = base + (v ? `?v=${v}` : "");
+
+  preview.replaceChildren(img);
+  previewScroll.scrollTop = top;
+  previewScroll.scrollLeft = left;
 }
 
 /* ---- Post-render hooks ---- */
@@ -907,6 +956,10 @@ async function onExport(format) {
   const t = activeTab();
   if (!t) {
     showTransientError("Open a document before exporting.");
+    return;
+  }
+  if (isImagePath(t.path)) {
+    showTransientError("Export is only available for text documents.");
     return;
   }
   const ext = format === "pdf" ? "pdf" : "html";
@@ -1482,6 +1535,15 @@ async function actionCopySource() {
 }
 
 async function runEditAction(name) {
+  const t = activeTab();
+  if (
+    t &&
+    isImagePath(t.path) &&
+    (name === "copy-source" || name === "toggle-raw")
+  ) {
+    showTransientError("Not available for images.");
+    return;
+  }
   switch (name) {
     case "copy":
       await actionCopySelection();

@@ -486,6 +486,21 @@ body {
   max-width: 100%;
 }
 
+/* Standalone image files: render at natural size; .preview-scroll supplies
+   horizontal + vertical scrollbars when the image is larger than the pane. */
+.image-view {
+  padding: 20px;
+}
+
+.image-view img {
+  display: block;
+}
+
+.image-view .image-error {
+  color: var(--sidebar-muted);
+  padding: 20px;
+}
+
 /* Plain-text fallback for non-markdown files */
 .markdown-body pre.plain-text {
   padding: 16px;
