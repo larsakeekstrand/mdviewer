@@ -11,6 +11,7 @@ import {
   releaseUrlFor,
   bannerMessage,
   progressText,
+  extractChangelog,
 } from "./update.js";
 
 // mdviewer frontend
@@ -1801,30 +1802,92 @@ const updateBanner = document.getElementById("update-banner");
 const updateBannerText = document.getElementById("update-banner-text");
 const updateBannerUpdate = document.getElementById("update-banner-update");
 const updateBannerRestart = document.getElementById("update-banner-restart");
-const updateBannerView = document.getElementById("update-banner-view");
+const updateBannerWhatsNew = document.getElementById("update-banner-whatsnew");
 const updateBannerDismiss = document.getElementById("update-banner-dismiss");
+
+const notesModal = document.getElementById("notes-modal");
+const notesDialog = document.getElementById("notes-dialog");
+const notesModalTitle = document.getElementById("notes-modal-title");
+const notesModalBody = document.getElementById("notes-modal-body");
+const notesModalLink = document.getElementById("notes-modal-link");
+const notesModalUpdate = document.getElementById("notes-modal-update");
+const notesModalClose = document.getElementById("notes-modal-close");
+const notesModalX = document.getElementById("notes-modal-x");
+let notesModalTrigger = null;
 
 function setUpdateButtons({
   update = false,
   restart = false,
-  view = false,
+  whatsNew = false,
   dismiss = false,
 } = {}) {
   updateBannerUpdate.hidden = !update;
   updateBannerRestart.hidden = !restart;
-  updateBannerView.hidden = !view;
+  updateBannerWhatsNew.hidden = !whatsNew;
   updateBannerDismiss.hidden = !dismiss;
 }
 
-function openReleasePage(version) {
-  return async () => {
-    try {
-      await invoke("open_url", { url: releaseUrlFor(REPO, version) });
-    } catch (e) {
-      console.error("open_url failed", e);
-    }
+function openNotesModal(update) {
+  notesModalTrigger = document.activeElement;
+  notesModalTitle.textContent = `What's new in ${update.version}`;
+  notesModalLink.href = releaseUrlFor(REPO, update.version);
+
+  notesModalUpdate.onclick = () => {
+    closeNotesModal();
+    runUpdate(update);
   };
+
+  const md = extractChangelog(update.body);
+  if (!md) {
+    notesModalBody.textContent = "No release notes available.";
+    revealNotesModal();
+    return;
+  }
+  notesModalBody.textContent = "Loading…";
+  revealNotesModal();
+  invoke("render_notes", { source: md, theme: currentTheme })
+    .then((html) => {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      notesModalBody.replaceChildren(...doc.body.childNodes);
+    })
+    .catch((e) => {
+      console.error("render_notes failed", e);
+      notesModalBody.textContent = md;
+    });
 }
+
+function revealNotesModal() {
+  notesModal.hidden = false;
+  notesModalX.focus();
+}
+
+function closeNotesModal() {
+  notesModal.hidden = true;
+  if (notesModalTrigger && typeof notesModalTrigger.focus === "function") {
+    notesModalTrigger.focus();
+  }
+  notesModalTrigger = null;
+}
+
+notesModalClose.addEventListener("click", closeNotesModal);
+notesModalX.addEventListener("click", closeNotesModal);
+notesModal.addEventListener("click", (ev) => {
+  if (ev.target === notesModal) closeNotesModal();
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && !notesModal.hidden) closeNotesModal();
+});
+notesDialog.addEventListener("click", (ev) => {
+  const a = ev.target.closest("a[href]");
+  if (!a || !notesDialog.contains(a)) return;
+  ev.preventDefault();
+  const href = a.getAttribute("href");
+  if (href && isExternalUrl(href)) {
+    invoke("open_url", { url: href }).catch((e) =>
+      console.error("open_url failed", e),
+    );
+  }
+});
 
 async function checkForUpdates({ silent = true } = {}) {
   if (updateInProgress) return;
@@ -1888,10 +1951,10 @@ function showUpdateAvailable(update) {
     update.version,
     update.currentVersion,
   );
-  setUpdateButtons({ update: true, view: true, dismiss: true });
+  setUpdateButtons({ update: true, whatsNew: true, dismiss: true });
 
   updateBannerUpdate.onclick = () => runUpdate(update);
-  updateBannerView.onclick = openReleasePage(update.version);
+  updateBannerWhatsNew.onclick = () => openNotesModal(update);
   updateBannerDismiss.onclick = () => {
     try {
       localStorage.setItem(DISMISS_KEY, update.version);
@@ -1928,8 +1991,8 @@ async function runUpdate(update) {
     updateInProgress = false;
     console.error("update failed", e);
     updateBannerText.textContent = "Update failed: " + e;
-    setUpdateButtons({ view: true, dismiss: true });
-    updateBannerView.onclick = openReleasePage(update.version);
+    setUpdateButtons({ whatsNew: true, dismiss: true });
+    updateBannerWhatsNew.onclick = () => openNotesModal(update);
     updateBannerDismiss.onclick = () => {
       updateBanner.hidden = true;
     };
