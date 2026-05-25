@@ -700,10 +700,18 @@ async function applyTheme(theme) {
     await renderActive({ scrollLock: false, forceMermaid: true });
 }
 
+let themeToggling = false;
+
 async function onToggleTheme() {
-  const next = nextTheme(currentTheme);
-  localStorage.setItem(THEME_KEY, next);
-  await applyTheme(next);
+  if (themeToggling) return;
+  themeToggling = true;
+  try {
+    const next = nextTheme(currentTheme);
+    localStorage.setItem(THEME_KEY, next);
+    await applyTheme(next);
+  } finally {
+    themeToggling = false;
+  }
 }
 
 /* ---- Rendering ---- */
