@@ -22,6 +22,7 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - Tabs with VS Code–style sticky/preview behavior (single-click replaces preview, double-click sticks)
 - **Session restore** — the last folder you opened and your open tabs are reopened on the next launch
 - Per-tab raw / rendered toggle
+- **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
 - File menu with **Open File…**, **Open Folder…**, and **Open Recent** (persisted)
 - Custom right-click context menu (Copy / Copy Source / Show Raw·Rendered)
@@ -78,6 +79,7 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
 - **Single-click** a file → opens it in the *preview* tab (italic title). Single-clicking another file replaces it.
 - **Double-click** a file → opens it as a *sticky* tab (regular title) that won't be replaced by future single-clicks.
 - Every file on disk is shown — including dotfiles, entries matched by `.gitignore`, and `node_modules` / `target`.
+- Markdown files render as a preview; image files open as images; anything else is shown as plain text.
 
 ### Tabs
 

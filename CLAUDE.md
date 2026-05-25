@@ -141,6 +141,15 @@ icon.svg          — source for icon regeneration
   `script-src 'self'` forbids an inline `<head>` bootstrap, so `data-theme` is
   set as the first statement of the deferred `app.js` module (sub-frame flash
   possible if a stored pref differs from the OS).
+- **Image files**: a frontend-only feature (no Rust). `isImagePath` (`ui/filetype.js`,
+  unit-tested) detects image extensions; `renderActive` short-circuits to
+  `renderImage` *before* the `render_file` IPC — which is essential because the
+  backend does `read_to_string` and would fail on binary data. `renderImage`
+  builds an `<img>` at natural size via `convertFileSrc` (asset protocol; `#preview`
+  takes the `image-view` class, not `markdown-body`, so the prose-width rules don't
+  shrink it). Live reload bumps a per-path `imageVersions` counter → `?v=N`
+  cache-bust. The Raw button is hidden and Copy Source / Export are guarded for
+  image tabs.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw), `open-file`, `open-folder`,
   `menu-check-updates`.
