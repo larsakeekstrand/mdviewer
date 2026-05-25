@@ -422,6 +422,12 @@ body {
   border-color: #5599ff;
 }
 
+#toggle-theme {
+  font-size: 14px;
+  line-height: 1;
+  padding: 3px 8px;
+}
+
 /* Raw-view styling: full-width pre with no surrounding chrome */
 .markdown-body.raw-body {
   padding: 0;
