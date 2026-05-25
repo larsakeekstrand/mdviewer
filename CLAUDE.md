@@ -13,7 +13,6 @@ Repo: https://github.com/larsakeekstrand/mdviewer
 - **Backend** (`src-tauri/`): Tauri 2.11, Rust edition 2021, MSRV 1.80.
   - `comrak` (GFM markdown) + `syntect` (server-side syntax highlighting).
   - `notify` + `notify-debouncer-full` for file watching.
-  - `ignore` for gitignore-aware directory listing.
   - `ureq` + `semver` for the update check (GitHub API).
   - `tauri-plugin-dialog` for Open File / Open Folder native pickers and the
     Check-for-Updates result dialogs.
@@ -39,7 +38,7 @@ src-tauri/
                     emit open-file + focus window, or buffer until ready
     markdown.rs   — comrak + syntect; sourcepos for scroll anchoring;
                     mermaid fences → <pre class="mermaid"> (codefence renderer)
-    tree.rs       — ignore::WalkBuilder depth-1, hides node_modules / target
+    tree.rs       — std::fs::read_dir depth-1, unfiltered (shows all files)
     watcher.rs    — notify-debouncer-full, 200 ms debounce, watches PARENT dir
     menu.rs       — native menu bar; on_menu_event handler emits JS events
     recent.rs     — JSON-persisted recent-folders list + last_folder (app_data_dir)

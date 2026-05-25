@@ -9,7 +9,7 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 
 ## Features
 
-- VS Code–style file tree (lazy expansion, respects `.gitignore`, hides dotfiles)
+- VS Code–style file tree (lazy expansion, shows every file on disk)
 - **Git status decoration** — `M` / `A` / `U` / `D` badges on modified, added, untracked, and deleted files when the folder is a git repo, with directory roll-up
 - GitHub-flavored markdown rendering with syntax-highlighted code blocks
 - **Mermaid diagrams** rendered inline, with hover-revealed **SVG / PNG export** buttons on each diagram (Retina-quality PNG with white background)
@@ -77,7 +77,7 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
 - Click a folder to expand or collapse it.
 - **Single-click** a file → opens it in the *preview* tab (italic title). Single-clicking another file replaces it.
 - **Double-click** a file → opens it as a *sticky* tab (regular title) that won't be replaced by future single-clicks.
-- Dotfiles and entries matched by `.gitignore` are hidden; `node_modules` and `target` are always hidden.
+- Every file on disk is shown — including dotfiles, entries matched by `.gitignore`, and `node_modules` / `target`.
 
 ### Tabs
 

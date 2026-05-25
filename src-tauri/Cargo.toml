@@ -1,6 +1,6 @@
 [package]
 name = "mdviewer"
-version = "1.7.0"
+version = "1.8.0"
 description = "A markdown viewer with a file tree and beautifully rendered preview"
 edition = "2021"
 rust-version = "1.80"
@@ -32,9 +32,6 @@ syntect = "5.3"
 # File-system watching
 notify = "8.2"
 notify-debouncer-full = "0.7"
-
-# Gitignore-aware directory walking
-ignore = "0.4"
 
 # Decode PNG export payloads from the frontend (canvas → base64 → bytes)
 base64 = "0.22"
