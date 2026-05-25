@@ -128,6 +128,19 @@ icon.svg          — source for icon regeneration
   On a plain launch (`Startup.tree_root == None`), `get_initial_state` resolves
   the root as explicit argv → `last_folder` (if still a dir) → cwd, persisting
   all but the bare cwd fallback. `recent::clear` keeps `last_folder`.
+- **Theme (light/dark)**: JS is the single source of truth. `app.js` resolves
+  the effective theme (`resolveTheme(localStorage["mdviewer.theme"], OS)`) and
+  writes it to `document.documentElement.dataset.theme`; all CSS is
+  attribute-driven (`:root[data-theme="dark"]` in `styles.css`,
+  `[data-theme="dark"] .markdown-body` in `github-markdown.css`) — no
+  `prefers-color-scheme` in our stylesheets. The toolbar **☾/☀** button
+  (`#toggle-theme`, pure helpers in `ui/theme.js`) flips and persists the
+  choice; the `matchMedia` listener only auto-follows the OS until a pref
+  exists (`hasThemePref`). `currentTheme` still feeds syntect/Mermaid/render_notes
+  and stays in lockstep with `data-theme` via `applyTheme`. FOUC tradeoff: CSP
+  `script-src 'self'` forbids an inline `<head>` bootstrap, so `data-theme` is
+  set as the first statement of the deferred `app.js` module (sub-frame flash
+  possible if a stored pref differs from the OS).
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw), `open-file`, `open-folder`,
   `menu-check-updates`.
@@ -277,13 +290,17 @@ icon.svg          — source for icon regeneration
 - **GitHub macos-13 (Intel) runners** routinely queue 30–60+ min. We dropped
   x86_64 from `release.yml`. Don't add it back without a queue-management
   plan.
-- **Export must force light CSS**: `github-markdown.css` gates its light color
-  variables behind `@media (prefers-color-scheme: light)`. Simply deleting the
-  dark block leaves a dark-OS viewer with *no* variables (broken colors). The
-  export's `forceLightCss` both removes the dark block AND unwraps the light
-  block so its rules apply unconditionally. KaTeX fonts must be inlined as
-  `data:` URLs too, or the `.html` references font files that don't travel with
-  it.
+- **Export stays light via attribute-driven CSS**: `github-markdown.css` is
+  attribute-driven — the light color variables are the unconditional
+  `.markdown-body` base, dark lives under `[data-theme="dark"] .markdown-body`.
+  The exported standalone HTML sets **no** `data-theme` on its `<html>`, so the
+  light base always wins; for PDF, `exportDocument` forces `data-theme="light"`
+  on the live `<html>` during the print re-render (restored in `finally`). The
+  `forceLightCss` helper is now a defensive no-op on this file — it only strips
+  `@media (prefers-color-scheme: …)` blocks, which no longer exist here — kept
+  in case the vendored CSS is ever re-vendored with media-query themes. KaTeX
+  fonts must still be inlined as `data:` URLs, or the `.html` references font
+  files that don't travel with it.
 - **PDF export is native objc2 FFI** (`export.rs`), and the print invocation is
   the load-bearing part:
   - `WKWebView` print rendering is **asynchronous**. `[op runOperation]` captures

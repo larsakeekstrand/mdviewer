@@ -980,6 +980,10 @@ async function exportHtml(t, path) {
   await inlineImages(clone);
   const bodyHtml = clone.innerHTML;
 
+  // github-markdown.css is attribute-driven (light base, dark only under
+  // [data-theme="dark"]); the exported document sets no data-theme, so the
+  // light base always wins. forceLightCss is now a defensive no-op on this
+  // file — kept in case the vendored CSS ever reintroduces media-query themes.
   let css = forceLightCss(await fetchText("github-markdown.css"));
   if (documentNeedsKatex(bodyHtml)) {
     let katexCss = await fetchText("katex/katex.min.css");
