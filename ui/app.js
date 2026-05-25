@@ -931,10 +931,12 @@ async function exportDocument(format, path) {
   if (!t) return;
   exportInProgress = true;
   const prevTheme = currentTheme;
+  const prevDataTheme = document.documentElement.dataset.theme;
   const prevRaw = t.raw;
   const prevScroll = previewScroll.scrollTop;
   try {
     currentTheme = "light";
+    document.documentElement.dataset.theme = "light";
     t.raw = false;
     initMermaid();
     await renderActive({ scrollLock: false, forceMermaid: true });
@@ -954,6 +956,7 @@ async function exportDocument(format, path) {
     // export permanently disabled for the session.
     exportInProgress = false;
     currentTheme = prevTheme;
+    document.documentElement.dataset.theme = prevDataTheme;
     t.raw = prevRaw;
     initMermaid();
     await renderActive({ scrollLock: false, forceMermaid: true });
