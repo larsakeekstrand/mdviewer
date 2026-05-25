@@ -13,6 +13,13 @@ import {
   progressText,
   extractChangelog,
 } from "./update.js";
+import {
+  THEME_KEY,
+  isValidTheme,
+  resolveTheme,
+  nextTheme,
+  themeButtonFace,
+} from "./theme.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -32,10 +39,14 @@ const previewScroll = document.getElementById("preview-scroll");
 const tabBar = document.getElementById("tab-bar");
 const tabsEl = document.getElementById("tabs");
 const rawBtn = document.getElementById("toggle-raw");
+const themeBtn = document.getElementById("toggle-theme");
 const splitter = document.getElementById("splitter");
 
 let treeRoot = null;
-let currentTheme = colorScheme();
+let currentTheme = resolveTheme(localStorage.getItem(THEME_KEY), colorScheme());
+// Set as early as the CSP allows (no inline <head> script) to minimize the
+// first-paint flash before the rest of the module runs.
+document.documentElement.dataset.theme = currentTheme;
 const childCache = new Map();
 
 /* ---- Git decoration state ---- */
@@ -209,13 +220,14 @@ async function init() {
   window
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", async () => {
-      currentTheme = colorScheme();
-      initMermaid();
-      if (activeTab())
-        await renderActive({ scrollLock: false, forceMermaid: true });
+      // Auto-follow the OS only until the user has made an explicit choice.
+      if (hasThemePref()) return;
+      await applyTheme(colorScheme());
     });
 
   rawBtn.addEventListener("click", onToggleRaw);
+  themeBtn.addEventListener("click", onToggleTheme);
+  updateThemeButton();
 
   // Drain files Finder buffered during a cold launch; afterwards, files opened
   // while running arrive live via the "open-file" listener above.
@@ -666,6 +678,32 @@ function onToggleRaw() {
   t.raw = !t.raw;
   renderTabBar();
   renderActive({ scrollLock: false });
+}
+
+function hasThemePref() {
+  return isValidTheme(localStorage.getItem(THEME_KEY));
+}
+
+function updateThemeButton() {
+  const face = themeButtonFace(currentTheme);
+  themeBtn.textContent = face.icon;
+  themeBtn.title = face.label;
+  themeBtn.setAttribute("aria-label", face.label);
+}
+
+async function applyTheme(theme) {
+  currentTheme = theme;
+  document.documentElement.dataset.theme = theme;
+  initMermaid();
+  updateThemeButton();
+  if (activeTab())
+    await renderActive({ scrollLock: false, forceMermaid: true });
+}
+
+async function onToggleTheme() {
+  const next = nextTheme(currentTheme);
+  localStorage.setItem(THEME_KEY, next);
+  await applyTheme(next);
 }
 
 /* ---- Rendering ---- */
