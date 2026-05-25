@@ -28,3 +28,16 @@ export function progressText(downloaded, contentLength) {
   const pct = progressPercent(downloaded, contentLength);
   return pct === null ? "Downloading…" : `Downloading… ${pct}%`;
 }
+
+/** The release-notes body is the full GitHub release text (install steps,
+ *  quarantine note, an Updating section, then a "## Changes" changelog). For
+ *  the in-app "What's new" modal we want only the changelog. Returns the text
+ *  after the "## Changes" heading (heading dropped, trimmed); falls back to the
+ *  whole body when that heading is absent; "" for empty input. */
+export function extractChangelog(body) {
+  if (!body) return "";
+  const lines = body.split("\n");
+  const idx = lines.findIndex((l) => /^##\s+Changes\s*$/.test(l));
+  if (idx === -1) return body.trim();
+  return lines.slice(idx + 1).join("\n").trim();
+}

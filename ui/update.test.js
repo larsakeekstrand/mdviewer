@@ -5,6 +5,7 @@ import {
   bannerMessage,
   progressPercent,
   progressText,
+  extractChangelog,
 } from "./update.js";
 
 test("releaseUrlFor builds a v-prefixed tag URL", () => {
@@ -54,4 +55,24 @@ test("bannerMessage omits the current version when null", () => {
 
 test("progressText clamps to 100%", () => {
   assert.equal(progressText(300, 200), "Downloading… 100%");
+});
+
+test("extractChangelog returns the section after '## Changes'", () => {
+  const body = "## Install\n\nblah\n\n## Changes\n\n- a (h1)\n- b (h2)\n";
+  assert.equal(extractChangelog(body), "- a (h1)\n- b (h2)");
+});
+
+test("extractChangelog falls back to the full body when '## Changes' is absent", () => {
+  const body = "# Notes\n\n- only this\n";
+  assert.equal(extractChangelog(body), "# Notes\n\n- only this");
+});
+
+test("extractChangelog returns empty string for empty/null/undefined", () => {
+  assert.equal(extractChangelog(""), "");
+  assert.equal(extractChangelog(null), "");
+  assert.equal(extractChangelog(undefined), "");
+});
+
+test("extractChangelog trims surrounding whitespace", () => {
+  assert.equal(extractChangelog("## Changes\n\n\n- only\n\n\n"), "- only");
 });
