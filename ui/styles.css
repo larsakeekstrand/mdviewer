@@ -1,5 +1,5 @@
 /* mdviewer layout + chrome
-   Light/dark via prefers-color-scheme; markdown body uses github-markdown.css. */
+   Light/dark via [data-theme] on <html>; markdown body uses github-markdown.css. */
 
 :root {
   --sidebar-bg: #f7f7f7;
@@ -14,19 +14,17 @@
   --chev: #57606a;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --sidebar-bg: #161b22;
-    --sidebar-fg: #e6edf3;
-    --sidebar-muted: #8b949e;
-    --sidebar-border: #30363d;
-    --sidebar-hover: #21262d;
-    --sidebar-selected: #1f3461;
-    --splitter: #30363d;
-    --bg: #0d1117;
-    --fg: #e6edf3;
-    --chev: #8b949e;
-  }
+:root[data-theme="dark"] {
+  --sidebar-bg: #161b22;
+  --sidebar-fg: #e6edf3;
+  --sidebar-muted: #8b949e;
+  --sidebar-border: #30363d;
+  --sidebar-hover: #21262d;
+  --sidebar-selected: #1f3461;
+  --splitter: #30363d;
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --chev: #8b949e;
 }
 
 * {
@@ -236,14 +234,12 @@ body {
   --git-ignored: var(--sidebar-muted);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --git-modified: #e2c08d;
-    --git-added: #7bc97a;
-    --git-deleted: #f48771;
-    --git-untracked: #7bc97a;
-    --git-conflict: #f48771;
-  }
+:root[data-theme="dark"] {
+  --git-modified: #e2c08d;
+  --git-added: #7bc97a;
+  --git-deleted: #f48771;
+  --git-untracked: #7bc97a;
+  --git-conflict: #f48771;
 }
 
 .tree .row .badge {
@@ -716,15 +712,13 @@ body {
   border-top: 1px solid var(--ctx-sep, rgba(255, 255, 255, 0.1));
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --ctx-bg: rgba(255, 255, 255, 0.97);
-    --ctx-fg: #1f2328;
-    --ctx-border: rgba(0, 0, 0, 0.12);
-    --ctx-muted: rgba(0, 0, 0, 0.35);
-    --ctx-shortcut: rgba(0, 0, 0, 0.45);
-    --ctx-sep: rgba(0, 0, 0, 0.08);
-  }
+:root[data-theme="light"] {
+  --ctx-bg: rgba(255, 255, 255, 0.97);
+  --ctx-fg: #1f2328;
+  --ctx-border: rgba(0, 0, 0, 0.12);
+  --ctx-muted: rgba(0, 0, 0, 0.35);
+  --ctx-shortcut: rgba(0, 0, 0, 0.45);
+  --ctx-sep: rgba(0, 0, 0, 0.08);
 }
 
 /* Scrollbars (WebKit) */
@@ -828,14 +822,12 @@ body {
   color: #1f2328;
 }
 
-@media (prefers-color-scheme: dark) {
-  ::highlight(search-match) {
-    background-color: rgba(255, 214, 0, 0.3);
-  }
-  ::highlight(search-current) {
-    background-color: #d2691e;
-    color: #ffffff;
-  }
+[data-theme="dark"] ::highlight(search-match) {
+  background-color: rgba(255, 214, 0, 0.3);
+}
+[data-theme="dark"] ::highlight(search-current) {
+  background-color: #d2691e;
+  color: #ffffff;
 }
 
 /* Print / PDF export: WKWebView.printOperationWithPrintInfo renders through the
