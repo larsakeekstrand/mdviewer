@@ -28,7 +28,7 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - Auto light + dark theme via OS `prefers-color-scheme`
 - CLI: `mdviewer [file-or-directory]`
 - **Install Command Line Tool** — one menu click symlinks `mdviewer` into `/usr/local/bin` so you can launch it from any terminal
-- **One-click auto-update** — when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app
+- **One-click auto-update** — when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app; a **What's new** button on the banner shows that release's changelog in an in-app window before you decide
 
 ## Install on macOS
 

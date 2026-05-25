@@ -393,8 +393,12 @@ rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon_1024.png
   one appears. The menu-driven check ignores this dismissal. The banner is a
   state machine (available → downloading → installed/error); **Update now**
   calls `downloadAndInstall`, **Restart now** calls the `restart` command
-  (`app.restart()`), and **View release** opens the reconstructed
-  `releases/tag/v<version>` page via `open_url`.
+  (`app.restart()`), and **What's new** opens an in-app modal
+  (`openNotesModal`) showing the release changelog — extracted from the
+  `## Changes` section client-side (`extractChangelog` in `update.js`), rendered
+  via the `render_notes` command (comrak) and inserted with `DOMParser` +
+  `replaceChildren`, with a link out to the `releases/tag/v<version>` page via
+  `open_url`.
 - `open_url` (Rust) is restricted to `http(s)://` schemes. `open_path` opens an
   existing local path via the macOS `open` command, but **refuses launchable /
   executable types** (`UNSAFE_OPEN_EXTS` in `commands.rs`: `.app`, `.command`,
