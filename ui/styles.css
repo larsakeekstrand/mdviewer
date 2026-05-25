@@ -454,11 +454,36 @@ body {
 
 .markdown-body {
   box-sizing: border-box;
-  max-width: 880px;
+  max-width: none;
   margin: 0 auto;
   padding: 40px 48px 80px;
   background: transparent !important;
   color: var(--fg) !important;
+}
+
+/* Width model: the body fills the pane, but prose is centered at a readable
+   measure (--prose-width). Wide blocks (tables, code, Mermaid) are exempted so
+   they use the available width and scroll only when wider than the window —
+   not at the prose width. Raw view stays full-width (handled by .raw-body). */
+.markdown-body:not(.raw-body) {
+  --prose-width: 880px;
+}
+
+.markdown-body:not(.raw-body) > * {
+  max-width: var(--prose-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.markdown-body:not(.raw-body) > table,
+.markdown-body:not(.raw-body) > pre {
+  width: max-content;
+  max-width: 100%;
+}
+
+.markdown-body:not(.raw-body) > pre.mermaid {
+  width: auto;
+  max-width: 100%;
 }
 
 /* Plain-text fallback for non-markdown files */
