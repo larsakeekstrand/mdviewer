@@ -25,7 +25,7 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
 - File menu with **Open File…**, **Open Folder…**, and **Open Recent** (persisted)
 - Custom right-click context menu (Copy / Copy Source / Show Raw·Rendered)
-- Auto light + dark theme via OS `prefers-color-scheme`
+- **Light / dark theme toggle** — a toolbar button (next to **Raw**) switches the whole app between light and dark; the app follows the macOS appearance until you choose, then remembers your choice across launches
 - CLI: `mdviewer [file-or-directory]`
 - **Install Command Line Tool** — one menu click symlinks `mdviewer` into `/usr/local/bin` so you can launch it from any terminal
 - **One-click auto-update** — when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app; a **What's new** button on the banner shows that release's changelog in an in-app window before you decide
@@ -89,6 +89,10 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
 ### Raw vs rendered view
 
 Each tab can be viewed rendered (default) or raw. Toggle with the **Raw** button at the top-right of the tab bar, or via the **Actions ▸ Toggle Raw** menu item, or via the right-click context menu. The toggle is per tab.
+
+### Theme
+
+Switch between light and dark with the **☾ / ☀** button at the top-right of the tab bar (left of **Raw**); the icon shows the theme you'll switch to. Until you press it, MDViewer follows your macOS appearance live; once you choose, that choice is remembered across launches and the app stops auto-following the OS. The theme applies everywhere — file tree, tabs, rendered markdown, syntax-highlighted code, Mermaid diagrams, and math. (Exports are always light regardless of the in-app theme.)
 
 ### Menus
 
