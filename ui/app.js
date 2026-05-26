@@ -29,6 +29,22 @@ const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const dialogApi = window.__TAURI__.dialog;
 
+let IS_MAC = false;
+let IS_WINDOWS = false;
+
+async function detectPlatform() {
+  try {
+    const os = await invoke("platform");
+    IS_MAC = os === "macos";
+    IS_WINDOWS = os === "windows";
+  } catch (e) {
+    // Fallback to the navigator heuristic if the command is ever unavailable
+    // (e.g., during HMR with a stale frontend). Don't fail init over this.
+    IS_MAC = navigator.platform.toLowerCase().includes("mac");
+    IS_WINDOWS = navigator.platform.toLowerCase().includes("win");
+  }
+}
+
 const MD_EXT = /\.(md|markdown|mdown|mkd|mkdn)$/i;
 const DOUBLE_CLICK_MS = 280;
 
@@ -183,6 +199,7 @@ function singleOrDouble(onSingle, onDouble, delay = DOUBLE_CLICK_MS) {
 }
 
 async function init() {
+  await detectPlatform();
   initMermaid();
   const initial = await invoke("get_initial_state");
 
@@ -220,6 +237,7 @@ async function init() {
   });
 
   await listen("menu-install-cli", async () => {
+    if (!IS_MAC) return;
     await installCli();
   });
 
