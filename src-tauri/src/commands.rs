@@ -90,6 +90,15 @@ pub fn read_source(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("cannot read '{path}': {e}"))
 }
 
+/// Returns the host operating system as the same string `std::env::consts::OS`
+/// reports — "macos", "windows", "linux", etc. The frontend uses this to gate
+/// macOS-only UI affordances (Install CLI menu, Export as PDF menu) so we have
+/// one source of truth rather than sniffing `navigator.platform`.
+#[tauri::command]
+pub fn platform() -> &'static str {
+    std::env::consts::OS
+}
+
 #[tauri::command]
 pub fn restart(app: AppHandle) {
     app.restart();
