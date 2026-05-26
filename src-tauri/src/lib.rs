@@ -3,6 +3,7 @@ mod export;
 mod git;
 mod markdown;
 mod menu;
+#[cfg(target_os = "macos")]
 mod open_files;
 mod recent;
 mod tasklist;

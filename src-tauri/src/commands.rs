@@ -399,6 +399,7 @@ fn decide(state: LinkState) -> InstallAction {
 
 /// The outcome reported back to the frontend. Serializes to snake_case strings
 /// (`"installed"`, `"already_installed"`, `"cancelled"`) that `app.js` matches.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallOutcome {

@@ -90,14 +90,12 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let github_source =
         MenuItemBuilder::with_id("github-source", "View Source on GitHub").build(app)?;
 
-    let mut app_menu_builder = SubmenuBuilder::new(app, "MDViewer")
+    let app_menu_builder = SubmenuBuilder::new(app, "MDViewer")
         .about(None)
         .item(&github_source)
         .item(&check_updates);
     #[cfg(target_os = "macos")]
-    {
-        app_menu_builder = app_menu_builder.item(&install_cli);
-    }
+    let app_menu_builder = app_menu_builder.item(&install_cli);
     let app_menu = app_menu_builder
         .separator()
         .item(&PredefinedMenuItem::hide(app, None)?)
@@ -107,16 +105,14 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .item(&PredefinedMenuItem::quit(app, None)?)
         .build()?;
 
-    let mut file_menu_builder = SubmenuBuilder::new(app, "File")
+    let file_menu_builder = SubmenuBuilder::new(app, "File")
         .item(&open_file)
         .item(&open_folder)
         .item(&recent_submenu)
         .separator()
         .item(&export_html);
     #[cfg(target_os = "macos")]
-    {
-        file_menu_builder = file_menu_builder.item(&export_pdf);
-    }
+    let file_menu_builder = file_menu_builder.item(&export_pdf);
     let file_menu = file_menu_builder.separator().close_window().build()?;
 
     let edit_copy = MenuItemBuilder::with_id("edit-copy", "Copy")
