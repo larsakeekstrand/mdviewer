@@ -153,9 +153,13 @@ icon.svg          — source for icon regeneration
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw), `open-file`, `open-folder`,
   `menu-check-updates`.
-- **Update check** runs after `init()` on every launch (silent on failure /
-  current). The menu entry **MDViewer ▸ Check for Updates…** triggers the same
-  function with `silent: false` so it surfaces a native dialog when current.
+- **Update check** runs after `init()` on every launch and then on a
+  `setInterval` of `UPDATE_CHECK_INTERVAL_MS` (1 h) for the lifetime of the
+  process (silent on failure / current; the silent path also respects the
+  `DISMISS_KEY` localStorage flag, so re-checks won't resurrect a banner the
+  user dismissed for the current latest version). The menu entry **MDViewer ▸
+  Check for Updates…** triggers the same function with `silent: false` so it
+  surfaces a native dialog when current.
 - **Auto-update**: `tauri-plugin-updater` (registered in `lib.rs`, capability
   `updater:default`). The banner's **Update now** downloads the signed
   `.app.tar.gz` in-process, verifies the minisign signature against

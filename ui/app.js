@@ -1939,6 +1939,7 @@ document.addEventListener("keydown", (ev) => {
 
 const REPO = "larsakeekstrand/mdviewer";
 const DISMISS_KEY = "mdviewer.update.dismissed_version";
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const updaterApi = window.__TAURI__.updater;
 let updateInProgress = false;
 
@@ -2159,6 +2160,7 @@ init()
     // Fire-and-forget — the check runs in the background and won't block
     // anything in init. Silent if no update or if the network call fails.
     checkForUpdates();
+    setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
   })
   .catch((e) => {
     console.error("init failed", e);
