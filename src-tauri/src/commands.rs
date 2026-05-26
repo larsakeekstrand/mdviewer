@@ -112,11 +112,7 @@ pub fn open_url(url: String) -> Result<(), String> {
     if !lower.starts_with("https://") && !lower.starts_with("http://") {
         return Err("only http(s) URLs are allowed".to_string());
     }
-    std::process::Command::new("open")
-        .arg(&url)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("failed to open url: {e}"))
+    opener::open(&url).map_err(|e| format!("failed to open url: {e}"))
 }
 
 /// Extensions that the host OS shell would *execute* or use to redirect to an
@@ -229,11 +225,7 @@ pub fn open_path(path: String) -> Result<(), String> {
     if is_unsafe_to_open(p) {
         return Err(format!("refusing to launch executable file type: {path}"));
     }
-    std::process::Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("failed to open path: {e}"))
+    opener::open(&path).map_err(|e| format!("failed to open path: {e}"))
 }
 
 #[tauri::command]

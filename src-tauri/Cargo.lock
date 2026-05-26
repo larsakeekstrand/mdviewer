@@ -266,6 +266,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
+dependencies = [
+ "memchr",
+ "regex-automata",
+ "serde",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2019,6 +2030,7 @@ version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "328c4789d42200f1eeec05bd86c9c13c7f091d2ba9a6ea35acdf51f31bc0f043"
 dependencies = [
+ "cc",
  "pkg-config",
 ]
 
@@ -2097,6 +2109,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
+ "opener",
  "serde",
  "serde_json",
  "syntect",
@@ -2205,6 +2218,15 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
+
+[[package]]
+name = "normpath"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9985ef7269fa99f3b12437bb698381da2428743ab90f20393f399fa14cab21a"
+dependencies = [
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "notify"
@@ -2568,6 +2590,18 @@ checksum = "1e68317604e77e53b85896388e1a803c1d21b74c899ec9e5e1112db90735edd7"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "opener"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0812e5e4df08da354c851a3376fead46db31c2214f849d3de356d774d057681"
+dependencies = [
+ "bstr",
+ "dbus",
+ "normpath",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
