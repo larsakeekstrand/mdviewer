@@ -1,6 +1,6 @@
 # CLAUDE.md — mdviewer project guide
 
-A macOS markdown viewer in Rust on Tauri 2. VS Code–style file tree + tabbed
+A markdown viewer for macOS and Windows, in Rust on Tauri 2. VS Code–style file tree + tabbed
 preview, GitHub-flavored markdown rendering, Mermaid diagrams, KaTeX math,
 copy-button on code blocks, git status decoration in the tree, live reload,
 an Open Recent menu, an in-app update check against GitHub Releases, a custom
@@ -167,6 +167,64 @@ icon.svg          — source for icon regeneration
   the `restart` command. Because the download is in-process, the new bundle is
   never quarantined — no `xattr` step on update (unlike the first manual DMG
   install).
+
+## Platform support
+
+Targets: macOS aarch64 (.dmg) and Windows x86_64 (NSIS .exe + MSI).
+Linux is out of scope.
+
+What's macOS-only (and how the Windows build handles it):
+
+- **PDF export** (`export.rs::macos`). Uses WKWebView's print pipeline.
+  The non-mac stub in `export.rs` returns
+  `"PDF export is not yet supported on Windows"`. The **File ▸ Export as PDF…**
+  menu item is cfg-gated to macOS in `menu.rs` so Windows users don't see
+  it. HTML export works on both platforms.
+- **Install CLI** (`commands.rs::install_cli` + `osascript` admin
+  elevation + `/usr/local/bin` symlink). The non-mac stub returns an
+  error; the **MDViewer ▸ Install Command Line Tool…** menu item is
+  cfg-gated to macOS. The NSIS installer's optional "Add to PATH"
+  checkbox covers the equivalent affordance on Windows.
+- **`RunEvent::Opened`** (`open_files.rs`, `lib.rs`). macOS surfaces
+  Finder file-open as an Apple Event. Windows opens via argv — already
+  handled by `main.rs`.
+
+What's intentionally cross-platform:
+
+- `UNSAFE_OPEN_EXTS` (`commands.rs`) is a single union list of dangerous
+  extensions for BOTH platforms. macOS-dangerous types (`.app`,
+  `.command`, `.scpt`) are harmless to deny on Windows and vice versa.
+  When adding a new dangerous extension, add to the single list — don't
+  cfg-split.
+- `opener::open` (the `opener` crate) replaces the old
+  `Command::new("open")` call sites. It dispatches to `start` on
+  Windows, `open` on macOS.
+- `platform()` (`commands.rs`) is the single Rust-side source of truth
+  for the frontend's `IS_MAC` / `IS_WINDOWS` constants in `app.js`.
+
+Windows-specific gotchas:
+
+- **WebView2 dependency.** Bundle config uses `webviewInstallMode:
+  downloadBootstrapper` (the default). Installer is small;
+  bootstrapper fetches WebView2 only if missing (rare on
+  Win 10 1903+ / Win 11).
+- **NSIS install mode.** `currentUser` (Tauri 2.x schema; equivalent
+  of per-user no-admin install). Mirrors the macOS drag-to-Applications
+  experience. Note: the plan originally called this `perUser`, which is
+  the Tauri 1.x field name — 2.x renamed it.
+- **`.ico` regeneration.** `cargo tauri icon icon.svg` rebuilds the
+  full icon set, including `src-tauri/icons/icon.ico`. The `.ico` must
+  remain in the `bundle.icon` array in `tauri.conf.json`.
+- **Code signing.** Windows builds are unsigned, like macOS. README
+  documents the SmartScreen "More info → Run anyway" workaround.
+- **CI** runs on `macos-14` AND `windows-latest` matrix entries in
+  `ci.yml` for every PR. The release workflow has separate
+  `build-macos` and `build-windows` jobs; only the macOS job sets
+  `releaseBody` so the Windows job doesn't clobber it.
+- **`latest.json` merge.** `tauri-action` merges per-platform
+  `latest.json` fragments on the GitHub Release. Smoke-test with a
+  `vX.Y.Z-rc1` tag and `gh release view … --json assets` before
+  publishing the final draft.
 
 ## Things that took hours and shouldn't again
 
@@ -389,6 +447,10 @@ reach existing installs.
 ### Icon regeneration
 
 ```sh
+# All platforms (preferred — generates .ico, .icns, and PNGs from one source):
+cargo tauri icon icon.svg
+
+# macOS-only manual fallback (the old recipe, kept for reference):
 rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon_1024.png
 # Then run the iconset/iconutil block from commit 64c1ab2 to rebuild
 # src-tauri/icons/icon.icns and the three referenced PNGs.
