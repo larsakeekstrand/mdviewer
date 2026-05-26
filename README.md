@@ -3,7 +3,7 @@
 [![CI](https://github.com/larsakeekstrand/mdviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/larsakeekstrand/mdviewer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A markdown viewer with a VS Code–style file tree and a beautifully rendered preview, built in Rust on Tauri 2.
+A markdown viewer for macOS and Windows with a VS Code–style file tree and a beautifully rendered preview, built in Rust on Tauri 2.
 
 ![MDViewer rendering Markdown — prose, a syntax-highlighted Rust code block, and a Mermaid flowchart — in dark mode](docs/screenshot.png)
 
@@ -31,19 +31,21 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - **Install Command Line Tool** — one menu click symlinks `mdviewer` into `/usr/local/bin` so you can launch it from any terminal
 - **One-click auto-update** — MDViewer checks for new releases on launch and then once an hour while it's running; when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app, and a **What's new** button on the banner shows that release's changelog in an in-app window before you decide
 
-## Install on macOS
+## Install
 
-The app currently ships only as a macOS Apple Silicon bundle (M1 / M2 / M3 / M4). Builds are not signed by an Apple Developer ID, so you have to remove macOS's quarantine flag once after installing.
+### macOS
 
-### 1. Download
+The macOS build targets Apple Silicon (M1 / M2 / M3 / M4). Builds are not signed by an Apple Developer ID, so you have to remove macOS's quarantine flag once after installing.
+
+#### 1. Download
 
 Grab `MDViewer_<version>_aarch64.dmg` from the [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest).
 
-### 2. Install
+#### 2. Install
 
 Open the `.dmg` and drag `MDViewer.app` to `Applications`.
 
-### 3. Remove the quarantine flag (required)
+#### 3. Remove the quarantine flag (required)
 
 When you download an unsigned app through a browser, macOS attaches a quarantine attribute. On macOS 15 (Sequoia) and newer, Gatekeeper then refuses to launch it with **"mdviewer" is damaged and cannot be opened**. That message is misleading — the app is fine; macOS is just blocking it. Clear the flag once from Terminal:
 
@@ -56,6 +58,30 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
 > The older right-click → Open workaround that some guides mention no longer works on Sequoia+ for browser-downloaded apps. The `xattr` command is the supported way to bypass Gatekeeper for software you trust.
 
 > You only need the `xattr` step for this initial manual install. Later releases arrive through the in-app **one-click auto-update** banner, which downloads and swaps the bundle in-process — those updates are never quarantined, so you won't have to clear the flag again.
+
+### Windows
+
+Download either installer from the
+[latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest):
+
+- `MDViewer_<version>_x64-setup.exe` — NSIS installer, smaller, per-user
+  install (installs into `%LOCALAPPDATA%\Programs\...`, no admin prompt).
+- `MDViewer_<version>_x64_en-US.msi` — MSI installer, for enterprise /
+  Group Policy deployment.
+
+#### First-run SmartScreen warning
+
+Builds are unsigned. On first install, Windows Defender SmartScreen
+will show "Windows protected your PC". Click **More info** → **Run
+anyway** once. After install, MDViewer launches normally from the
+Start Menu.
+
+#### WebView2
+
+The installer auto-downloads Microsoft Edge WebView2 Runtime if it
+isn't already present (it usually is on Windows 10 1903+ and
+Windows 11). An internet connection is required during install in
+that case.
 
 ## Usage
 
@@ -119,7 +145,7 @@ cargo build --release
 
 The release binary lands at `src-tauri/target/release/mdviewer`.
 
-To produce a `.app` / `.dmg` bundle:
+To produce a platform bundle:
 
 ```sh
 cargo install tauri-cli --version "^2"
@@ -127,7 +153,15 @@ cd src-tauri
 cargo tauri build
 ```
 
-Bundles end up under `src-tauri/target/release/bundle/`.
+Bundles end up under `src-tauri/target/release/bundle/`. On macOS that's
+`.app` and `.dmg` under `macos/` and `dmg/`. On Windows (`cargo tauri build`),
+the bundler produces both:
+
+- `src-tauri/target/release/bundle/nsis/MDViewer_<version>_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/MDViewer_<version>_x64_en-US.msi`
+
+Regenerate `src-tauri/icons/icon.ico` from `icon.svg` with
+`cargo tauri icon icon.svg` if the source SVG changes.
 
 ## Develop
 
@@ -140,7 +174,7 @@ CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -- -D wa
 
 ## Cut a release
 
-Push a `v*` tag to trigger `.github/workflows/release.yml`. It builds for `aarch64-apple-darwin` and attaches the `.dmg` and `.app.tar.gz` artifacts to a draft GitHub Release that you publish manually.
+Push a `v*` tag to trigger `.github/workflows/release.yml`. It builds for `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`, then attaches the `.dmg`, `.app.tar.gz`, `.exe`, and `.msi` artifacts to a draft GitHub Release that you publish manually.
 
 ```sh
 git tag v0.1.0
