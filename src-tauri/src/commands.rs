@@ -119,11 +119,15 @@ pub fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| format!("failed to open url: {e}"))
 }
 
-/// Extensions that macOS `open` (Launch Services) would *execute* or use to
-/// redirect to an arbitrary target, rather than passively display. A markdown
-/// document is untrusted input, so a relative link pointing at one of these
-/// must not be handed to `open` — otherwise a co-located payload Cmd-clicked
-/// from a deceptive link becomes local code execution.
+/// Extensions that the host OS shell would *execute* or use to redirect to an
+/// arbitrary target, rather than passively display. A markdown document is
+/// untrusted input, so a relative link pointing at one of these must not be
+/// handed to the shell opener — otherwise a co-located payload Cmd/Right-
+/// clicked from a deceptive link becomes local code execution.
+///
+/// This is a cross-platform union: on macOS the Windows entries are inert
+/// (the OS doesn't auto-execute them), and vice versa. Denying both keeps
+/// one source of truth and avoids cfg-conditional security policy.
 const UNSAFE_OPEN_EXTS: &[&str] = &[
     // Executable bundles / things launched directly
     "app",
@@ -167,6 +171,44 @@ const UNSAFE_OPEN_EXTS: &[&str] = &[
     "framework",
     "dylib",
     "so",
+    // Windows executables (PE32)
+    "exe",
+    "com",
+    "scr",
+    "pif",
+    // Windows scripting hosts
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "psc1",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "wsf",
+    "wsh",
+    "msh",
+    "msh1",
+    "msh2",
+    "mshxml",
+    "msh1xml",
+    "msh2xml",
+    // Windows installer / control panel / registry
+    "msi",
+    "msp",
+    "msc",
+    "cpl",
+    "reg",
+    "inf",
+    // Windows shortcut / link files (redirect `start` to an arbitrary target)
+    "lnk",
+    "scf",
+    "appref-ms",
+    // Windows app packages
+    "appx",
+    "appxbundle",
+    "hta",
 ];
 
 fn is_unsafe_to_open(path: &Path) -> bool {
@@ -538,5 +580,51 @@ mod tests {
         let html = render_notes("# Hello".to_string(), None).unwrap();
         assert!(html.contains("<h1"), "expected an h1, got: {html}");
         assert!(html.contains("Hello"));
+    }
+
+    mod platform_safety_tests {
+        use super::super::is_unsafe_to_open;
+        use std::path::Path;
+
+        fn unsafe_path(name: &str) -> bool {
+            is_unsafe_to_open(Path::new(name))
+        }
+
+        #[test]
+        fn macos_executables_are_unsafe() {
+            assert!(unsafe_path("foo.app"));
+            assert!(unsafe_path("foo.command"));
+            assert!(unsafe_path("foo.scpt"));
+        }
+
+        #[test]
+        fn windows_executables_are_unsafe() {
+            assert!(unsafe_path("foo.exe"));
+            assert!(unsafe_path("foo.bat"));
+            assert!(unsafe_path("foo.cmd"));
+            assert!(unsafe_path("foo.com"));
+            assert!(unsafe_path("foo.ps1"));
+            assert!(unsafe_path("foo.vbs"));
+            assert!(unsafe_path("foo.lnk"));
+            assert!(unsafe_path("foo.msi"));
+            assert!(unsafe_path("foo.scr"));
+            assert!(unsafe_path("foo.hta"));
+            assert!(unsafe_path("foo.cpl"));
+            assert!(unsafe_path("foo.reg"));
+        }
+
+        #[test]
+        fn extension_match_is_case_insensitive() {
+            assert!(unsafe_path("foo.EXE"));
+            assert!(unsafe_path("foo.Bat"));
+        }
+
+        #[test]
+        fn benign_extensions_are_safe() {
+            assert!(!unsafe_path("foo.md"));
+            assert!(!unsafe_path("foo.txt"));
+            assert!(!unsafe_path("foo.png"));
+            assert!(!unsafe_path("foo.pdf"));
+        }
     }
 }
