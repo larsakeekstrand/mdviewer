@@ -25,7 +25,7 @@ A markdown viewer with a VS Code–style file tree and a beautifully rendered pr
 - **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
 - File menu with **Open File…**, **Open Folder…**, and **Open Recent** (persisted)
-- Custom right-click context menu (Copy / Copy Source / Show Raw·Rendered)
+- Custom right-click context menu — in the preview (Copy / Copy Source / Show Raw·Rendered) and on tree rows (Copy Relative / Absolute Path)
 - **Light / dark theme toggle** — a toolbar button (next to **Raw**) switches the whole app between light and dark; the app follows the macOS appearance until you choose, then remembers your choice across launches
 - CLI: `mdviewer [file-or-directory]`
 - **Install Command Line Tool** — one menu click symlinks `mdviewer` into `/usr/local/bin` so you can launch it from any terminal
@@ -108,7 +108,7 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
 
 ### Right-click
 
-Right-clicking anywhere in the preview shows a compact menu with Copy / Copy Source / Show Raw·Rendered. macOS's default text menu (Look Up, Translate, Writing Tools, Speech, …) is suppressed.
+Right-clicking anywhere in the preview shows a compact menu with Copy / Copy Source / Show Raw·Rendered. Right-clicking a row in the file tree shows **Copy Relative Path** (relative to the sidebar root) and **Copy Absolute Path** instead. macOS's default text menu (Look Up, Translate, Writing Tools, Speech, …) is suppressed.
 
 ## Build from source
 

@@ -1627,11 +1627,40 @@ async function copyText(text) {
   }
 }
 
+function relativeToRoot(path, root) {
+  if (!root) return path;
+  if (path === root) return "";
+  const sep = root.endsWith("/") || root.endsWith("\\") ? "" : "/";
+  const prefix = root + sep;
+  if (path.startsWith(prefix)) return path.slice(prefix.length);
+  return path;
+}
+
 document.addEventListener("contextmenu", (ev) => {
   ev.preventDefault();
   const items = [];
   const text = selectedText();
   const tab = activeTab();
+
+  const treeRow =
+    ev.target instanceof Element
+      ? ev.target.closest("li[data-path]")
+      : null;
+  if (treeRow && tree.contains(treeRow)) {
+    const absolute = treeRow.dataset.path;
+    const relative = relativeToRoot(absolute, treeRoot);
+    items.push({
+      label: "Copy Relative Path",
+      action: () => copyText(relative),
+      disabled: !relative,
+    });
+    items.push({
+      label: "Copy Absolute Path",
+      action: () => copyText(absolute),
+    });
+    buildContextMenu(items, ev.clientX, ev.clientY);
+    return;
+  }
 
   if (text) {
     items.push({
