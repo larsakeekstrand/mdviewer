@@ -15,7 +15,7 @@ pub async fn export_pdf(window: tauri::WebviewWindow, path: String) -> Result<()
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (window, path);
-        Err("PDF export is only supported on macOS".to_string())
+        Err("PDF export is not yet supported on Windows".to_string())
     }
 }
 
