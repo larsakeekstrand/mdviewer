@@ -365,9 +365,11 @@ pub fn save_session(app: AppHandle, tabs: Vec<String>, active: Option<usize>) {
 /// default `/etc/paths`, so it is already on `$PATH` for every login shell with
 /// no profile edits. The directory is root-owned on a stock Mac, so creating
 /// the link there usually needs admin rights (handled in `install_with_admin`).
+#[cfg(target_os = "macos")]
 const CLI_LINK_PATH: &str = "/usr/local/bin/mdviewer";
 
 /// What is currently present at `CLI_LINK_PATH`.
+#[cfg(target_os = "macos")]
 #[derive(Debug, PartialEq)]
 enum LinkState {
     Absent,
@@ -377,6 +379,7 @@ enum LinkState {
 }
 
 /// What `install_cli` should do given the current `LinkState`.
+#[cfg(target_os = "macos")]
 #[derive(Debug, PartialEq)]
 enum InstallAction {
     Create,
@@ -385,6 +388,7 @@ enum InstallAction {
 }
 
 /// Pure decision: maps the on-disk state to the action.
+#[cfg(target_os = "macos")]
 fn decide(state: LinkState) -> InstallAction {
     match state {
         LinkState::Absent | LinkState::SymlinkElsewhere => InstallAction::Create,
@@ -406,6 +410,7 @@ pub enum InstallOutcome {
 /// Classifies what is at `link` relative to `target`. Uses `symlink_metadata`
 /// so a symlink is inspected, not followed (a broken symlink still reads as a
 /// symlink; a missing path reads as `Absent`).
+#[cfg(target_os = "macos")]
 fn classify_link(link: &Path, target: &Path) -> LinkState {
     match std::fs::symlink_metadata(link) {
         Err(_) => LinkState::Absent,
@@ -420,6 +425,7 @@ fn classify_link(link: &Path, target: &Path) -> LinkState {
 /// Creates (or replaces) the symlink. Tries unprivileged first so Macs where
 /// `/usr/local/bin` is user-writable (e.g. Homebrew on Intel) never see a
 /// password prompt; escalates only on a permission or missing-directory error.
+#[cfg(target_os = "macos")]
 fn create_cli_symlink(target: &Path, link: &Path) -> Result<InstallOutcome, String> {
     if link.is_symlink() {
         // Best-effort: a root-owned dir will reject this, and the following
@@ -446,6 +452,7 @@ fn create_cli_symlink(target: &Path, link: &Path) -> Result<InstallOutcome, Stri
 /// `quoted form of`, so it is never interpolated into a shell string by us — a
 /// path containing spaces or quotes cannot break out. The destination is a
 /// fixed literal.
+#[cfg(target_os = "macos")]
 fn install_with_admin(target: &Path) -> Result<InstallOutcome, String> {
     let script = format!(
         "do shell script \"mkdir -p /usr/local/bin && ln -sf \" & quoted form of (item 1 of argv) & \" {CLI_LINK_PATH}\" with administrator privileges"
@@ -481,6 +488,7 @@ fn install_with_admin(target: &Path) -> Result<InstallOutcome, String> {
 /// Symlinks the running binary into `/usr/local/bin` so `mdviewer` is runnable
 /// from a terminal. The target is always our own `current_exe()`, never a
 /// caller-supplied path.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn install_cli() -> Result<InstallOutcome, String> {
     let target =
@@ -493,6 +501,12 @@ pub fn install_cli() -> Result<InstallOutcome, String> {
         )),
         InstallAction::Create => create_cli_symlink(&target, link),
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn install_cli() -> Result<InstallOutcome, String> {
+    Err("CLI install is only supported on macOS".to_string())
 }
 
 #[cfg(test)]
@@ -541,30 +555,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn decide_creates_when_absent() {
-        assert_eq!(decide(LinkState::Absent), InstallAction::Create);
-    }
+    #[cfg(target_os = "macos")]
+    mod cli_install_tests {
+        use super::super::{decide, InstallAction, LinkState};
 
-    #[test]
-    fn decide_creates_when_symlink_points_elsewhere() {
-        assert_eq!(decide(LinkState::SymlinkElsewhere), InstallAction::Create);
-    }
+        #[test]
+        fn decide_creates_when_absent() {
+            assert_eq!(decide(LinkState::Absent), InstallAction::Create);
+        }
 
-    #[test]
-    fn decide_already_installed_when_symlink_points_to_target() {
-        assert_eq!(
-            decide(LinkState::SymlinkToTarget),
-            InstallAction::AlreadyInstalled
-        );
-    }
+        #[test]
+        fn decide_creates_when_symlink_points_elsewhere() {
+            assert_eq!(decide(LinkState::SymlinkElsewhere), InstallAction::Create);
+        }
 
-    #[test]
-    fn decide_refuses_when_non_symlink_exists() {
-        assert_eq!(
-            decide(LinkState::NonSymlink),
-            InstallAction::RefuseNonSymlink
-        );
+        #[test]
+        fn decide_already_installed_when_symlink_points_to_target() {
+            assert_eq!(
+                decide(LinkState::SymlinkToTarget),
+                InstallAction::AlreadyInstalled
+            );
+        }
+
+        #[test]
+        fn decide_refuses_when_non_symlink_exists() {
+            assert_eq!(
+                decide(LinkState::NonSymlink),
+                InstallAction::RefuseNonSymlink
+            );
+        }
     }
 
     #[test]
