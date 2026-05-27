@@ -90,6 +90,15 @@ pub fn read_source(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("cannot read '{path}': {e}"))
 }
 
+/// Returns the host operating system as the same string `std::env::consts::OS`
+/// reports — "macos", "windows", "linux", etc. The frontend uses this to gate
+/// macOS-only UI affordances (Install CLI menu, Export as PDF menu) so we have
+/// one source of truth rather than sniffing `navigator.platform`.
+#[tauri::command]
+pub fn platform() -> &'static str {
+    std::env::consts::OS
+}
+
 #[tauri::command]
 pub fn restart(app: AppHandle) {
     app.restart();
@@ -103,18 +112,18 @@ pub fn open_url(url: String) -> Result<(), String> {
     if !lower.starts_with("https://") && !lower.starts_with("http://") {
         return Err("only http(s) URLs are allowed".to_string());
     }
-    std::process::Command::new("open")
-        .arg(&url)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("failed to open url: {e}"))
+    opener::open(&url).map_err(|e| format!("failed to open url: {e}"))
 }
 
-/// Extensions that macOS `open` (Launch Services) would *execute* or use to
-/// redirect to an arbitrary target, rather than passively display. A markdown
-/// document is untrusted input, so a relative link pointing at one of these
-/// must not be handed to `open` — otherwise a co-located payload Cmd-clicked
-/// from a deceptive link becomes local code execution.
+/// Extensions that the host OS shell would *execute* or use to redirect to an
+/// arbitrary target, rather than passively display. A markdown document is
+/// untrusted input, so a relative link pointing at one of these must not be
+/// handed to the shell opener — otherwise a co-located payload Cmd/Right-
+/// clicked from a deceptive link becomes local code execution.
+///
+/// This is a cross-platform union: on macOS the Windows entries are inert
+/// (the OS doesn't auto-execute them), and vice versa. Denying both keeps
+/// one source of truth and avoids cfg-conditional security policy.
 const UNSAFE_OPEN_EXTS: &[&str] = &[
     // Executable bundles / things launched directly
     "app",
@@ -158,6 +167,44 @@ const UNSAFE_OPEN_EXTS: &[&str] = &[
     "framework",
     "dylib",
     "so",
+    // Windows executables (PE32)
+    "exe",
+    "com",
+    "scr",
+    "pif",
+    // Windows scripting hosts
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "psc1",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "wsf",
+    "wsh",
+    "msh",
+    "msh1",
+    "msh2",
+    "mshxml",
+    "msh1xml",
+    "msh2xml",
+    // Windows installer / control panel / registry
+    "msi",
+    "msp",
+    "msc",
+    "cpl",
+    "reg",
+    "inf",
+    // Windows shortcut / link files (redirect `start` to an arbitrary target)
+    "lnk",
+    "scf",
+    "appref-ms",
+    // Windows app packages
+    "appx",
+    "appxbundle",
+    "hta",
 ];
 
 fn is_unsafe_to_open(path: &Path) -> bool {
@@ -178,11 +225,7 @@ pub fn open_path(path: String) -> Result<(), String> {
     if is_unsafe_to_open(p) {
         return Err(format!("refusing to launch executable file type: {path}"));
     }
-    std::process::Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("failed to open path: {e}"))
+    opener::open(&path).map_err(|e| format!("failed to open path: {e}"))
 }
 
 #[tauri::command]
@@ -322,9 +365,11 @@ pub fn save_session(app: AppHandle, tabs: Vec<String>, active: Option<usize>) {
 /// default `/etc/paths`, so it is already on `$PATH` for every login shell with
 /// no profile edits. The directory is root-owned on a stock Mac, so creating
 /// the link there usually needs admin rights (handled in `install_with_admin`).
+#[cfg(target_os = "macos")]
 const CLI_LINK_PATH: &str = "/usr/local/bin/mdviewer";
 
 /// What is currently present at `CLI_LINK_PATH`.
+#[cfg(target_os = "macos")]
 #[derive(Debug, PartialEq)]
 enum LinkState {
     Absent,
@@ -334,6 +379,7 @@ enum LinkState {
 }
 
 /// What `install_cli` should do given the current `LinkState`.
+#[cfg(target_os = "macos")]
 #[derive(Debug, PartialEq)]
 enum InstallAction {
     Create,
@@ -342,6 +388,7 @@ enum InstallAction {
 }
 
 /// Pure decision: maps the on-disk state to the action.
+#[cfg(target_os = "macos")]
 fn decide(state: LinkState) -> InstallAction {
     match state {
         LinkState::Absent | LinkState::SymlinkElsewhere => InstallAction::Create,
@@ -352,6 +399,7 @@ fn decide(state: LinkState) -> InstallAction {
 
 /// The outcome reported back to the frontend. Serializes to snake_case strings
 /// (`"installed"`, `"already_installed"`, `"cancelled"`) that `app.js` matches.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallOutcome {
@@ -363,6 +411,7 @@ pub enum InstallOutcome {
 /// Classifies what is at `link` relative to `target`. Uses `symlink_metadata`
 /// so a symlink is inspected, not followed (a broken symlink still reads as a
 /// symlink; a missing path reads as `Absent`).
+#[cfg(target_os = "macos")]
 fn classify_link(link: &Path, target: &Path) -> LinkState {
     match std::fs::symlink_metadata(link) {
         Err(_) => LinkState::Absent,
@@ -377,6 +426,7 @@ fn classify_link(link: &Path, target: &Path) -> LinkState {
 /// Creates (or replaces) the symlink. Tries unprivileged first so Macs where
 /// `/usr/local/bin` is user-writable (e.g. Homebrew on Intel) never see a
 /// password prompt; escalates only on a permission or missing-directory error.
+#[cfg(target_os = "macos")]
 fn create_cli_symlink(target: &Path, link: &Path) -> Result<InstallOutcome, String> {
     if link.is_symlink() {
         // Best-effort: a root-owned dir will reject this, and the following
@@ -403,6 +453,7 @@ fn create_cli_symlink(target: &Path, link: &Path) -> Result<InstallOutcome, Stri
 /// `quoted form of`, so it is never interpolated into a shell string by us — a
 /// path containing spaces or quotes cannot break out. The destination is a
 /// fixed literal.
+#[cfg(target_os = "macos")]
 fn install_with_admin(target: &Path) -> Result<InstallOutcome, String> {
     let script = format!(
         "do shell script \"mkdir -p /usr/local/bin && ln -sf \" & quoted form of (item 1 of argv) & \" {CLI_LINK_PATH}\" with administrator privileges"
@@ -438,6 +489,7 @@ fn install_with_admin(target: &Path) -> Result<InstallOutcome, String> {
 /// Symlinks the running binary into `/usr/local/bin` so `mdviewer` is runnable
 /// from a terminal. The target is always our own `current_exe()`, never a
 /// caller-supplied path.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn install_cli() -> Result<InstallOutcome, String> {
     let target =
@@ -450,6 +502,12 @@ pub fn install_cli() -> Result<InstallOutcome, String> {
         )),
         InstallAction::Create => create_cli_symlink(&target, link),
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn install_cli() -> Result<InstallOutcome, String> {
+    Err("CLI install is only supported on macOS".to_string())
 }
 
 #[cfg(test)]
@@ -498,30 +556,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn decide_creates_when_absent() {
-        assert_eq!(decide(LinkState::Absent), InstallAction::Create);
-    }
+    #[cfg(target_os = "macos")]
+    mod cli_install_tests {
+        use super::super::{decide, InstallAction, LinkState};
 
-    #[test]
-    fn decide_creates_when_symlink_points_elsewhere() {
-        assert_eq!(decide(LinkState::SymlinkElsewhere), InstallAction::Create);
-    }
+        #[test]
+        fn decide_creates_when_absent() {
+            assert_eq!(decide(LinkState::Absent), InstallAction::Create);
+        }
 
-    #[test]
-    fn decide_already_installed_when_symlink_points_to_target() {
-        assert_eq!(
-            decide(LinkState::SymlinkToTarget),
-            InstallAction::AlreadyInstalled
-        );
-    }
+        #[test]
+        fn decide_creates_when_symlink_points_elsewhere() {
+            assert_eq!(decide(LinkState::SymlinkElsewhere), InstallAction::Create);
+        }
 
-    #[test]
-    fn decide_refuses_when_non_symlink_exists() {
-        assert_eq!(
-            decide(LinkState::NonSymlink),
-            InstallAction::RefuseNonSymlink
-        );
+        #[test]
+        fn decide_already_installed_when_symlink_points_to_target() {
+            assert_eq!(
+                decide(LinkState::SymlinkToTarget),
+                InstallAction::AlreadyInstalled
+            );
+        }
+
+        #[test]
+        fn decide_refuses_when_non_symlink_exists() {
+            assert_eq!(
+                decide(LinkState::NonSymlink),
+                InstallAction::RefuseNonSymlink
+            );
+        }
     }
 
     #[test]
@@ -529,5 +592,51 @@ mod tests {
         let html = render_notes("# Hello".to_string(), None).unwrap();
         assert!(html.contains("<h1"), "expected an h1, got: {html}");
         assert!(html.contains("Hello"));
+    }
+
+    mod platform_safety_tests {
+        use super::super::is_unsafe_to_open;
+        use std::path::Path;
+
+        fn unsafe_path(name: &str) -> bool {
+            is_unsafe_to_open(Path::new(name))
+        }
+
+        #[test]
+        fn macos_executables_are_unsafe() {
+            assert!(unsafe_path("foo.app"));
+            assert!(unsafe_path("foo.command"));
+            assert!(unsafe_path("foo.scpt"));
+        }
+
+        #[test]
+        fn windows_executables_are_unsafe() {
+            assert!(unsafe_path("foo.exe"));
+            assert!(unsafe_path("foo.bat"));
+            assert!(unsafe_path("foo.cmd"));
+            assert!(unsafe_path("foo.com"));
+            assert!(unsafe_path("foo.ps1"));
+            assert!(unsafe_path("foo.vbs"));
+            assert!(unsafe_path("foo.lnk"));
+            assert!(unsafe_path("foo.msi"));
+            assert!(unsafe_path("foo.scr"));
+            assert!(unsafe_path("foo.hta"));
+            assert!(unsafe_path("foo.cpl"));
+            assert!(unsafe_path("foo.reg"));
+        }
+
+        #[test]
+        fn extension_match_is_case_insensitive() {
+            assert!(unsafe_path("foo.EXE"));
+            assert!(unsafe_path("foo.Bat"));
+        }
+
+        #[test]
+        fn benign_extensions_are_safe() {
+            assert!(!unsafe_path("foo.md"));
+            assert!(!unsafe_path("foo.txt"));
+            assert!(!unsafe_path("foo.png"));
+            assert!(!unsafe_path("foo.pdf"));
+        }
     }
 }

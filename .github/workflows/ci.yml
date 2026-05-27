@@ -11,8 +11,12 @@ env:
 
 jobs:
   check:
-    name: Lint and test
-    runs-on: macos-14
+    name: Lint and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
     steps:
       - uses: actions/checkout@v6
 

@@ -1,6 +1,6 @@
 [package]
 name = "mdviewer"
-version = "1.12.0"
+version = "1.13.0"
 description = "A markdown viewer with a file tree and beautifully rendered preview"
 edition = "2021"
 rust-version = "1.80"
@@ -35,6 +35,9 @@ notify-debouncer-full = "0.7"
 
 # Decode PNG export payloads from the frontend (canvas → base64 → bytes)
 base64 = "0.22"
+
+# Cross-platform `open` / `start` / xdg-open replacement.
+opener = "0.7"
 
 # macOS-only: native WKWebView print-to-PDF (paginated, silent save).
 # objc2 0.6 core with the 0.3 framework wrappers Tauri 2.11 uses internally.

@@ -118,10 +118,11 @@ mod tests {
         let repo = PathBuf::from("/repo");
         let map = parse_porcelain(&bytes, &repo);
 
-        assert_eq!(map.get("/repo/src/foo.rs").map(|s| s.as_str()), Some(" M"));
-        assert_eq!(map.get("/repo/src/bar.rs").map(|s| s.as_str()), Some("A "));
-        assert_eq!(map.get("/repo/new.md").map(|s| s.as_str()), Some("??"));
-        assert_eq!(map.get("/repo/both.rs").map(|s| s.as_str()), Some("MM"));
+        let key = |rel: &str| repo.join(rel).to_string_lossy().into_owned();
+        assert_eq!(map.get(&key("src/foo.rs")).map(|s| s.as_str()), Some(" M"));
+        assert_eq!(map.get(&key("src/bar.rs")).map(|s| s.as_str()), Some("A "));
+        assert_eq!(map.get(&key("new.md")).map(|s| s.as_str()), Some("??"));
+        assert_eq!(map.get(&key("both.rs")).map(|s| s.as_str()), Some("MM"));
     }
 
     #[test]
@@ -132,9 +133,10 @@ mod tests {
         bytes.extend_from_slice(b" M ok.rs");
         bytes.push(0);
 
-        let map = parse_porcelain(&bytes, Path::new("/r"));
+        let repo = Path::new("/r");
+        let map = parse_porcelain(&bytes, repo);
         assert_eq!(map.len(), 1);
-        assert!(map.contains_key("/r/ok.rs"));
+        assert!(map.contains_key(repo.join("ok.rs").to_string_lossy().as_ref()));
     }
 
     #[test]
@@ -142,10 +144,9 @@ mod tests {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.extend_from_slice(b" M docs/My Notes.md");
         bytes.push(0);
-        let map = parse_porcelain(&bytes, Path::new("/r"));
-        assert_eq!(
-            map.get("/r/docs/My Notes.md").map(|s| s.as_str()),
-            Some(" M")
-        );
+        let repo = Path::new("/r");
+        let map = parse_porcelain(&bytes, repo);
+        let key = repo.join("docs/My Notes.md").to_string_lossy().into_owned();
+        assert_eq!(map.get(&key).map(|s| s.as_str()), Some(" M"));
     }
 }

@@ -79,20 +79,24 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let recent_submenu = build_recent_submenu(app)?;
 
     let export_html = MenuItemBuilder::with_id("export-html", "Export as HTML…").build(app)?;
+    #[cfg(target_os = "macos")]
     let export_pdf = MenuItemBuilder::with_id("export-pdf", "Export as PDF…").build(app)?;
 
     let check_updates =
         MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+    #[cfg(target_os = "macos")]
     let install_cli =
         MenuItemBuilder::with_id("install-cli", "Install Command Line Tool…").build(app)?;
     let github_source =
         MenuItemBuilder::with_id("github-source", "View Source on GitHub").build(app)?;
 
-    let app_menu = SubmenuBuilder::new(app, "MDViewer")
+    let app_menu_builder = SubmenuBuilder::new(app, "MDViewer")
         .about(None)
         .item(&github_source)
-        .item(&check_updates)
-        .item(&install_cli)
+        .item(&check_updates);
+    #[cfg(target_os = "macos")]
+    let app_menu_builder = app_menu_builder.item(&install_cli);
+    let app_menu = app_menu_builder
         .separator()
         .item(&PredefinedMenuItem::hide(app, None)?)
         .item(&PredefinedMenuItem::hide_others(app, None)?)
@@ -101,16 +105,15 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .item(&PredefinedMenuItem::quit(app, None)?)
         .build()?;
 
-    let file_menu = SubmenuBuilder::new(app, "File")
+    let file_menu_builder = SubmenuBuilder::new(app, "File")
         .item(&open_file)
         .item(&open_folder)
         .item(&recent_submenu)
         .separator()
-        .item(&export_html)
-        .item(&export_pdf)
-        .separator()
-        .close_window()
-        .build()?;
+        .item(&export_html);
+    #[cfg(target_os = "macos")]
+    let file_menu_builder = file_menu_builder.item(&export_pdf);
+    let file_menu = file_menu_builder.separator().close_window().build()?;
 
     let edit_copy = MenuItemBuilder::with_id("edit-copy", "Copy")
         .accelerator("CmdOrCtrl+C")
