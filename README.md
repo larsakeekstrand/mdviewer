@@ -39,7 +39,7 @@ The macOS build targets Apple Silicon (M1 / M2 / M3 / M4). Builds are not signed
 
 #### 1. Download
 
-Grab `MDViewer_<version>_aarch64.dmg` from the [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest).
+Grab `MDViewer_<version>_macOS_aarch64.dmg` from the [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest).
 
 #### 2. Install
 
@@ -64,9 +64,9 @@ You'll be prompted for your password. After this, double-click `mdviewer` in App
 Download either installer from the
 [latest release](https://github.com/larsakeekstrand/mdviewer/releases/latest):
 
-- `MDViewer_<version>_x64-setup.exe` — NSIS installer, smaller, per-user
+- `MDViewer_<version>_Windows_x64-setup.exe` — NSIS installer, smaller, per-user
   install (installs into `%LOCALAPPDATA%\Programs\...`, no admin prompt).
-- `MDViewer_<version>_x64_en-US.msi` — MSI installer, for enterprise /
+- `MDViewer_<version>_Windows_x64_en-US.msi` — MSI installer, for enterprise /
   Group Policy deployment.
 
 #### First-run SmartScreen warning

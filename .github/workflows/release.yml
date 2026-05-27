@@ -91,7 +91,7 @@ jobs:
           releaseBody: |
             ## Install (Apple Silicon)
 
-            Download `MDViewer_<version>_aarch64.dmg`, open it, and drag
+            Download `MDViewer_<version>_macOS_aarch64.dmg`, open it, and drag
             `MDViewer.app` to Applications.
 
             ### Required: remove the quarantine flag
@@ -118,8 +118,8 @@ jobs:
 
             Download either:
 
-            - `MDViewer_<version>_x64-setup.exe` (NSIS, smaller, per-user install)
-            - `MDViewer_<version>_x64_en-US.msi` (MSI, enterprise / GPO deploy)
+            - `MDViewer_<version>_Windows_x64-setup.exe` (NSIS, smaller, per-user install)
+            - `MDViewer_<version>_Windows_x64_en-US.msi` (MSI, enterprise / GPO deploy)
 
             ### First-run SmartScreen warning
 
@@ -185,3 +185,72 @@ jobs:
           tagName: ${{ steps.tag.outputs.value }}
           releaseName: ${{ steps.tag.outputs.value }}
           releaseDraft: true
+
+  polish-release:
+    name: Rename installers for clarity
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_TAG: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "value=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$REF_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rename installers and patch latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          set -euo pipefail
+
+          # Tauri's bundler embeds the bare semver (no leading "v", no pre-release
+          # suffix) in installer filenames. Derive it from the tag so this works
+          # for both vX.Y.Z and vX.Y.Z-rcN tags.
+          VERSION=$(echo "$TAG" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          RELEASE_ID=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+
+          rename_asset() {
+            local old="$1"; local new="$2"
+            local id
+            id=$(gh api "repos/$REPO/releases/$RELEASE_ID/assets" --jq ".[] | select(.name == \"$old\") | .id")
+            if [ -z "$id" ]; then
+              echo "::warning::Asset not found: $old (skipping)"
+              return 0
+            fi
+            gh api -X PATCH "repos/$REPO/releases/assets/$id" -f name="$new" > /dev/null
+            echo "Renamed: $old -> $new"
+          }
+
+          rename_asset "MDViewer_${VERSION}_aarch64.dmg"          "MDViewer_${VERSION}_macOS_aarch64.dmg"
+          rename_asset "MDViewer_${VERSION}_x64-setup.exe"        "MDViewer_${VERSION}_Windows_x64-setup.exe"
+          rename_asset "MDViewer_${VERSION}_x64-setup.exe.sig"    "MDViewer_${VERSION}_Windows_x64-setup.exe.sig"
+          rename_asset "MDViewer_${VERSION}_x64_en-US.msi"        "MDViewer_${VERSION}_Windows_x64_en-US.msi"
+          rename_asset "MDViewer_${VERSION}_x64_en-US.msi.sig"    "MDViewer_${VERSION}_Windows_x64_en-US.msi.sig"
+
+          # latest.json embeds full URLs to the Windows installers; rewrite those
+          # so the auto-updater resolves the renamed files. The .app.tar.gz path
+          # is unchanged (we don't rename the updater payload).
+          LATEST_ID=$(gh api "repos/$REPO/releases/$RELEASE_ID/assets" --jq '.[] | select(.name == "latest.json") | .id')
+          if [ -z "$LATEST_ID" ]; then
+            echo "::warning::latest.json not found on the release; skipping URL patch"
+            exit 0
+          fi
+
+          gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$LATEST_ID" > latest.json
+          sed -i -E "
+            s|MDViewer_${VERSION}_x64-setup\.exe|MDViewer_${VERSION}_Windows_x64-setup.exe|g
+            s|MDViewer_${VERSION}_x64_en-US\.msi|MDViewer_${VERSION}_Windows_x64_en-US.msi|g
+          " latest.json
+          python3 -m json.tool latest.json > /dev/null
+
+          gh api -X DELETE "repos/$REPO/releases/assets/$LATEST_ID"
+          gh release upload "$TAG" latest.json -R "$REPO"
