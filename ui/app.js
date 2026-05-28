@@ -213,6 +213,11 @@ async function init() {
     scheduleGitRefresh();
   });
 
+  await listen("tree-changed", async () => {
+    await refreshTree();
+    scheduleGitRefresh();
+  });
+
   await listen("open-file", async (ev) => {
     await openSticky(ev.payload);
   });
@@ -423,6 +428,95 @@ async function renderRoot() {
     tree.appendChild(makeNode(entry, 1));
   }
   applyGitDecorations();
+  updateTreeWatch();
+}
+
+/** Tell the backend which directories to watch for live tree updates: the
+ *  root plus every currently-expanded folder. Re-sent whenever the visible
+ *  set changes. Best-effort — a failure just means the tree won't auto-refresh
+ *  until the next change to the visible set. */
+function updateTreeWatch() {
+  invoke("watch_tree", { dirs: visibleDirs() }).catch((e) =>
+    console.error("watch_tree failed", e),
+  );
+}
+
+/** Root plus every expanded folder currently rendered in the tree. */
+function visibleDirs() {
+  const dirs = treeRoot ? [treeRoot] : [];
+  for (const li of tree.querySelectorAll('li[data-is-dir="1"]')) {
+    const row = li.querySelector(":scope > .row");
+    if (row && row.classList.contains("open")) dirs.push(li.dataset.path);
+  }
+  return dirs;
+}
+
+function depthOf(li) {
+  const d = parseInt(li.dataset.depth, 10);
+  return Number.isFinite(d) ? d : 1;
+}
+
+/** Re-read the root and every expanded folder and reconcile each listing in
+ *  place, so files added/removed/renamed by other apps appear without a
+ *  restart. Reconciling reuses existing rows (preserving expanded subtrees,
+ *  selection, and scroll) and only touches what actually changed. */
+async function refreshTree() {
+  if (!treeRoot) return;
+  await refreshOneDir(treeRoot, tree, 1);
+  // Snapshot after the root reconcile so vanished top-level folders are gone;
+  // the static NodeList is safe to iterate while nested reconciles mutate it,
+  // and tree.contains() skips any row a parent refresh has since removed.
+  for (const li of tree.querySelectorAll('li[data-is-dir="1"]')) {
+    if (!tree.contains(li)) continue;
+    const row = li.querySelector(":scope > .row");
+    const ul = li.querySelector(":scope > ul");
+    if (!row || !row.classList.contains("open") || !ul) continue;
+    await refreshOneDir(li.dataset.path, ul, depthOf(li) + 1);
+  }
+  applyGitDecorations();
+  updateTreeWatch();
+}
+
+async function refreshOneDir(path, container, depth) {
+  childCache.delete(path);
+  let entries;
+  try {
+    entries = await listDir(path);
+  } catch (e) {
+    // Folder vanished or unreadable; its row (if any) is dropped when its
+    // parent reconciles, so there's nothing to update here.
+    console.debug("tree refresh skipped:", path, e);
+    return;
+  }
+  reconcileChildren(container, entries, depth);
+}
+
+/** Update a rendered <ul> (root or a folder's) in place to match `entries`:
+ *  reuse existing <li> by path, insert new entries in sorted order, drop
+ *  vanished ones. A path whose type flipped (file <-> dir) is recreated. */
+function reconcileChildren(container, entries, depth) {
+  const existing = new Map();
+  for (const li of [...container.children]) {
+    if (li.dataset && li.dataset.path) existing.set(li.dataset.path, li);
+  }
+  const seen = new Set();
+  let prev = null;
+  for (const entry of entries) {
+    let li = existing.get(entry.path);
+    const wantDir = entry.is_dir ? "1" : "0";
+    if (li && li.dataset.isDir !== wantDir) {
+      li.remove();
+      li = null;
+    }
+    if (!li) li = makeNode(entry, depth);
+    seen.add(entry.path);
+    if (prev) prev.after(li);
+    else container.prepend(li);
+    prev = li;
+  }
+  for (const [path, li] of existing) {
+    if (!seen.has(path)) li.remove();
+  }
 }
 
 function rememberFolder(path) {
@@ -458,6 +552,7 @@ function makeNode(entry, depth) {
   const li = document.createElement("li");
   li.dataset.path = entry.path;
   li.dataset.isDir = entry.is_dir ? "1" : "0";
+  li.dataset.depth = String(depth);
 
   const row = document.createElement("div");
   row.className = "row " + (entry.is_dir ? "dir" : "file");
@@ -502,6 +597,10 @@ async function onDirClick(entry, li, row, depth) {
   if (open) {
     open.remove();
     row.classList.remove("open");
+    // Bust the cache so a folder that changes while collapsed (and thus
+    // unwatched) reads fresh on the next expand.
+    childCache.delete(entry.path);
+    updateTreeWatch();
     return;
   }
   row.classList.add("open");
@@ -510,6 +609,7 @@ async function onDirClick(entry, li, row, depth) {
     children = await listDir(entry.path);
   } catch (e) {
     console.error("list_dir failed", e);
+    row.classList.remove("open");
     return;
   }
   const ul = document.createElement("ul");
@@ -518,6 +618,7 @@ async function onDirClick(entry, li, row, depth) {
   }
   li.appendChild(ul);
   applyGitDecorations(ul);
+  updateTreeWatch();
 }
 
 async function onTreeFileSingle(path) {

@@ -30,6 +30,7 @@ pub struct AppState {
     pub tree_root: Option<PathBuf>,
     pub initial_file: Option<PathBuf>,
     pub watcher: Mutex<watcher::WatcherSlot>,
+    pub tree_watcher: Mutex<watcher::TreeWatcherSlot>,
     pub opens: Mutex<PendingOpens>,
     /// Serializes task-list write-backs. Held only for the read-verify-write
     /// critical section so two rapid clicks can't interleave reads.
@@ -41,6 +42,7 @@ pub fn run(startup: Startup) {
         tree_root: startup.tree_root,
         initial_file: startup.initial_file,
         watcher: Mutex::new(watcher::WatcherSlot::default()),
+        tree_watcher: Mutex::new(watcher::TreeWatcherSlot::default()),
         opens: Mutex::new(PendingOpens::default()),
         tasklist_lock: Mutex::new(()),
     };
@@ -53,6 +55,7 @@ pub fn run(startup: Startup) {
             commands::get_initial_state,
             commands::list_dir,
             commands::git_status,
+            commands::watch_tree,
             commands::render_file,
             commands::render_notes,
             commands::open_file,

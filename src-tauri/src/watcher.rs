@@ -63,6 +63,48 @@ impl WatcherSlot {
     }
 }
 
+#[derive(Default)]
+pub struct TreeWatcherSlot {
+    debouncer: Option<DebouncerType>,
+}
+
+impl TreeWatcherSlot {
+    /// Replaces any active tree watcher with one watching each directory in
+    /// `dirs` non-recursively. Any event under a watched directory emits a
+    /// single `tree-changed`; the frontend re-reads and reconciles the affected
+    /// listings. Watching is best-effort per directory — a vanished or
+    /// unreadable directory is skipped rather than failing the whole call, so a
+    /// folder deleted out from under us doesn't break refresh for the rest.
+    pub fn watch_dirs(&mut self, app: &AppHandle, dirs: Vec<PathBuf>) -> Result<(), String> {
+        // Drop the old watcher first; some platforms refuse to re-watch.
+        self.debouncer.take();
+        if dirs.is_empty() {
+            return Ok(());
+        }
+
+        let app_handle = app.clone();
+        let mut debouncer = new_debouncer(
+            Duration::from_millis(200),
+            None,
+            move |result: DebounceEventResult| {
+                if let Ok(events) = result {
+                    if !events.is_empty() {
+                        let _ = app_handle.emit("tree-changed", ());
+                    }
+                }
+            },
+        )
+        .map_err(|e| format!("tree watcher init failed: {e}"))?;
+
+        for dir in &dirs {
+            let _ = debouncer.watch(dir, RecursiveMode::NonRecursive);
+        }
+
+        self.debouncer = Some(debouncer);
+        Ok(())
+    }
+}
+
 fn paths_match(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;

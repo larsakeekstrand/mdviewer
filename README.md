@@ -9,7 +9,7 @@ A markdown viewer for macOS and Windows with a VS Code–style file tree and a b
 
 ## Features
 
-- VS Code–style file tree (lazy expansion, shows every file on disk)
+- VS Code–style file tree (lazy expansion, shows every file on disk) that updates live as files are added, removed, or renamed by other apps
 - **Git status decoration** — `M` / `A` / `U` / `D` badges on modified, added, untracked, and deleted files when the folder is a git repo, with directory roll-up
 - GitHub-flavored markdown rendering with syntax-highlighted code blocks
 - **Mermaid diagrams** rendered inline, with hover-revealed **SVG / PNG export** buttons on each diagram (Retina-quality PNG with white background)
@@ -105,6 +105,7 @@ that case.
 - **Single-click** a file → opens it in the *preview* tab (italic title). Single-clicking another file replaces it.
 - **Double-click** a file → opens it as a *sticky* tab (regular title) that won't be replaced by future single-clicks.
 - Every file on disk is shown — including dotfiles, entries matched by `.gitignore`, and `node_modules` / `target`.
+- The tree updates live: files added, removed, or renamed by other apps in the root or any expanded folder appear without reopening the folder, and git badges refresh with them.
 - Markdown files render as a preview; image files open as images; anything else is shown as plain text.
 
 ### Tabs

@@ -53,6 +53,23 @@ pub fn git_status(path: String) -> Result<git::GitStatusReport, String> {
     git::status(Path::new(&path))
 }
 
+/// Sets the directories whose listings the sidebar is currently showing (the
+/// tree root plus every expanded folder) so changes made by other apps appear
+/// live. The frontend re-sends the set whenever the visible folders change.
+#[tauri::command]
+pub fn watch_tree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    dirs: Vec<String>,
+) -> Result<(), String> {
+    let paths: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
+    let mut slot = state
+        .tree_watcher
+        .lock()
+        .map_err(|_| "tree watcher mutex poisoned".to_string())?;
+    slot.watch_dirs(&app, paths)
+}
+
 #[derive(Serialize)]
 pub struct RenderedFile {
     pub html: String,
