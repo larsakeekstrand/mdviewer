@@ -22,6 +22,8 @@ jobs:
   build-macos:
     name: Build macOS (aarch64)
     runs-on: macos-14
+    outputs:
+      changelog: ${{ steps.changelog.outputs.value }}
     steps:
       - name: Resolve tag
         id: tag
@@ -209,6 +211,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.tag.outputs.value }}
+          CHANGELOG: ${{ needs.build-macos.outputs.changelog }}
         run: |
           set -euo pipefail
 
@@ -250,6 +253,17 @@ jobs:
             s|MDViewer_${VERSION}_x64-setup\.exe|MDViewer_${VERSION}_Windows_x64-setup.exe|g
             s|MDViewer_${VERSION}_x64_en-US\.msi|MDViewer_${VERSION}_Windows_x64_en-US.msi|g
           " latest.json
+
+          # The Windows tauri-action job re-emits latest.json without a body,
+          # blanking the "notes" field the macOS job set. The in-app "What's new"
+          # modal reads notes (not the GitHub release page body), so restore the
+          # changelog here. extractChangelog (ui/update.js) slices after the
+          # "## Changes" heading. CHANGELOG comes via env + jq --arg, never
+          # interpolated into the shell.
+          NOTES=$(printf '## Changes\n\n%s\n' "$CHANGELOG")
+          jq --arg notes "$NOTES" '.notes = $notes' latest.json > latest.json.tmp
+          mv latest.json.tmp latest.json
+
           python3 -m json.tool latest.json > /dev/null
 
           gh api -X DELETE "repos/$REPO/releases/assets/$LATEST_ID"

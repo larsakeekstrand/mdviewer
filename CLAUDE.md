@@ -222,8 +222,16 @@ Windows-specific gotchas:
   `build-macos` and `build-windows` jobs; only the macOS job sets
   `releaseBody` so the Windows job doesn't clobber it.
 - **`latest.json` merge.** `tauri-action` merges per-platform
-  `latest.json` fragments on the GitHub Release. Smoke-test with a
-  `vX.Y.Z-rc1` tag and `gh release view … --json assets` before
+  `latest.json` fragments on the GitHub Release. The Windows job runs
+  without `releaseBody`, so its merge blanks the manifest's `notes` field —
+  and the in-app **What's new** modal reads `notes` (via the updater's
+  `update.body`), NOT the GitHub release-page body. The `polish-release` job
+  restores it: `build-macos` exposes its `changelog` step as a job output,
+  and `polish-release` writes that into `.notes` with `jq --arg` (passed via
+  env, never shell-interpolated) when it rewrites the Windows asset URLs.
+  Without this the modal shows "No release notes available" (regressed in the
+  v1.13.0 Windows port; worked on the macOS-only v1.11/v1.12). Smoke-test
+  with a `vX.Y.Z-rc1` tag and `gh release view … --json assets` before
   publishing the final draft.
 
 ## Things that took hours and shouldn't again
