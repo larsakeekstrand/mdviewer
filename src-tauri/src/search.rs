@@ -205,12 +205,7 @@ pub fn search_in_folder(
 /// Centre an excerpt of `line` on `[start, end)` so the displayed substring is
 /// no longer than `max` chars. Returns the excerpt and the adjusted match
 /// offsets relative to that excerpt.
-fn truncate_around(
-    line: &str,
-    start: usize,
-    end: usize,
-    max: usize,
-) -> (String, usize, usize) {
+fn truncate_around(line: &str, start: usize, end: usize, max: usize) -> (String, usize, usize) {
     if line.chars().count() <= max {
         return (line.to_string(), start, end);
     }
