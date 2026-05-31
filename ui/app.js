@@ -687,10 +687,20 @@ async function openSticky(path) {
   await setActiveTab(tabs.length - 1);
 }
 
-function openTabAtLine(path, _line) {
-  // Real jump-to-line behavior added in the next task; for now, just open
-  // the file. Tabs use the existing single-click semantics.
-  return openPreview(path);
+async function openTabAtLine(path, line) {
+  const idx = findTab(path);
+  if (idx !== -1) {
+    tabs[idx].pendingJumpLine = line;
+    await setActiveTab(idx, { forceRender: true });
+    return;
+  }
+  const previewIdx = tabs.findIndex((t) => !t.sticky);
+  await openPreview(path);
+  const finalIdx = previewIdx !== -1 ? previewIdx : tabs.length - 1;
+  if (finalIdx >= 0 && finalIdx < tabs.length) {
+    tabs[finalIdx].pendingJumpLine = line;
+    await renderActive({ scrollLock: false });
+  }
 }
 
 function persistSession() {
@@ -936,10 +946,13 @@ async function renderActive(
     },
   });
 
+  const hadPendingJump = t.pendingJumpLine != null;
   await postRender(t, { raw: result.raw, forceMermaid });
 
-  if (anchor) restoreAnchor(anchor);
-  else previewScroll.scrollTop = 0;
+  if (!hadPendingJump) {
+    if (anchor) restoreAnchor(anchor);
+    else previewScroll.scrollTop = 0;
+  }
 
   if (findOpen()) runFind({ keepCurrent: true, scroll: false });
 }
@@ -994,6 +1007,55 @@ async function postRender(t, { raw = false, forceMermaid = false } = {}) {
     renderMath();
     await renderMermaid({ force: forceMermaid });
     addMermaidExportButtons();
+  }
+  if (t.pendingJumpLine != null) {
+    const line = t.pendingJumpLine;
+    t.pendingJumpLine = null;
+    jumpToLine(line);
+  }
+}
+
+function jumpToLine(line) {
+  const target = findElementForLine(line);
+  if (!target) return;
+  target.scrollIntoView({ block: "center" });
+  pulseJumpHighlight(target);
+}
+
+function findElementForLine(line) {
+  // Comrak emits data-sourcepos="L1:C1-L2:C2"; pick the deepest element whose
+  // [L1, L2] range contains `line`. Walk depth-first so nested blocks win
+  // over their parents.
+  const all = preview.querySelectorAll("[data-sourcepos]");
+  let best = null;
+  for (const el of all) {
+    const m = el.dataset.sourcepos.match(/^(\d+):\d+-(\d+):\d+$/);
+    if (!m) continue;
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    if (a <= line && line <= b) {
+      best = el;
+    }
+  }
+  return best;
+}
+
+function pulseJumpHighlight(el) {
+  if (
+    typeof CSS === "undefined" ||
+    !CSS.highlights ||
+    typeof Highlight === "undefined"
+  ) {
+    return;
+  }
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const hl = new Highlight(range);
+    CSS.highlights.set("search-jump", hl);
+    setTimeout(() => CSS.highlights.delete("search-jump"), 1500);
+  } catch {
+    // selectNodeContents can throw on unusual targets; ignore.
   }
 }
 
