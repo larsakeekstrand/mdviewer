@@ -102,14 +102,152 @@ fn is_whole_word(text: &str, start: usize, end: usize) -> bool {
     !before_word && !after_word
 }
 
+const PER_FILE_MATCH_CAP: usize = 200;
+const TOTAL_MATCH_CAP: usize = 5000;
+const PER_FILE_SIZE_CAP: u64 = 10 * 1024 * 1024;
+const BINARY_SNIFF_BYTES: usize = 8192;
+const LINE_TEXT_MAX_CHARS: usize = 300;
+
 /// Walk `root` recursively, scanning every text file for `query`. See module
 /// docs and the design spec for limits / skip rules.
 pub fn search_in_folder(
-    _root: &Path,
-    _query: &str,
-    _opts: SearchOpts,
+    root: &Path,
+    query: &str,
+    opts: SearchOpts,
 ) -> Result<SearchResults, String> {
-    Ok(SearchResults::default())
+    if !root.is_dir() {
+        return Err(format!("not a directory: {}", root.display()));
+    }
+
+    let mut results = SearchResults::default();
+
+    'outer: for entry in walkdir::WalkDir::new(root).follow_links(false) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => {
+                results.files_unreadable += 1;
+                continue;
+            }
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => {
+                results.files_unreadable += 1;
+                continue;
+            }
+        };
+        if metadata.len() > PER_FILE_SIZE_CAP {
+            results.files_skipped_too_large += 1;
+            continue;
+        }
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(_) => {
+                results.files_unreadable += 1;
+                continue;
+            }
+        };
+        if is_binary(&bytes[..bytes.len().min(BINARY_SNIFF_BYTES)]) {
+            results.files_skipped_binary += 1;
+            continue;
+        }
+        let contents = match String::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                // Invalid UTF-8: treat as binary for this feature.
+                results.files_skipped_binary += 1;
+                continue;
+            }
+        };
+        results.files_scanned += 1;
+
+        let path_str = path.to_string_lossy().into_owned();
+        let mut per_file = 0usize;
+        for (line_idx, line) in contents.split('\n').enumerate() {
+            if per_file >= PER_FILE_MATCH_CAP {
+                break;
+            }
+            let spans = match_line(line, query, opts);
+            if spans.is_empty() {
+                continue;
+            }
+            for (start, end) in spans {
+                if results.matches.len() >= TOTAL_MATCH_CAP {
+                    results.truncated = true;
+                    break 'outer;
+                }
+                let column = line[..start].chars().count() as u32 + 1;
+                let (display, display_start, display_end) =
+                    truncate_around(line, start, end, LINE_TEXT_MAX_CHARS);
+                results.matches.push(Match {
+                    path: path_str.clone(),
+                    line: (line_idx as u32) + 1,
+                    column,
+                    line_text: display,
+                    match_start: display_start as u32,
+                    match_end: display_end as u32,
+                });
+                per_file += 1;
+                if per_file >= PER_FILE_MATCH_CAP {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Centre an excerpt of `line` on `[start, end)` so the displayed substring is
+/// no longer than `max` chars. Returns the excerpt and the adjusted match
+/// offsets relative to that excerpt.
+fn truncate_around(
+    line: &str,
+    start: usize,
+    end: usize,
+    max: usize,
+) -> (String, usize, usize) {
+    if line.chars().count() <= max {
+        return (line.to_string(), start, end);
+    }
+    let char_indices: Vec<(usize, char)> = line.char_indices().collect();
+    let start_char = char_indices
+        .iter()
+        .position(|(b, _)| *b >= start)
+        .unwrap_or(char_indices.len());
+    let end_char = char_indices
+        .iter()
+        .position(|(b, _)| *b >= end)
+        .unwrap_or(char_indices.len());
+    let match_len = end_char.saturating_sub(start_char);
+    let context = max.saturating_sub(match_len) / 2;
+    let win_start_char = start_char.saturating_sub(context);
+    let win_end_char = (end_char + context).min(char_indices.len());
+    let win_start_byte = char_indices
+        .get(win_start_char)
+        .map(|(b, _)| *b)
+        .unwrap_or(line.len());
+    let win_end_byte = char_indices
+        .get(win_end_char)
+        .map(|(b, _)| *b)
+        .unwrap_or(line.len());
+    let prefix = if win_start_char > 0 { "…" } else { "" };
+    let suffix = if win_end_char < char_indices.len() {
+        "…"
+    } else {
+        ""
+    };
+    let mut out = String::new();
+    out.push_str(prefix);
+    out.push_str(&line[win_start_byte..win_end_byte]);
+    out.push_str(suffix);
+    let new_start = prefix.len() + (start - win_start_byte);
+    let new_end = prefix.len() + (end - win_start_byte);
+    (out, new_start, new_end)
 }
 
 #[cfg(test)]
@@ -212,5 +350,145 @@ mod tests {
     fn is_binary_says_no_for_pure_text() {
         assert!(!is_binary(b"hello world"));
         assert!(!is_binary("café 日本語".as_bytes()));
+    }
+
+    use std::collections::HashSet;
+    use std::fs;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn unique_temp_dir() -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "mdviewer_search_test_{}_{nanos}_{n}",
+            std::process::id()
+        ));
+        fs::create_dir(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn search_finds_matches_across_nested_dirs() {
+        let dir = unique_temp_dir();
+        fs::write(dir.join("a.md"), "hello world\nfoo bar\nhello again\n").unwrap();
+        fs::create_dir(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub").join("b.txt"), "no match here\n").unwrap();
+        fs::write(dir.join("sub").join("c.md"), "second hello\n").unwrap();
+
+        let res = search_in_folder(&dir, "hello", SearchOpts::default()).unwrap();
+
+        let paths: HashSet<String> = res.matches.iter().map(|m| m.path.clone()).collect();
+        assert!(paths.iter().any(|p| p.ends_with("a.md")));
+        assert!(paths.iter().any(|p| p.ends_with("c.md")));
+        assert!(!paths.iter().any(|p| p.ends_with("b.txt")));
+        assert_eq!(res.matches.len(), 3);
+        assert!(!res.truncated);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_returns_one_based_line_and_column() {
+        let dir = unique_temp_dir();
+        fs::write(dir.join("x.md"), "alpha\nbeta\ngamma needle here\n").unwrap();
+
+        let res = search_in_folder(&dir, "needle", SearchOpts::default()).unwrap();
+
+        assert_eq!(res.matches.len(), 1);
+        let m = &res.matches[0];
+        assert_eq!(m.line, 3);
+        assert_eq!(m.column, 7);
+        assert_eq!(m.line_text, "gamma needle here");
+        assert_eq!(m.match_start, 6);
+        assert_eq!(m.match_end, 12);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_skips_binary_files() {
+        let dir = unique_temp_dir();
+        fs::write(dir.join("text.md"), "needle in text\n").unwrap();
+        let mut blob = b"needle in binary\n".to_vec();
+        blob.push(0);
+        fs::write(dir.join("blob.bin"), &blob).unwrap();
+
+        let res = search_in_folder(&dir, "needle", SearchOpts::default()).unwrap();
+
+        assert_eq!(res.matches.len(), 1);
+        assert!(res.matches[0].path.ends_with("text.md"));
+        assert_eq!(res.files_skipped_binary, 1);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_skips_files_larger_than_10mb() {
+        let dir = unique_temp_dir();
+        let mut big = String::with_capacity(11 * 1024 * 1024);
+        big.push_str("needle\n");
+        while big.len() < 10 * 1024 * 1024 + 1 {
+            big.push_str("padding line\n");
+        }
+        fs::write(dir.join("big.md"), &big).unwrap();
+        fs::write(dir.join("small.md"), "needle\n").unwrap();
+
+        let res = search_in_folder(&dir, "needle", SearchOpts::default()).unwrap();
+
+        assert_eq!(res.matches.len(), 1);
+        assert!(res.matches[0].path.ends_with("small.md"));
+        assert_eq!(res.files_skipped_too_large, 1);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_enforces_per_file_cap() {
+        let dir = unique_temp_dir();
+        let mut s = String::new();
+        for _ in 0..250 {
+            s.push_str("needle\n");
+        }
+        fs::write(dir.join("many.md"), &s).unwrap();
+
+        let res = search_in_folder(&dir, "needle", SearchOpts::default()).unwrap();
+
+        assert_eq!(res.matches.len(), 200);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_enforces_total_cap_and_sets_truncated() {
+        let dir = unique_temp_dir();
+        for i in 0..30 {
+            let mut s = String::new();
+            for _ in 0..200 {
+                s.push_str("needle\n");
+            }
+            fs::write(dir.join(format!("f{i:02}.md")), &s).unwrap();
+        }
+
+        let res = search_in_folder(&dir, "needle", SearchOpts::default()).unwrap();
+
+        assert_eq!(res.matches.len(), 5000);
+        assert!(res.truncated);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_returns_err_on_non_directory_root() {
+        let dir = unique_temp_dir();
+        let file = dir.join("a.md");
+        fs::write(&file, "x").unwrap();
+        assert!(search_in_folder(&file, "x", SearchOpts::default()).is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
