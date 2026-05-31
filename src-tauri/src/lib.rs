@@ -6,6 +6,7 @@ mod menu;
 #[cfg(target_os = "macos")]
 mod open_files;
 mod recent;
+mod search;
 mod tasklist;
 mod tree;
 mod watcher;
