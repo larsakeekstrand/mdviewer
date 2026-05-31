@@ -33,6 +33,9 @@ syntect = "5.3"
 notify = "8.2"
 notify-debouncer-full = "0.7"
 
+# Recursive directory walking for folder content search
+walkdir = "2"
+
 # Decode PNG export payloads from the frontend (canvas → base64 → bytes)
 base64 = "0.22"
 
