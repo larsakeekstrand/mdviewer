@@ -167,6 +167,23 @@ icon.svg          — source for icon regeneration
   the `restart` command. Because the download is in-process, the new bundle is
   never quarantined — no `xattr` step on update (unlike the first manual DMG
   install).
+- **Folder content search**: right-click a folder in the tree → "Search in
+  Folder…" opens a sidebar takeover (`<section id="search-panel">` sibling
+  to `<ul id="tree">`, toggled by `.searching` on the sidebar). Backend is
+  `src-tauri/src/search.rs` (`walkdir` + a hand-written substring matcher
+  whose semantics mirror `ui/search.js::findMatches` — non-overlapping
+  matches, case-sensitive + whole-word options, Unicode-aware
+  case-insensitive via `str::to_lowercase`). The walk is unfiltered (matches
+  `tree.rs` behaviour); only detected binaries (NUL in first 8 KB) and
+  files >10 MB are skipped, plus a per-file cap of 200 matches and a total
+  cap of 5000 (truncation flag surfaced in the footer). The frontend
+  (`ui/folder_search.js`) debounces input at 150 ms and uses a sequence
+  number to drop stale IPC responses (Tauri's `invoke` has no abort).
+  Clicking a result calls `openTabAtLine(path, line)` which stashes
+  `pendingJumpLine` on the tab; the next `postRender` consumes it, scrolls
+  the matching `data-sourcepos` element into view, and pulses
+  `CSS.highlights["search-jump"]` for 1.5 s. `restoreAnchor` is skipped on
+  that one render so the jump's scroll position survives.
 
 ## Platform support
 
