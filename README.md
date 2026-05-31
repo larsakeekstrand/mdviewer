@@ -17,6 +17,7 @@ A markdown viewer for macOS and Windows with a VS Code–style file tree and a b
 - **Copy button** on every fenced code block (hover to reveal)
 - **Interactive task lists** — click a `- [ ]` / `- [x]` checkbox in the rendered view and the change is written back to the source file atomically
 - **In-document find** (⌘F) with case-sensitive and whole-word toggles, match count, and next/previous navigation
+- **Folder content search** (⌘⇧F) — recursively search every file in the open tree (or a single folder via right-click). Case-sensitive, whole-word, and an "include .gitignored files" toggle (off by default — `.gitignore` / `.ignore` / global gitignore are honored like ripgrep). Click a result to open the file and jump the preview to the matching line.
 - **Document export** — export the rendered page to **self-contained HTML** (CSS, fonts, and local images inlined; always light-themed) or **PDF** (native WebKit print pipeline)
 - Live reload when the open file changes on disk
 - Tabs with VS Code–style sticky/preview behavior (single-click replaces preview, double-click sticks)
@@ -131,11 +132,11 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
 - **File ▸ Open Folder…** (⇧⌘O) — re-roots the tree at any folder.
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
 - **File ▸ Export as HTML…** / **Export as PDF…** — exports the active tab's rendered document. HTML is fully self-contained; both are always rendered light-themed regardless of your OS appearance.
-- **Actions** — Copy (⌘C), Find… (⌘F), Copy Source, Toggle Raw.
+- **Actions** — Copy (⌘C), Find… (⌘F), Search Files… (⇧⌘F), Copy Source, Toggle Raw.
 
 ### Right-click
 
-Right-clicking anywhere in the preview shows a compact menu with Copy / Copy Source / Show Raw·Rendered. Right-clicking a row in the file tree shows **Copy Relative Path** (relative to the sidebar root) and **Copy Absolute Path** instead. macOS's default text menu (Look Up, Translate, Writing Tools, Speech, …) is suppressed.
+Right-clicking anywhere in the preview shows a compact menu with Copy / Copy Source / Show Raw·Rendered. Right-clicking a row in the file tree shows **Copy Relative Path** (relative to the sidebar root) and **Copy Absolute Path** — and on folder rows, a **Search in Folder…** entry that opens a sidebar takeover for content search inside that folder. Right-clicking the sidebar background does the same for the whole tree root. macOS's default text menu (Look Up, Translate, Writing Tools, Speech, …) is suppressed.
 
 ## Build from source
 
