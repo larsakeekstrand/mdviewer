@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::{git, markdown, recent, tasklist, tree, AppState};
+use crate::{git, markdown, recent, search, tasklist, tree, AppState};
 
 #[derive(Serialize)]
 pub struct InitialState {
@@ -525,6 +525,23 @@ pub fn install_cli() -> Result<InstallOutcome, String> {
 #[tauri::command]
 pub fn install_cli() -> Result<InstallOutcome, String> {
     Err("CLI install is only supported on macOS".to_string())
+}
+
+#[tauri::command]
+pub fn search_in_folder(
+    root: String,
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> Result<search::SearchResults, String> {
+    search::search_in_folder(
+        Path::new(&root),
+        &query,
+        search::SearchOpts {
+            case_sensitive,
+            whole_word,
+        },
+    )
 }
 
 #[cfg(test)]

@@ -72,6 +72,7 @@ pub fn run(startup: Startup) {
             commands::save_session,
             commands::install_cli,
             commands::platform,
+            commands::search_in_folder,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.
