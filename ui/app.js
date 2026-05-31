@@ -1752,6 +1752,9 @@ async function runEditAction(name) {
     case "find":
       openFind();
       break;
+    case "search-files":
+      if (treeRoot) enterSearchMode(treeRoot, { treeRoot });
+      break;
   }
 }
 
@@ -1860,6 +1863,19 @@ document.addEventListener("contextmenu", (ev) => {
     items.push({
       label: "Copy Absolute Path",
       action: () => copyText(absolute),
+    });
+    buildContextMenu(items, ev.clientX, ev.clientY);
+    return;
+  }
+
+  // Right-click on the sidebar background (header, padding, empty area below
+  // the tree) → offer to search the entire open tree.
+  const sidebar =
+    ev.target instanceof Element ? ev.target.closest("#sidebar") : null;
+  if (sidebar && treeRoot) {
+    items.push({
+      label: "Search in Folder…",
+      action: () => enterSearchMode(treeRoot, { treeRoot }),
     });
     buildContextMenu(items, ev.clientX, ev.clientY);
     return;

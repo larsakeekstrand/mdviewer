@@ -39,6 +39,9 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "edit-find" => {
                 let _ = app.emit("edit-action", "find");
             }
+            "edit-search-files" => {
+                let _ = app.emit("edit-action", "search-files");
+            }
             "edit-copy-source" => {
                 let _ = app.emit("edit-action", "copy-source");
             }
@@ -121,6 +124,9 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let edit_find = MenuItemBuilder::with_id("edit-find", "Find…")
         .accelerator("CmdOrCtrl+F")
         .build(app)?;
+    let edit_search_files = MenuItemBuilder::with_id("edit-search-files", "Search Files…")
+        .accelerator("CmdOrCtrl+Shift+F")
+        .build(app)?;
     let edit_copy_source =
         MenuItemBuilder::with_id("edit-copy-source", "Copy Source").build(app)?;
     let edit_toggle_raw = MenuItemBuilder::with_id("edit-toggle-raw", "Toggle Raw").build(app)?;
@@ -131,6 +137,7 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let edit_menu = SubmenuBuilder::new(app, "Actions")
         .item(&edit_copy)
         .item(&edit_find)
+        .item(&edit_search_files)
         .separator()
         .item(&edit_copy_source)
         .item(&edit_toggle_raw)
