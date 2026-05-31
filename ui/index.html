@@ -47,10 +47,57 @@
       </button>
     </div>
     <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
+      <div class="sidebar-header" id="sidebar-header-tree">
         <span class="sidebar-title" id="tree-title">Files</span>
       </div>
       <ul class="tree" id="tree" role="tree"></ul>
+      <section class="search-panel" id="search-panel" hidden aria-label="Folder search">
+        <div class="search-panel-header">
+          <button
+            id="search-back"
+            class="search-back"
+            type="button"
+            title="Back to files"
+            aria-label="Back to files"
+          >
+            ← Files
+          </button>
+          <span class="search-panel-title" id="search-panel-title"></span>
+        </div>
+        <div class="search-panel-input">
+          <input
+            id="search-input"
+            class="search-input"
+            type="text"
+            placeholder="Search in folder"
+            aria-label="Search in folder"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button
+            id="search-case"
+            class="search-toggle"
+            type="button"
+            aria-pressed="false"
+            title="Match case"
+            aria-label="Match case"
+          >
+            Aa
+          </button>
+          <button
+            id="search-word"
+            class="search-toggle"
+            type="button"
+            aria-pressed="false"
+            title="Whole word"
+            aria-label="Whole word"
+          >
+            \b
+          </button>
+        </div>
+        <div class="search-results" id="search-results"></div>
+        <div class="search-footer" id="search-footer" aria-live="polite"></div>
+      </section>
     </aside>
     <div class="splitter" id="splitter" role="separator" aria-orientation="vertical"></div>
     <main class="preview-pane" id="preview-pane">
