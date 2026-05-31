@@ -1,5 +1,11 @@
 import { findMatches } from "./search.js";
 import {
+  initSearchPanel,
+  enterSearchMode,
+  exitSearchMode,
+  isSearchModeOpen,
+} from "./folder_search.js";
+import {
   exportFilename,
   baseName,
   documentNeedsKatex,
@@ -198,6 +204,10 @@ function singleOrDouble(onSingle, onDouble, delay = DOUBLE_CLICK_MS) {
 async function init() {
   await detectPlatform();
   initMermaid();
+  initSearchPanel({
+    invoke,
+    openResult: (path, line) => openTabAtLine(path, line),
+  });
   const initial = await invoke("get_initial_state");
 
   // Register listeners before the readiness handshake so a file opened the
@@ -526,6 +536,7 @@ function rememberFolder(path) {
 }
 
 async function setTreeRoot(path) {
+  if (isSearchModeOpen()) exitSearchMode();
   treeRoot = path;
   treeTitle.textContent = basename(path) || path;
   treeTitle.title = path;
@@ -674,6 +685,12 @@ async function openSticky(path) {
   }
   tabs.push({ path, sticky: true, raw: false });
   await setActiveTab(tabs.length - 1);
+}
+
+function openTabAtLine(path, _line) {
+  // Real jump-to-line behavior added in the next task; for now, just open
+  // the file. Tabs use the existing single-click semantics.
+  return openPreview(path);
 }
 
 function persistSession() {
@@ -1764,7 +1781,15 @@ document.addEventListener("contextmenu", (ev) => {
       : null;
   if (treeRow && tree.contains(treeRow)) {
     const absolute = treeRow.dataset.path;
+    const isDir = treeRow.dataset.isDir === "1";
     const relative = relativeToRoot(absolute, treeRoot);
+    if (isDir) {
+      items.push({
+        label: "Search in Folder…",
+        action: () => enterSearchMode(absolute, { treeRoot }),
+      });
+      items.push("---");
+    }
     items.push({
       label: "Copy Relative Path",
       action: () => copyText(relative),
