@@ -93,6 +93,7 @@ let _state = {
   busy: false,
   caseSensitive: false,
   wholeWord: false,
+  includeIgnored: false,
 };
 let _root = null;
 let _rootRelativeTo = null;
@@ -117,6 +118,7 @@ export function initSearchPanel({ invoke, openResult }) {
     input: document.getElementById("search-input"),
     caseBtn: document.getElementById("search-case"),
     wordBtn: document.getElementById("search-word"),
+    includeIgnoredBtn: document.getElementById("search-include-ignored"),
     results: document.getElementById("search-results"),
     footer: document.getElementById("search-footer"),
   };
@@ -142,6 +144,14 @@ export function initSearchPanel({ invoke, openResult }) {
     _ui.wordBtn.setAttribute("aria-pressed", String(_state.wholeWord));
     scheduleSearch();
   });
+  _ui.includeIgnoredBtn.addEventListener("click", () => {
+    _state.includeIgnored = !_state.includeIgnored;
+    _ui.includeIgnoredBtn.setAttribute(
+      "aria-pressed",
+      String(_state.includeIgnored),
+    );
+    scheduleSearch();
+  });
 }
 
 export function enterSearchMode(folderPath, { treeRoot } = {}) {
@@ -154,10 +164,12 @@ export function enterSearchMode(folderPath, { treeRoot } = {}) {
     busy: false,
     caseSensitive: false,
     wholeWord: false,
+    includeIgnored: false,
   };
   _ui.input.value = "";
   _ui.caseBtn.setAttribute("aria-pressed", "false");
   _ui.wordBtn.setAttribute("aria-pressed", "false");
+  _ui.includeIgnoredBtn.setAttribute("aria-pressed", "false");
   _ui.title.textContent = relPath(folderPath, _rootRelativeTo) || folderPath;
   _ui.panel.hidden = false;
   _ui.sidebar.classList.add("searching");
@@ -208,6 +220,7 @@ async function runSearch() {
       query,
       caseSensitive: _state.caseSensitive,
       wholeWord: _state.wholeWord,
+      respectGitignore: !_state.includeIgnored,
     });
     if (seq !== _seq) return;
     _state.results = results;

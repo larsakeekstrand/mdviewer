@@ -33,8 +33,10 @@ syntect = "5.3"
 notify = "8.2"
 notify-debouncer-full = "0.7"
 
-# Recursive directory walking for folder content search
-walkdir = "2"
+# Recursive directory walking + .gitignore-aware filtering for folder content
+# search. `ignore` is the same walker ripgrep uses; with standard_filters(false)
+# it behaves identically to walkdir.
+ignore = "0.4"
 
 # Decode PNG export payloads from the frontend (canvas → base64 → bytes)
 base64 = "0.22"

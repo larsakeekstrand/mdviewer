@@ -533,6 +533,7 @@ pub fn search_in_folder(
     query: String,
     case_sensitive: bool,
     whole_word: bool,
+    respect_gitignore: bool,
 ) -> Result<search::SearchResults, String> {
     search::search_in_folder(
         Path::new(&root),
@@ -540,6 +541,7 @@ pub fn search_in_folder(
         search::SearchOpts {
             case_sensitive,
             whole_word,
+            respect_gitignore,
         },
     )
 }

@@ -10,10 +10,16 @@ use std::path::Path;
 
 use serde::Serialize;
 
+/// `Default` is "least filtering" (all bools false). The IPC layer always
+/// supplies an explicit value for every field, and tests use `Default` to
+/// get predictable behaviour regardless of any host's global gitignore. The
+/// user-facing default of "respect .gitignore" is set in the frontend
+/// (`ui/folder_search.js`), not here.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SearchOpts {
     pub case_sensitive: bool,
     pub whole_word: bool,
+    pub respect_gitignore: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq, Eq)]
@@ -121,7 +127,22 @@ pub fn search_in_folder(
 
     let mut results = SearchResults::default();
 
-    'outer: for entry in walkdir::WalkDir::new(root).follow_links(false) {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .standard_filters(false)
+        .hidden(false)
+        .follow_links(false);
+    if opts.respect_gitignore {
+        builder
+            .git_ignore(true)
+            .git_exclude(true)
+            .git_global(true)
+            .ignore(true)
+            .require_git(false)
+            .parents(true);
+    }
+
+    'outer: for entry in builder.build() {
         let entry = match entry {
             Ok(e) => e,
             Err(_) => {
@@ -129,7 +150,7 @@ pub fn search_in_folder(
                 continue;
             }
         };
-        if !entry.file_type().is_file() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
         let path = entry.path();
@@ -253,6 +274,7 @@ mod tests {
         SearchOpts {
             case_sensitive: cs,
             whole_word: ww,
+            respect_gitignore: false,
         }
     }
 
@@ -484,6 +506,75 @@ mod tests {
         let file = dir.join("a.md");
         fs::write(&file, "x").unwrap();
         assert!(search_in_folder(&file, "x", SearchOpts::default()).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn gitignore_opts() -> SearchOpts {
+        SearchOpts {
+            respect_gitignore: true,
+            ..SearchOpts::default()
+        }
+    }
+
+    #[test]
+    fn search_respects_gitignore_when_enabled() {
+        let dir = unique_temp_dir();
+        fs::write(dir.join(".gitignore"), "ignored.md\nbuild/\n").unwrap();
+        fs::write(dir.join("kept.md"), "needle here\n").unwrap();
+        fs::write(dir.join("ignored.md"), "needle in ignored\n").unwrap();
+        fs::create_dir(dir.join("build")).unwrap();
+        fs::write(dir.join("build").join("artifact.md"), "needle in build\n").unwrap();
+
+        let res = search_in_folder(&dir, "needle", gitignore_opts()).unwrap();
+
+        let paths: HashSet<String> = res.matches.iter().map(|m| m.path.clone()).collect();
+        assert!(paths.iter().any(|p| p.ends_with("kept.md")));
+        assert!(
+            !paths.iter().any(|p| p.ends_with("ignored.md")),
+            "ignored.md should be skipped: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| p.contains("build/")),
+            "build/ should be skipped: {paths:?}"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_includes_gitignored_files_when_option_off() {
+        let dir = unique_temp_dir();
+        fs::write(dir.join(".gitignore"), "ignored.md\n").unwrap();
+        fs::write(dir.join("kept.md"), "needle here\n").unwrap();
+        fs::write(dir.join("ignored.md"), "needle in ignored\n").unwrap();
+
+        let res = search_in_folder(&dir, "needle", SearchOpts::default()).unwrap();
+
+        let paths: HashSet<String> = res.matches.iter().map(|m| m.path.clone()).collect();
+        assert!(paths.iter().any(|p| p.ends_with("kept.md")));
+        assert!(
+            paths.iter().any(|p| p.ends_with("ignored.md")),
+            "ignored.md should be searched when respect_gitignore=false: {paths:?}"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_with_gitignore_finds_hidden_dotfiles() {
+        // The ignore crate's `hidden` filter is OFF in our config; dotfiles
+        // that aren't in .gitignore should still be searched.
+        let dir = unique_temp_dir();
+        fs::write(dir.join(".gitignore"), "build/\n").unwrap();
+        fs::write(dir.join(".env"), "API_KEY=needle\n").unwrap();
+        fs::write(dir.join("kept.md"), "needle here\n").unwrap();
+
+        let res = search_in_folder(&dir, "needle", gitignore_opts()).unwrap();
+
+        let paths: HashSet<String> = res.matches.iter().map(|m| m.path.clone()).collect();
+        assert!(paths.iter().any(|p| p.ends_with(".env")));
+        assert!(paths.iter().any(|p| p.ends_with("kept.md")));
+
         fs::remove_dir_all(&dir).unwrap();
     }
 }
