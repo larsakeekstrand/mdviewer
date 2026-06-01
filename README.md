@@ -31,6 +31,7 @@ A markdown viewer for macOS and Windows with a VS Code–style file tree and a b
 - CLI: `mdviewer [file-or-directory]`
 - **Install Command Line Tool** — one menu click symlinks `mdviewer` into `/usr/local/bin` so you can launch it from any terminal
 - **One-click auto-update** — MDViewer checks for new releases on launch and then once an hour while it's running; when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app, and a **What's new** button on the banner shows that release's changelog in an in-app window before you decide
+- **Beta update channel** — opt in via **MDViewer ▸ Settings…** to receive pre-release builds as soon as they publish, and roll onto stable automatically when a final release follows
 
 ## Install
 
@@ -133,6 +134,17 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
 - **File ▸ Export as HTML…** / **Export as PDF…** — exports the active tab's rendered document. HTML is fully self-contained; both are always rendered light-themed regardless of your OS appearance.
 - **Actions** — Copy (⌘C), Find… (⌘F), Search Files… (⇧⌘F), Copy Source, Toggle Raw.
+- **MDViewer ▸ Settings…** (⌘,) — opens the Preferences window where you can opt in to beta (pre-release) updates.
+
+### Beta updates
+
+MDViewer can track a beta (pre-release) channel. Open **MDViewer ▸ Settings…**
+(⌘,) and tick **Receive beta (pre-release) updates** to opt in. From then on the
+in-app update check follows the beta channel, which always offers the newest
+build — including stable releases — so a beta tester is never left behind a
+final release. Untick the box to return to stable-only updates; the change takes
+effect at the next update check (no restart needed). Beta builds may be less
+stable than final releases.
 
 ### Right-click
 
