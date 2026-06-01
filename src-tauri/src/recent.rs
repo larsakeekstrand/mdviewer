@@ -118,13 +118,11 @@ pub fn save_session(app: &AppHandle, tabs: &[PathBuf], active: Option<usize>) {
     write_store(app, &store);
 }
 
-#[allow(dead_code)]
 pub fn load_channel(app: &AppHandle) -> UpdateChannel {
     load_store(app).channel
 }
 
 /// Persists the update channel, preserving every other field.
-#[allow(dead_code)]
 pub fn save_channel(app: &AppHandle, channel: UpdateChannel) {
     let mut store = load_store(app);
     store.channel = channel;

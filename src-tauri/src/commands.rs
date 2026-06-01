@@ -5,6 +5,30 @@ use tauri::{AppHandle, State};
 
 use crate::{git, markdown, recent, search, tasklist, tree, AppState};
 
+/// Updater manifest endpoints. `STABLE_UPDATE_URL` mirrors the endpoint baked
+/// into `tauri.conf.json`; `BETA_UPDATE_URL` is the rolling pre-release channel.
+/// If you change either, update `tauri.conf.json` / the release workflow to match.
+const STABLE_UPDATE_URL: &str =
+    "https://github.com/larsakeekstrand/mdviewer/releases/latest/download/latest.json";
+const BETA_UPDATE_URL: &str =
+    "https://github.com/larsakeekstrand/mdviewer/releases/download/beta/latest.json";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMeta {
+    rid: tauri::ResourceId,
+    version: String,
+    current_version: String,
+    body: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preferences {
+    pub channel: recent::UpdateChannel,
+    pub version: String,
+}
+
 #[derive(Serialize)]
 pub struct InitialState {
     pub tree_root: String,
@@ -119,6 +143,69 @@ pub fn platform() -> &'static str {
 #[tauri::command]
 pub fn restart(app: AppHandle) {
     app.restart();
+}
+
+#[tauri::command]
+pub fn get_preferences(app: AppHandle) -> Preferences {
+    Preferences {
+        channel: recent::load_channel(&app),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+/// Persists the user's update channel. Best-effort: like the rest of the
+/// `recent` store, an underlying write failure is swallowed rather than
+/// surfaced to the caller.
+#[tauri::command]
+pub fn set_update_channel(app: AppHandle, channel: recent::UpdateChannel) {
+    recent::save_channel(&app, channel);
+}
+
+/// Checks for an update on the user's selected channel. Mirrors the updater
+/// plugin's own `check`, but overrides the endpoint per the stored channel and
+/// returns the resource id so the frontend can hand it to the plugin's
+/// (unchanged) `download_and_install`.
+#[tauri::command]
+pub async fn check_update(
+    app: AppHandle,
+    webview: tauri::Webview,
+) -> Result<Option<UpdateMeta>, String> {
+    use tauri::Manager;
+    use tauri_plugin_updater::UpdaterExt;
+
+    let url = match recent::load_channel(&app) {
+        recent::UpdateChannel::Beta => BETA_UPDATE_URL,
+        recent::UpdateChannel::Stable => STABLE_UPDATE_URL,
+    };
+    let endpoint = tauri::Url::parse(url).map_err(|e| format!("bad updater endpoint: {e}"))?;
+
+    let updater = webview
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| format!("updater endpoints: {e}"))?
+        .build()
+        .map_err(|e| format!("updater build: {e}"))?;
+
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("update check failed: {e}"))?;
+
+    match update {
+        Some(update) => {
+            let version = update.version.clone();
+            let current_version = update.current_version.clone();
+            let body = update.body.clone();
+            let rid = webview.resources_table().add(update);
+            Ok(Some(UpdateMeta {
+                rid,
+                version,
+                current_version,
+                body,
+            }))
+        }
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]
