@@ -2159,7 +2159,25 @@ document.addEventListener("keydown", (ev) => {
 const REPO = "larsakeekstrand/mdviewer";
 const DISMISS_KEY = "mdviewer.update.dismissed_version";
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-const updaterApi = window.__TAURI__.updater;
+/** Wrap the metadata returned by the `check_update` command into the same
+ *  surface the banner already consumes. `downloadAndInstall` reuses the updater
+ *  plugin's own command via the resource id. */
+function wrapUpdate(meta) {
+  if (!meta) return null;
+  return {
+    version: meta.version,
+    currentVersion: meta.currentVersion,
+    body: meta.body,
+    async downloadAndInstall(onEvent) {
+      const channel = new window.__TAURI__.core.Channel();
+      if (onEvent) channel.onmessage = onEvent;
+      await invoke("plugin:updater|download_and_install", {
+        rid: meta.rid,
+        onEvent: channel,
+      });
+    },
+  };
+}
 let updateInProgress = false;
 
 const updateBanner = document.getElementById("update-banner");
@@ -2257,7 +2275,7 @@ async function checkForUpdates({ silent = true } = {}) {
   if (updateInProgress) return;
   let update;
   try {
-    update = await updaterApi.check();
+    update = wrapUpdate(await invoke("check_update"));
   } catch (e) {
     if (silent) {
       // No published release yet, network error, etc.
