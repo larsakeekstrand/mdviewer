@@ -6,6 +6,16 @@ use tauri::{AppHandle, Manager};
 const MAX_RECENT: usize = 10;
 const FILE_NAME: &str = "recent.json";
 
+/// Which release stream the auto-updater follows. Persisted in `recent.json`;
+/// read at update-check time to pick the manifest endpoint.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Beta,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Store {
     folders: Vec<PathBuf>,
@@ -15,6 +25,8 @@ struct Store {
     open_tabs: Vec<PathBuf>,
     #[serde(default)]
     active_tab: Option<usize>,
+    #[serde(default)]
+    channel: UpdateChannel,
 }
 
 impl Store {
@@ -103,6 +115,19 @@ pub fn save_session(app: &AppHandle, tabs: &[PathBuf], active: Option<usize>) {
     let mut store = load_store(app);
     store.open_tabs = tabs.to_vec();
     store.active_tab = active;
+    write_store(app, &store);
+}
+
+#[allow(dead_code)]
+pub fn load_channel(app: &AppHandle) -> UpdateChannel {
+    load_store(app).channel
+}
+
+/// Persists the update channel, preserving every other field.
+#[allow(dead_code)]
+pub fn save_channel(app: &AppHandle, channel: UpdateChannel) {
+    let mut store = load_store(app);
+    store.channel = channel;
     write_store(app, &store);
 }
 
@@ -271,5 +296,29 @@ mod tests {
         );
         assert_eq!(kept, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
         assert_eq!(active, None);
+    }
+
+    #[test]
+    fn store_defaults_channel_to_stable() {
+        let s = Store::default();
+        assert_eq!(s.channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn deserializes_legacy_store_without_channel() {
+        let back: Store = serde_json::from_str(r#"{"folders":["/a"]}"#).unwrap();
+        assert_eq!(back.channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn channel_round_trips_as_lowercase() {
+        let s = Store {
+            channel: UpdateChannel::Beta,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"channel\":\"beta\""), "got: {json}");
+        let back: Store = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.channel, UpdateChannel::Beta);
     }
 }
