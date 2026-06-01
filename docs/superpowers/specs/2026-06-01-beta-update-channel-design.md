@@ -32,17 +32,23 @@ releases.
 
 ## Key technical constraints that shaped the approach
 
-1. **The JS `check()` always uses the endpoint the plugin was registered with at
-   startup.** GitHub serves static manifests, so the response can't be varied
-   per-user by header or query string. The only lever is *which endpoint the
-   plugin holds*. Therefore per-user channel selection is fixed at startup
-   (plugin registration), and a channel change applies on relaunch.
-2. **Immediate in-place switching would require replacing the JS
-   `check()`/`downloadAndInstall` path** with Rust `updater_builder().endpoints()`
-   + Rust download/install commands + event-based progress. That reworks the
-   hardened update path and is explicitly out of scope. We accept
-   relaunch-to-apply instead.
-3. **Semver ordering is on our side:** `1.15.1 < 1.16.0-rc.1 < 1.16.0`. A beta
+1. **The plugin's JS `check()` reads endpoints from immutable managed state**
+   seeded from `tauri.conf.json` at plugin setup. The plugin `Builder` exposes
+   `pubkey`/`installer_args` but **not** `endpoints`, so there is no
+   startup-fixed way to point the bundled `check()` at a beta URL. (This
+   invalidated an earlier plan of overriding endpoints at plugin registration.)
+2. **The runtime path *can* choose endpoints.**
+   `webview.updater_builder().endpoints(vec![url])?` builds an updater against an
+   arbitrary endpoint at call time. A small custom `check_update` command uses
+   this, picking the URL from the stored channel. Crucially, the resulting
+   `Update` is added to the webview resource table and its `rid` is returned —
+   and the **existing, hardened** `plugin:updater|download_and_install` command
+   looks an update up by `rid`. So only `check` is custom; download + progress +
+   install are reused verbatim.
+3. **Channel choice is read per-check, so no relaunch is needed.** Toggling the
+   channel persists it and re-runs the normal `checkForUpdates()`; the next check
+   uses the new endpoint immediately.
+4. **Semver ordering is on our side:** `1.15.1 < 1.16.0-rc.1 < 1.16.0`. A beta
    tester rolls rc → rc → final stable with no special "downgrade" logic and
    without `allowDowngrades`.
 
@@ -108,30 +114,57 @@ Legacy `recent.json` files without the field deserialize to `Stable` (covered by
 `#[serde(default)]`, same pattern as the existing legacy-store tests). Add unit
 tests: round-trip with channel, and legacy-store-without-channel → `Stable`.
 
-### 3. Updater registration (`lib.rs`)
+### 3. Channel-aware update check (`commands.rs` + frontend)
 
-Where the updater plugin is registered (currently
-`.plugin(tauri_plugin_updater::Builder::new().build())`), read the persisted
-channel and choose the endpoint:
+The bundled updater plugin stays registered as-is (its `tauri.conf.json` stable
+endpoint becomes a harmless default — our command always sets endpoints
+explicitly). We add **one** custom command that mirrors the plugin's `check` plus
+an endpoint override, and a thin JS shim.
+
+**Rust `check_update` command (`commands.rs`):** picks the endpoint from the
+stored channel, builds an updater against it via `webview.updater_builder()
+.endpoints(...)`, runs `check()`, and — exactly as the plugin's own `check`
+does — adds the resulting `Update` to `webview.resources_table()` and returns its
+`rid` alongside the version/body. Constants:
 
 ```rust
-const STABLE_URL: &str = ".../releases/latest/download/latest.json";
-const BETA_URL:   &str = ".../releases/download/beta/latest.json";
-
-let channel = recent::load_channel(&handle);
-let endpoint = if channel == UpdateChannel::Beta { BETA_URL } else { STABLE_URL };
-tauri_plugin_updater::Builder::new()
-    .endpoints(vec![endpoint.parse().expect("valid updater endpoint")])?
-    .build()
+const STABLE_URL: &str = "https://github.com/larsakeekstrand/mdviewer/releases/latest/download/latest.json";
+const BETA_URL:   &str = "https://github.com/larsakeekstrand/mdviewer/releases/download/beta/latest.json";
 ```
 
-Registration must happen where an `AppHandle` (or `&App`) is available so
-`recent::load_channel` can resolve `app_data_dir()` — i.e. inside `setup` (the
-documented pattern: `app.handle().plugin(...)`), not the bare builder chain, if
-the current chain has no handle. The stable URL stays the default in
-`tauri.conf.json` `endpoints` as documentation/fallback; `.endpoints()`
-overrides it at runtime. Everything downstream — JS `check()`, the banner,
-progress, *What's new*, install — is **unchanged**.
+`tauri::Url` is the re-export of `url::Url` (no new dependency). The exact borrow
+order (read `version`/`body`/`current_version` off the `Update` before moving it
+into the resource table) is spelled out in the plan.
+
+**Frontend shim (`ui/app.js`):** replace `updaterApi.check()` in
+`checkForUpdates()` with `invoke("check_update")`, wrapping the returned metadata
+in an object exposing the same surface the banner already uses (`.version`,
+`.currentVersion`, `.body`, `.downloadAndInstall(cb)`):
+
+```js
+function wrapUpdate(meta) {
+  if (!meta) return null;
+  return {
+    version: meta.version,
+    currentVersion: meta.currentVersion,
+    body: meta.body,
+    async downloadAndInstall(onEvent) {
+      const channel = new window.__TAURI__.core.Channel();
+      if (onEvent) channel.onmessage = onEvent;
+      await invoke("plugin:updater|download_and_install", {
+        rid: meta.rid,
+        onEvent: channel,
+      });
+    },
+  };
+}
+```
+
+`download_and_install` is the same plugin command the banner installs with today
+(permission already granted via `updater:default`), so its behavior is unchanged.
+Because `check_update` reads the channel per call, switching channels takes effect
+on the next check — **no relaunch**. Everything downstream of `check` — banner
+state machine, progress, *What's new*, install, restart — is untouched.
 
 ### 4. Preferences window (frontend + small Rust surface)
 
@@ -145,32 +178,35 @@ non-resizable-ish, titled "Settings".
 - A checkbox **"Receive beta (pre-release) updates"**, reflecting the persisted
   channel.
 - A one-line explainer (betas may be unstable; you can switch back any time).
-- A read-only **"Current version: X.Y.Z"** line (from `CARGO_PKG_VERSION`, via an
-  existing or tiny new command / the version is also available to the frontend).
+- A read-only **"Current version: X.Y.Z"** line, supplied by the
+  `get_preferences` command (returns `{ channel, version }` where `version` is
+  `env!("CARGO_PKG_VERSION")`).
 
-**Menu.** Add `MDViewer ▸ Settings…` with accelerator `CmdOrCtrl+,`. In
-`menu.rs` it emits an event (or directly opens the window). Opening reuses the
-window if already present (focus it) rather than spawning duplicates.
+**Menu.** Add `MDViewer ▸ Settings…` with accelerator `CmdOrCtrl+,`. The
+`menu.rs` handler opens the window directly (Rust `WebviewWindowBuilder`), and if
+a window with that label already exists it focuses it rather than spawning a
+duplicate.
 
-**Toggle flow.** Changing the checkbox calls a Rust command
-`set_update_channel(channel)` → `recent::save_channel`. After persisting, the UI
-surfaces **"Relaunch now to apply?"** — confirm → `restart` (the process-plugin
-restart already used by the banner's *Restart now*); decline → the change takes
-effect on the next launch. A `get_update_channel` command (or bundling channel +
-version into one `get_preferences` command) feeds the window's initial state.
+**Toggle flow.** Changing the checkbox calls `set_update_channel(channel)` →
+`recent::save_channel`. No relaunch: because `check_update` reads the channel per
+call, the change takes effect at the next update check. The prefs window may
+optionally emit an event so the main window kicks off an immediate
+`checkForUpdates()`, but that is a nicety, not required for correctness.
+`get_preferences` feeds the window's initial checkbox + version state.
 
 ### 5. Documentation
 
 - **README**: a short "Beta updates" subsection under the updates docs — how to
   opt in (Settings → checkbox), what to expect, how to switch back.
 - **CLAUDE.md**: document the channel architecture (rolling `beta` release,
-  superset model, startup-fixed endpoint, Preferences window) and add a
-  beta-release recipe alongside the existing "Cutting a release" steps.
+  superset model, the custom `check_update` command + JS shim, Preferences
+  window) and add a beta-release recipe alongside the existing "Cutting a
+  release" steps.
 
 ## Out of scope (YAGNI)
 
-- Immediate in-place channel switching (no relaunch) — explicitly rejected;
-  relaunch-to-apply is acceptable.
+- Replacing the plugin's download/install path — reused verbatim via the `rid`
+  handed to `plugin:updater|download_and_install`.
 - Migrating the theme toggle into Preferences — the toolbar `☾/☀` stays.
 - A general preferences framework — the window holds only the beta toggle (+
   version line) for now; it can grow later.
@@ -197,8 +233,10 @@ version into one `get_preferences` command) feeds the window's initial state.
   Windows asset URLs and restores `notes`; the beta path needs the equivalent so
   the in-app *What's new* modal and Windows installer URLs resolve on the `beta`
   release too.
-- **Endpoint registration needs an AppHandle** — must register the updater where
-  `app_data_dir()` is resolvable.
+- **`check_update` borrow order** — read `version`/`body`/`current_version` off
+  the `Update` *before* moving it into `webview.resources_table().add(...)`; the
+  add consumes/owns it and yields the `rid`.
+- **New window needs capability scope** — the `preferences` window label must be
+  added to `capabilities/default.json` `windows` (or a new capability), or its
+  webview gets no `core`/`event` permissions and `invoke` fails.
 - **Don't widen CSP** for the new window; external JS only.
-</content>
-</invoke>
