@@ -31,6 +31,13 @@ impl WatcherSlot {
             .to_path_buf();
 
         let watched_file = canonical.clone();
+        // Emit the path exactly as the frontend handed it to us, NOT the
+        // canonical form: the frontend gates its re-render on
+        // `payload === tab.path` (string identity), and tab paths are kept
+        // un-canonicalized. Emitting the canonical path silently drops live
+        // reload whenever a symlink sits in the ancestry (e.g. macOS
+        // /tmp → /private/tmp, iCloud/synced or symlinked project folders).
+        let payload = file.to_string_lossy().into_owned();
         let app_handle = app.clone();
 
         let mut debouncer = new_debouncer(
@@ -46,8 +53,7 @@ impl WatcherSlot {
                     .flat_map(|ev| ev.paths.iter())
                     .any(|p| paths_match(p, &watched_file));
                 if touches_target {
-                    let payload = watched_file.to_string_lossy().into_owned();
-                    let _ = app_handle.emit("file-changed", payload);
+                    let _ = app_handle.emit("file-changed", payload.clone());
                 }
             },
         )
