@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release as (e.g. v0.1.0). Must already exist as a git tag."
+        description: "Tag to release as (e.g. v0.1.0 or v0.1.0-rc.1). Must already exist as a git tag."
         required: true
         type: string
 
@@ -19,34 +19,92 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  build-macos:
-    name: Build macOS (aarch64)
-    runs-on: macos-14
+  meta:
+    name: Resolve release facts
+    runs-on: ubuntu-latest
     outputs:
-      changelog: ${{ steps.changelog.outputs.value }}
+      tag: ${{ steps.r.outputs.tag }}
+      release_tag: ${{ steps.r.outputs.release_tag }}
+      release_name: ${{ steps.r.outputs.release_name }}
+      is_prerelease: ${{ steps.r.outputs.is_prerelease }}
+      is_draft: ${{ steps.r.outputs.is_draft }}
     steps:
-      - name: Resolve tag
-        id: tag
+      - name: Resolve
+        id: r
         env:
           DISPATCH_TAG: ${{ inputs.tag }}
           REF_TAG: ${{ github.ref_name }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
+          set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "value=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+            TAG="$DISPATCH_TAG"
           else
-            echo "value=$REF_TAG" >> "$GITHUB_OUTPUT"
+            TAG="$REF_TAG"
           fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # A "-" in the semver tag (e.g. v1.16.0-rc.1) marks a prerelease.
+          case "$TAG" in
+            *-*)
+              echo "release_tag=beta" >> "$GITHUB_OUTPUT"
+              echo "release_name=Beta channel" >> "$GITHUB_OUTPUT"
+              echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+              echo "is_draft=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+              echo "release_name=$TAG" >> "$GITHUB_OUTPUT"
+              echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "is_draft=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
+  prepare-beta:
+    name: Reset rolling beta release
+    needs: meta
+    if: ${{ needs.meta.outputs.is_prerelease == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ steps.tag.outputs.value }}
+          ref: ${{ needs.meta.outputs.tag }}
+          fetch-depth: 0
+      - name: Reset the rolling beta release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Drop the old release, repoint the rolling `beta` tag at the current
+          # prerelease commit, then create a fresh empty release. Pre-creating it
+          # here (rather than letting the two build jobs create it) means both
+          # build jobs find an existing release and take the upload path — no
+          # parallel createRelease race (which would 422 the slower job).
+          gh release delete beta --yes || true
+          git tag -f beta
+          git push -f origin beta
+          gh release create beta \
+            --prerelease \
+            --title "Beta channel" \
+            --notes "Rolling pre-release channel. The in-app updater reads latest.json on this release." \
+            --verify-tag
+
+  build-macos:
+    name: Build macOS (aarch64)
+    needs: [meta, prepare-beta]
+    if: ${{ always() && needs.meta.result == 'success' && needs.prepare-beta.result != 'failure' }}
+    runs-on: macos-14
+    outputs:
+      changelog: ${{ steps.changelog.outputs.value }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
           fetch-depth: 0
 
       - name: Build changelog
         id: changelog
         env:
-          CURRENT: ${{ steps.tag.outputs.value }}
+          CURRENT: ${{ needs.meta.outputs.tag }}
         run: |
           set -euo pipefail
           PREV=$(git describe --tags --abbrev=0 "${CURRENT}^" 2>/dev/null || true)
@@ -61,7 +119,6 @@ jobs:
             LOG=$(git log "${PREV}..HEAD" --pretty=format:'- %s (%h)' --no-merges --reverse)
           fi
 
-          # Multiline output via heredoc-style delimiter
           {
             echo "value<<CHANGELOG_EOF"
             echo "$HEADER"
@@ -88,8 +145,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: src-tauri
-          tagName: ${{ steps.tag.outputs.value }}
-          releaseName: ${{ steps.tag.outputs.value }}
+          tagName: ${{ needs.meta.outputs.release_tag }}
+          releaseName: ${{ needs.meta.outputs.release_name }}
           releaseBody: |
             ## Install (Apple Silicon)
 
@@ -139,31 +196,19 @@ jobs:
             ## Changes
 
             ${{ steps.changelog.outputs.value }}
-          releaseDraft: true
-          prerelease: false
+          releaseDraft: ${{ needs.meta.outputs.is_draft }}
+          prerelease: ${{ needs.meta.outputs.is_prerelease }}
           args: --target aarch64-apple-darwin
 
   build-windows:
     name: Build Windows (x86_64)
+    needs: [meta, prepare-beta]
+    if: ${{ always() && needs.meta.result == 'success' && needs.prepare-beta.result != 'failure' }}
     runs-on: windows-latest
     steps:
-      - name: Resolve tag
-        id: tag
-        shell: bash
-        env:
-          DISPATCH_TAG: ${{ inputs.tag }}
-          REF_TAG: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "value=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=$REF_TAG" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: actions/checkout@v6
         with:
-          ref: ${{ steps.tag.outputs.value }}
+          ref: ${{ needs.meta.outputs.tag }}
           fetch-depth: 0
 
       - name: Install Rust toolchain
@@ -184,42 +229,34 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: src-tauri
-          tagName: ${{ steps.tag.outputs.value }}
-          releaseName: ${{ steps.tag.outputs.value }}
-          releaseDraft: true
+          tagName: ${{ needs.meta.outputs.release_tag }}
+          releaseName: ${{ needs.meta.outputs.release_name }}
+          releaseDraft: ${{ needs.meta.outputs.is_draft }}
+          prerelease: ${{ needs.meta.outputs.is_prerelease }}
 
   polish-release:
     name: Rename installers for clarity
-    needs: [build-macos, build-windows]
+    needs: [meta, build-macos, build-windows]
+    if: ${{ always() && needs.build-macos.result == 'success' && needs.build-windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve tag
-        id: tag
-        env:
-          DISPATCH_TAG: ${{ inputs.tag }}
-          REF_TAG: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "value=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=$REF_TAG" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Rename installers and patch latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          TAG: ${{ steps.tag.outputs.value }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          RELEASE_TAG: ${{ needs.meta.outputs.release_tag }}
           CHANGELOG: ${{ needs.build-macos.outputs.changelog }}
         run: |
           set -euo pipefail
 
           # Tauri's bundler embeds the bare semver (no leading "v", no pre-release
           # suffix) in installer filenames. Derive it from the tag so this works
-          # for both vX.Y.Z and vX.Y.Z-rcN tags.
+          # for both vX.Y.Z and vX.Y.Z-rc.N tags.
           VERSION=$(echo "$TAG" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-          RELEASE_ID=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          # Release operations target the *published* release tag, which is the
+          # rolling "beta" for prereleases and the actual tag for stable.
+          RELEASE_ID=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")
 
           rename_asset() {
             local old="$1"; local new="$2"
@@ -239,9 +276,6 @@ jobs:
           rename_asset "MDViewer_${VERSION}_x64_en-US.msi"        "MDViewer_${VERSION}_Windows_x64_en-US.msi"
           rename_asset "MDViewer_${VERSION}_x64_en-US.msi.sig"    "MDViewer_${VERSION}_Windows_x64_en-US.msi.sig"
 
-          # latest.json embeds full URLs to the Windows installers; rewrite those
-          # so the auto-updater resolves the renamed files. The .app.tar.gz path
-          # is unchanged (we don't rename the updater payload).
           LATEST_ID=$(gh api "repos/$REPO/releases/$RELEASE_ID/assets" --jq '.[] | select(.name == "latest.json") | .id')
           if [ -z "$LATEST_ID" ]; then
             echo "::warning::latest.json not found on the release; skipping URL patch"
@@ -254,12 +288,6 @@ jobs:
             s|MDViewer_${VERSION}_x64_en-US\.msi|MDViewer_${VERSION}_Windows_x64_en-US.msi|g
           " latest.json
 
-          # The Windows tauri-action job re-emits latest.json without a body,
-          # blanking the "notes" field the macOS job set. The in-app "What's new"
-          # modal reads notes (not the GitHub release page body), so restore the
-          # changelog here. extractChangelog (ui/update.js) slices after the
-          # "## Changes" heading. CHANGELOG comes via env + jq --arg, never
-          # interpolated into the shell.
           NOTES=$(printf '## Changes\n\n%s\n' "$CHANGELOG")
           jq --arg notes "$NOTES" '.notes = $notes' latest.json > latest.json.tmp
           mv latest.json.tmp latest.json
@@ -267,4 +295,4 @@ jobs:
           python3 -m json.tool latest.json > /dev/null
 
           gh api -X DELETE "repos/$REPO/releases/assets/$LATEST_ID"
-          gh release upload "$TAG" latest.json -R "$REPO"
+          gh release upload "$RELEASE_TAG" latest.json -R "$REPO"
