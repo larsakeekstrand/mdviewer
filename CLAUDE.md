@@ -167,6 +167,19 @@ icon.svg          — source for icon regeneration
   the `restart` command. Because the download is in-process, the new bundle is
   never quarantined — no `xattr` step on update (unlike the first manual DMG
   install).
+- **Beta channel**: a persisted `channel` (`stable`/`beta`) in `recent.json`
+  selects the updater endpoint. The bundled updater plugin can't switch
+  endpoints at runtime, so a custom `commands::check_update` builds
+  `webview.updater_builder().endpoints(...)` from the stored channel, adds the
+  resulting `Update` to the webview resource table, and returns its `rid`; the
+  frontend `wrapUpdate` shim (`app.js`) hands that `rid` to the unchanged
+  `plugin:updater|download_and_install`. Channel is read per check, so toggling
+  it in **MDViewer ▸ Settings…** (`ui/preferences.html`/`.js`, a `preferences`
+  window listed in `capabilities/default.json`) takes effect at the next check —
+  no relaunch. Betas publish as GitHub *prereleases* to a single rolling `beta`
+  release (`releases/download/beta/latest.json`); `release.yml` branches on a
+  `-` in the tag, and `promote-beta.yml` copies a published stable `latest.json`
+  onto the `beta` release so testers roll onto stable (superset model).
 - **Folder content search**: right-click a folder in the tree → "Search in
   Folder…", or right-click the sidebar background, or **Actions ▸ Search
   Files…** (⌘⇧F) to search the whole open tree. All three open a sidebar
@@ -477,6 +490,15 @@ The release workflow signs the `.app.tar.gz` and attaches `latest.json` when the
 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are
 set (one-time setup). Publishing the draft (step 7) is what makes the update
 reach existing installs.
+
+**Cutting a beta:** bump `Cargo.toml` + `tauri.conf.json` to a prerelease
+version (e.g. `1.16.0-rc.1`), `cargo update -p mdviewer`, commit, then
+`git tag v1.16.0-rc.1 && git push origin v1.16.0-rc.1`. The release workflow
+detects the `-` and publishes to the rolling `beta` release (prerelease,
+non-draft) instead of a draft — beta-opted installs pick it up automatically.
+When the matching stable `vX.Y.Z` is later published, `promote-beta.yml` rolls
+beta testers onto it. Smoke-test the manifest with
+`gh release view beta --json assets` after the run.
 
 ### Icon regeneration
 
