@@ -1,0 +1,44 @@
+name: Promote stable to beta channel
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: Copy stable latest.json onto the beta release
+    if: ${{ !github.event.release.prerelease && github.event.release.tag_name != 'beta' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          STABLE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          STABLE_ID=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name == \"$STABLE_TAG\") | .id")
+          SRC_ID=$(gh api "repos/$REPO/releases/$STABLE_ID/assets" --jq '.[] | select(.name == "latest.json") | .id')
+          if [ -z "$SRC_ID" ]; then
+            echo "::warning::stable release has no latest.json; nothing to promote"
+            exit 0
+          fi
+          gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$SRC_ID" > latest.json
+          python3 -m json.tool latest.json > /dev/null
+
+          # The beta release must already exist (it does once any rc has shipped).
+          BETA_ID=$(gh api "repos/$REPO/releases" --jq '.[] | select(.tag_name == "beta") | .id')
+          if [ -z "$BETA_ID" ]; then
+            echo "::warning::no beta release yet; skipping promotion"
+            exit 0
+          fi
+          OLD_ID=$(gh api "repos/$REPO/releases/$BETA_ID/assets" --jq '.[] | select(.name == "latest.json") | .id')
+          if [ -n "$OLD_ID" ]; then
+            gh api -X DELETE "repos/$REPO/releases/assets/$OLD_ID"
+          fi
+          gh release upload beta latest.json -R "$REPO"
+          echo "Promoted $STABLE_TAG manifest onto the beta channel."
