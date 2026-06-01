@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{AppHandle, Emitter, Wry};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::recent;
@@ -27,6 +27,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "check-updates" => {
                 let _ = app.emit("menu-check-updates", ());
             }
+            "settings" => open_settings(app),
             "install-cli" => {
                 let _ = app.emit("menu-install-cli", ());
             }
@@ -87,6 +88,9 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
 
     let check_updates =
         MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+    let settings = MenuItemBuilder::with_id("settings", "Settings…")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
     #[cfg(target_os = "macos")]
     let install_cli =
         MenuItemBuilder::with_id("install-cli", "Install Command Line Tool…").build(app)?;
@@ -100,6 +104,8 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     let app_menu_builder = app_menu_builder.item(&install_cli);
     let app_menu = app_menu_builder
+        .separator()
+        .item(&settings)
         .separator()
         .item(&PredefinedMenuItem::hide(app, None)?)
         .item(&PredefinedMenuItem::hide_others(app, None)?)
@@ -187,6 +193,22 @@ fn build_recent_submenu(app: &AppHandle) -> tauri::Result<tauri::menu::Submenu<W
         builder = builder.separator().item(&clear);
     }
     builder.build()
+}
+
+fn open_settings(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("preferences") {
+        let _ = win.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(
+        app,
+        "preferences",
+        WebviewUrl::App("preferences.html".into()),
+    )
+    .title("Settings")
+    .inner_size(440.0, 230.0)
+    .resizable(false)
+    .build();
 }
 
 fn prompt_open_file(app: AppHandle) {
