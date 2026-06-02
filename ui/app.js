@@ -2064,7 +2064,7 @@ async function runEditAction(name) {
   if (
     t &&
     isImagePath(t.path) &&
-    (name === "copy-source" || name === "toggle-raw")
+    (name === "copy-source" || name === "toggle-raw" || name === "toggle-edit")
   ) {
     showTransientError("Not available for images.");
     return;
@@ -2078,6 +2078,12 @@ async function runEditAction(name) {
       break;
     case "toggle-raw":
       onToggleRaw();
+      break;
+    case "toggle-edit":
+      await onToggleEdit();
+      break;
+    case "save":
+      await saveActive();
       break;
     case "find":
       openFind();

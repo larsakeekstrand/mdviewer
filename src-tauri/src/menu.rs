@@ -49,6 +49,12 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "edit-toggle-raw" => {
                 let _ = app.emit("edit-action", "toggle-raw");
             }
+            "edit-toggle-edit" => {
+                let _ = app.emit("edit-action", "toggle-edit");
+            }
+            "edit-save" => {
+                let _ = app.emit("edit-action", "save");
+            }
             "clear-recent" => {
                 recent::clear(app);
                 let _ = rebuild(app);
@@ -136,6 +142,11 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let edit_copy_source =
         MenuItemBuilder::with_id("edit-copy-source", "Copy Source").build(app)?;
     let edit_toggle_raw = MenuItemBuilder::with_id("edit-toggle-raw", "Toggle Raw").build(app)?;
+    let edit_toggle_edit =
+        MenuItemBuilder::with_id("edit-toggle-edit", "Toggle Edit").build(app)?;
+    let edit_save = MenuItemBuilder::with_id("edit-save", "Save")
+        .accelerator("CmdOrCtrl+S")
+        .build(app)?;
 
     // Title intentionally not "Edit": macOS auto-injects Writing Tools,
     // AutoFill, Start Dictation, and Emoji & Symbols into any submenu
@@ -147,6 +158,9 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .separator()
         .item(&edit_copy_source)
         .item(&edit_toggle_raw)
+        .separator()
+        .item(&edit_toggle_edit)
+        .item(&edit_save)
         .build()?;
 
     let view_menu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
