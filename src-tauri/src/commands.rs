@@ -677,8 +677,14 @@ mod tests {
         symlink(&secret, &escaping).unwrap();
 
         let w = work.to_string_lossy().into_owned();
-        assert!(path_within_dir(inside.to_string_lossy().into_owned(), w.clone()));
-        assert!(!path_within_dir(escaping.to_string_lossy().into_owned(), w.clone()));
+        assert!(path_within_dir(
+            inside.to_string_lossy().into_owned(),
+            w.clone()
+        ));
+        assert!(!path_within_dir(
+            escaping.to_string_lossy().into_owned(),
+            w.clone()
+        ));
         assert!(!path_within_dir(secret.to_string_lossy().into_owned(), w));
 
         let _ = std::fs::remove_dir_all(&base);
