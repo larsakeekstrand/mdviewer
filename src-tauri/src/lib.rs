@@ -58,6 +58,7 @@ pub fn run(startup: Startup) {
             commands::git_status,
             commands::watch_tree,
             commands::render_file,
+            commands::render_preview,
             commands::render_notes,
             commands::open_file,
             commands::read_source,

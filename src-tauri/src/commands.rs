@@ -120,6 +120,21 @@ pub fn render_file(
     Ok(RenderedFile { html, path, raw })
 }
 
+/// Render an in-memory editor buffer (NOT disk) so the split editor's live
+/// preview reflects unsaved text. Mirrors `render_file`'s markdown-vs-plain
+/// choice by path extension; there is no raw mode (the editor itself is the
+/// source view).
+#[tauri::command]
+pub fn render_preview(source: String, path: String, theme: Option<String>) -> String {
+    let p = PathBuf::from(&path);
+    let theme = theme.as_deref().unwrap_or("light");
+    if markdown::is_markdown_path(&p) {
+        markdown::render_markdown(&source, theme)
+    } else {
+        markdown::render_plain(&source)
+    }
+}
+
 #[tauri::command]
 pub fn render_notes(source: String, theme: Option<String>) -> Result<String, String> {
     let theme = theme.as_deref().unwrap_or("light");
@@ -837,5 +852,27 @@ mod tests {
             assert!(!unsafe_path("foo.png"));
             assert!(!unsafe_path("foo.pdf"));
         }
+    }
+
+    #[test]
+    fn render_preview_uses_markdown_for_md_paths() {
+        let html = render_preview("# Hi".to_string(), "/x/note.md".to_string(), None);
+        assert!(
+            html.contains("<h1"),
+            "expected markdown render, got: {html}"
+        );
+    }
+
+    #[test]
+    fn render_preview_uses_plain_for_txt_paths() {
+        let html = render_preview("# Hi".to_string(), "/x/note.txt".to_string(), None);
+        assert!(
+            !html.contains("<h1"),
+            "plain text must not become an h1: {html}"
+        );
+        assert!(
+            html.contains("# Hi"),
+            "plain text should be preserved: {html}"
+        );
     }
 }
