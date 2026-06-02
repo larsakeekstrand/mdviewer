@@ -50,6 +50,14 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialS
             .filter(|p| p.is_dir())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
     };
+    // Seed the containment root for file operations so a plain launch (no CLI
+    // arg, AppState.current_root starts None) still permits create/rename/etc.
+    // in the folder the sidebar actually shows. A later sidebar-root change
+    // (remember_folder) overrides this — including the cold-Finder case, where
+    // the frontend shows the opened file's folder rather than this resolved root.
+    if let Ok(mut slot) = state.current_root.lock() {
+        *slot = Some(tree_root.clone());
+    }
     let (saved_tabs, saved_active) = recent::load_session(&app);
     let (tabs, active_tab) = recent::restore_session(saved_tabs, saved_active, |p| p.is_file());
     InitialState {
