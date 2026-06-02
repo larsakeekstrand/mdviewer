@@ -72,6 +72,7 @@ pub fn run(startup: Startup) {
             commands::save_export,
             export::export_pdf,
             commands::toggle_task,
+            commands::save_file,
             commands::frontend_ready,
             commands::remember_folder,
             commands::save_session,

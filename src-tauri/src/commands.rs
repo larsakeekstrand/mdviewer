@@ -454,6 +454,31 @@ pub fn toggle_task(
         .map_err(|e| format!("cannot write '{}': {}", p.display(), e))
 }
 
+/// Save an editor buffer to disk. `expected` is the content the editor believes
+/// is currently on disk. `Some(_)` enforces read-verify-write: a divergence
+/// means an external edit landed since load, and the write is refused so the
+/// frontend can surface the conflict banner. `None` forces the write (the user
+/// chose "Keep my version"). Writes atomically (temp-file + same-dir rename).
+#[tauri::command]
+pub fn save_file(path: String, contents: String, expected: Option<String>) -> Result<(), String> {
+    save_file_inner(&PathBuf::from(&path), &contents, expected)
+}
+
+fn save_file_inner(path: &Path, contents: &str, expected: Option<String>) -> Result<(), String> {
+    if let Some(expected) = expected {
+        match std::fs::read_to_string(path) {
+            Ok(disk) if disk != expected => return Err("file changed on disk".to_string()),
+            Ok(_) => {}
+            // A missing file is fine to (re)create — e.g. saving a brand-new file
+            // whose on-disk bytes were just created empty.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot read '{}': {e}", path.display())),
+        }
+    }
+    write_atomically(path, contents.as_bytes())
+        .map_err(|e| format!("cannot write '{}': {e}", path.display()))
+}
+
 /// Write `bytes` to `target` via a same-directory temp file + rename so a
 /// crash mid-write can't truncate the user's file. Same-directory is load-
 /// bearing on macOS — a cross-filesystem rename copies and isn't atomic.
@@ -876,5 +901,48 @@ mod tests {
             html.contains("# Hi"),
             "plain text should be preserved: {html}"
         );
+    }
+
+    #[test]
+    fn save_file_writes_when_expected_matches() {
+        let dir = std::env::temp_dir().join(format!("mdv-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.md");
+        std::fs::write(&f, b"old").unwrap();
+
+        save_file_inner(&f, "new content", Some("old".to_string())).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new content");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_file_refuses_when_disk_diverged() {
+        let dir = std::env::temp_dir().join(format!("mdv-save2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.md");
+        std::fs::write(&f, b"changed by someone else").unwrap();
+
+        let err = save_file_inner(&f, "mine", Some("what I loaded".to_string())).unwrap_err();
+        assert!(err.contains("changed on disk"), "got: {err}");
+        assert_eq!(
+            std::fs::read_to_string(&f).unwrap(),
+            "changed by someone else"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_file_forces_when_expected_is_none() {
+        let dir = std::env::temp_dir().join(format!("mdv-save3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.md");
+        std::fs::write(&f, b"whatever").unwrap();
+
+        save_file_inner(&f, "forced", None).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "forced");
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
