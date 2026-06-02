@@ -3,10 +3,9 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
-## [1.17.0-rc.2] - 2026-06-02
+## [1.17.0] - 2026-06-02
 
-MDViewer is now an editor, not just a viewer. This is a release candidate —
-please report anything that feels off before the 1.17.0 release.
+MDViewer is now an editor, not just a viewer.
 
 - **Edit files in the app.** Click **Edit** on any text or Markdown tab to open a
   side-by-side source editor with a live preview that updates as you type. Save
