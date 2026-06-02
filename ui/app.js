@@ -1707,7 +1707,11 @@ async function exportDocument(format, path) {
     document.documentElement.dataset.theme = prevDataTheme;
     t.raw = prevRaw;
     initMermaid();
-    await renderActive({ scrollLock: false, forceMermaid: true });
+    if (t.editing) {
+      await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
+    } else {
+      await renderActive({ scrollLock: false, forceMermaid: true });
+    }
     previewScroll.scrollTop = prevScroll;
   }
 }
