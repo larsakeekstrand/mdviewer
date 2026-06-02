@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{git, markdown, recent, search, tasklist, tree, AppState};
+use crate::{fs_ops, git, markdown, recent, search, tasklist, tree, AppState};
 
 /// Updater manifest endpoints. `STABLE_UPDATE_URL` mirrors the endpoint baked
 /// into `tauri.conf.json`; `BETA_UPDATE_URL` is the rolling pre-release channel.
@@ -518,10 +518,13 @@ pub fn frontend_ready(state: State<'_, AppState>) -> Vec<String> {
 /// launch can restore it. Best-effort: a non-directory or vanished path is a
 /// no-op, and persistence errors are swallowed (UI state, never user-facing).
 #[tauri::command]
-pub fn remember_folder(app: AppHandle, path: String) {
+pub fn remember_folder(app: AppHandle, state: State<'_, AppState>, path: String) {
     let p = PathBuf::from(path);
     if p.is_dir() {
         recent::save_last(&app, &p);
+        if let Ok(mut slot) = state.current_root.lock() {
+            *slot = Some(p);
+        }
     }
 }
 
@@ -697,6 +700,74 @@ pub fn search_in_folder(
             respect_gitignore,
         },
     )
+}
+
+/// The current sidebar root, or an error if no folder is open. File-op commands
+/// confine their targets within it.
+fn current_root(state: &State<'_, AppState>) -> Result<PathBuf, String> {
+    state
+        .current_root
+        .lock()
+        .map_err(|_| "current_root mutex poisoned".to_string())?
+        .clone()
+        .ok_or_else(|| "no folder is open".to_string())
+}
+
+#[tauri::command]
+pub fn create_file(
+    state: State<'_, AppState>,
+    dir: String,
+    name: String,
+) -> Result<String, String> {
+    let root = current_root(&state)?;
+    let dir = PathBuf::from(dir);
+    if !fs_ops::within_root(&dir, &root) {
+        return Err("target is outside the open folder".to_string());
+    }
+    let p = fs_ops::create_file(&dir, &name)?;
+    Ok(p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn create_folder(
+    state: State<'_, AppState>,
+    dir: String,
+    name: String,
+) -> Result<String, String> {
+    let root = current_root(&state)?;
+    let dir = PathBuf::from(dir);
+    if !fs_ops::within_root(&dir, &root) {
+        return Err("target is outside the open folder".to_string());
+    }
+    let p = fs_ops::create_folder(&dir, &name)?;
+    Ok(p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Result<(), String> {
+    let root = current_root(&state)?;
+    let from = PathBuf::from(from);
+    let to = PathBuf::from(to);
+    if let Some(name) = to.file_name().and_then(|s| s.to_str()) {
+        fs_ops::validate_name(name)?;
+    } else {
+        return Err("invalid destination name".to_string());
+    }
+    if !fs_ops::within_root(&from, &root) || !fs_ops::within_root(&to, &root) {
+        return Err("target is outside the open folder".to_string());
+    }
+    fs_ops::rename_path(&from, &to)
+}
+
+#[tauri::command]
+pub fn duplicate_file(state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let root = current_root(&state)?;
+    let path = PathBuf::from(path);
+    if !fs_ops::within_root(&path, &root) {
+        return Err("target is outside the open folder".to_string());
+    }
+    let p = fs_ops::duplicate_file(&path)?;
+    Ok(p.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

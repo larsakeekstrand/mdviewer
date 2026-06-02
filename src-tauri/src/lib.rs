@@ -1,6 +1,6 @@
 mod commands;
 mod export;
-pub mod fs_ops;
+mod fs_ops;
 mod git;
 mod markdown;
 mod menu;
@@ -37,10 +37,14 @@ pub struct AppState {
     /// Serializes task-list write-backs. Held only for the read-verify-write
     /// critical section so two rapid clicks can't interleave reads.
     pub tasklist_lock: Mutex<()>,
+    /// The folder the sidebar is currently showing. File operations are confined
+    /// within it. Set by the frontend on every sidebar-root change.
+    pub current_root: Mutex<Option<PathBuf>>,
 }
 
 pub fn run(startup: Startup) {
     let state = AppState {
+        current_root: Mutex::new(startup.tree_root.clone()),
         tree_root: startup.tree_root,
         initial_file: startup.initial_file,
         watcher: Mutex::new(watcher::WatcherSlot::default()),
@@ -76,6 +80,10 @@ pub fn run(startup: Startup) {
             commands::save_file,
             commands::frontend_ready,
             commands::remember_folder,
+            commands::create_file,
+            commands::create_folder,
+            commands::rename_path,
+            commands::duplicate_file,
             commands::save_session,
             commands::install_cli,
             commands::platform,
