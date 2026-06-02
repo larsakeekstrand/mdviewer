@@ -327,10 +327,19 @@ pub fn open_path(path: String) -> Result<(), String> {
     if !p.exists() {
         return Err(format!("not found: {path}"));
     }
-    if is_unsafe_to_open(p) {
+    if refuses_to_open(p) {
         return Err(format!("refusing to launch executable file type: {path}"));
     }
     opener::open(&path).map_err(|e| format!("failed to open path: {e}"))
+}
+
+/// Whether the system opener must refuse `p`. Checks both the literal path and,
+/// because `opener::open` follows symlinks, the symlink-resolved target — so a
+/// link named `notes.txt` pointing at `/Applications/Evil.app` can't smuggle a
+/// launchable type past the extension denylist.
+fn refuses_to_open(p: &Path) -> bool {
+    let resolved = p.canonicalize();
+    is_unsafe_to_open(p) || resolved.as_deref().map(is_unsafe_to_open).unwrap_or(false)
 }
 
 #[tauri::command]
@@ -637,6 +646,29 @@ pub fn search_in_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn refuses_symlink_whose_target_is_launchable() {
+        use std::os::unix::fs::symlink;
+
+        let dir = std::env::temp_dir().join(format!("mdviewer-symlink-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("payload.command"); // .command is in UNSAFE_OPEN_EXTS
+        std::fs::write(&target, b"#!/bin/sh\n").unwrap();
+        let link = dir.join("notes.txt"); // innocuous-looking name
+        let _ = std::fs::remove_file(&link);
+        symlink(&target, &link).unwrap();
+
+        // The link name alone (".txt") passes the extension denylist...
+        assert!(!is_unsafe_to_open(&link));
+        // ...but resolving the symlink reveals the .command target, so we refuse.
+        assert!(refuses_to_open(&link));
+
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&target);
+        let _ = std::fs::remove_dir(&dir);
+    }
 
     #[test]
     fn flags_launchable_extensions() {
