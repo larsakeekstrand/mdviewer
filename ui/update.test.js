@@ -117,3 +117,10 @@ test("changelogSection tolerates a heading with no date suffix", () => {
 test("changelogSection returns '' for empty input", () => {
   assert.equal(changelogSection("", "1.0.0"), "");
 });
+
+test("changelogSection selects the right section regardless of order", () => {
+  const text =
+    "# Changelog\n\n## [1.15.0] - 2026-05-31\n\n- Older\n\n## [1.16.0] - 2026-06-02\n\n- Newer\n";
+  assert.equal(changelogSection(text, "1.16.0"), "- Newer");
+  assert.equal(changelogSection(text, "1.15.0"), "- Older");
+});
