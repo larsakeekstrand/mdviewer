@@ -224,7 +224,11 @@ icon.svg          — source for icon regeneration
   `edit-action:"toggle-edit"` event) enters a side-by-side split — CodeMirror 5
   (markdown mode, line numbers, line-wrap) on the left, the live-rendered
   preview on the right, re-rendering via `render_preview` (renders the editor
-  buffer, not disk) debounced ~150 ms. Hidden/disabled for image tabs. Entering
+  buffer, not disk) debounced ~150 ms. Hidden/disabled for image tabs. CodeMirror
+  ships only a light `default` theme, so dark mode is done with attribute-driven
+  CSS overrides (`[data-theme="dark"] .editor-pane .CodeMirror …` in `styles.css`,
+  recoloring surface + markdown tokens) rather than a vendored theme — toggling the
+  theme while editing restyles the editor with no JS. Entering
   edit calls `read_source` → primes `savedContent` + `editBuffer`; the editor
   follows the active tab by sharing a single CodeMirror instance re-initialized
   per `setActiveTab`. **Save** (⌘S / Actions ▸ Save) calls `save_file(path,
