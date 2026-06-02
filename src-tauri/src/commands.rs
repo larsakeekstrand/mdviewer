@@ -778,6 +778,19 @@ pub fn duplicate_file(state: State<'_, AppState>, path: String) -> Result<String
     Ok(p.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+pub fn delete_to_trash(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let root = current_root(&state)?;
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("not found: {path}"));
+    }
+    if !fs_ops::within_root(&p, &root) {
+        return Err("target is outside the open folder".to_string());
+    }
+    trash::delete(&p).map_err(|e| format!("cannot move to Trash: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

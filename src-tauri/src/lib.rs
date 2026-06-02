@@ -84,6 +84,7 @@ pub fn run(startup: Startup) {
             commands::create_folder,
             commands::rename_path,
             commands::duplicate_file,
+            commands::delete_to_trash,
             commands::save_session,
             commands::install_cli,
             commands::platform,
