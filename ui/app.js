@@ -248,6 +248,14 @@ async function init() {
     await checkForUpdates({ silent: false });
   });
 
+  // The Settings window changed the update channel: clear any banner left from
+  // the old channel and re-check on the new one immediately (no relaunch).
+  await listen("channel-changed", async () => {
+    if (updateInProgress) return;
+    updateBanner.hidden = true;
+    await checkForUpdates({ silent: true });
+  });
+
   await listen("menu-install-cli", async () => {
     if (!IS_MAC) return;
     await installCli();

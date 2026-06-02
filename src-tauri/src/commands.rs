@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::{git, markdown, recent, search, tasklist, tree, AppState};
 
@@ -153,12 +153,13 @@ pub fn get_preferences(app: AppHandle) -> Preferences {
     }
 }
 
-/// Persists the user's update channel. Best-effort: like the rest of the
-/// `recent` store, an underlying write failure is swallowed rather than
-/// surfaced to the caller.
+/// Persists the user's update channel and signals the UI to re-check on the new
+/// channel immediately. Best-effort: like the rest of the `recent` store, an
+/// underlying write failure is swallowed rather than surfaced to the caller.
 #[tauri::command]
 pub fn set_update_channel(app: AppHandle, channel: recent::UpdateChannel) {
     recent::save_channel(&app, channel);
+    let _ = app.emit("channel-changed", ());
 }
 
 /// Checks for an update on the user's selected channel. Mirrors the updater
