@@ -28,6 +28,7 @@ import {
   themeButtonFace,
 } from "./theme.js";
 import { isImagePath } from "./filetype.js";
+import { classifyFileChange, isDirty } from "./editor.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -62,6 +63,15 @@ const tabsEl = document.getElementById("tabs");
 const rawBtn = document.getElementById("toggle-raw");
 const themeBtn = document.getElementById("toggle-theme");
 const splitter = document.getElementById("splitter");
+const editBtn = document.getElementById("toggle-edit");
+const saveBtn = document.getElementById("save-file");
+const editorPane = document.getElementById("editor-pane");
+const editorSplitter = document.getElementById("editor-splitter");
+const paneBody = document.getElementById("pane-body");
+
+let cm = null; // the single CodeMirror instance (created lazily, reused)
+let previewDebounce = null;
+const EDITOR_PREVIEW_DEBOUNCE_MS = 150;
 
 let treeRoot = null;
 // path → reload counter; bumped on file-changed so the asset: URL cache-busts.
@@ -271,6 +281,8 @@ async function init() {
     });
 
   rawBtn.addEventListener("click", onToggleRaw);
+  editBtn.addEventListener("click", onToggleEdit);
+  saveBtn.addEventListener("click", () => saveActive());
   themeBtn.addEventListener("click", onToggleTheme);
   updateThemeButton();
 
@@ -792,7 +804,13 @@ function renderTabBar() {
   const t = activeTab();
   if (t) {
     const image = isImagePath(t.path);
-    rawBtn.hidden = image;
+    editBtn.hidden = image;
+    if (!image) {
+      editBtn.textContent = t.editing ? "Done" : "Edit";
+      editBtn.setAttribute("aria-pressed", t.editing ? "true" : "false");
+    }
+    saveBtn.hidden = !t.editing;
+    rawBtn.hidden = image || t.editing;
     if (!image) {
       rawBtn.textContent = t.raw ? "Rendered" : "Raw";
       rawBtn.setAttribute("aria-pressed", t.raw ? "true" : "false");
@@ -852,6 +870,143 @@ function onToggleRaw() {
   renderTabBar();
   renderActive({ scrollLock: false });
 }
+
+/* ---- Source editor ---- */
+
+function ensureCm() {
+  if (cm) return cm;
+  cm = window.CodeMirror(editorPane, {
+    value: "",
+    mode: "markdown",
+    lineNumbers: true,
+    lineWrapping: true,
+    theme: "default",
+  });
+  cm.on("change", onEditorChange);
+  cm.setOption("extraKeys", {
+    "Cmd-S": () => saveActive(),
+    "Ctrl-S": () => saveActive(),
+  });
+  return cm;
+}
+
+async function onToggleEdit() {
+  const t = activeTab();
+  if (!t || isImagePath(t.path)) return;
+  if (t.editing) {
+    await exitEditMode(t);
+  } else {
+    await enterEditMode(t);
+  }
+}
+
+async function enterEditMode(t) {
+  let src;
+  try {
+    src = await invoke("read_source", { path: t.path });
+  } catch (e) {
+    showTransientError("Can't open this file for editing: " + e);
+    return;
+  }
+  t.editing = true;
+  t.raw = false;
+  t.savedContent = src;
+  t.dirty = false;
+  ensureCm();
+  cm.setValue(src);
+  cm.clearHistory();
+  showEditorChrome(true);
+  renderTabBar();
+  cm.refresh();
+  cm.focus();
+  await renderFromEditor(t, { scrollLock: false });
+}
+
+async function exitEditMode(t) {
+  if (t.dirty) {
+    const discard = await dialogApi.ask(
+      `Discard unsaved changes to ${basename(t.path)}?`,
+      { title: "MDViewer", kind: "warning" },
+    );
+    if (!discard) return;
+  }
+  t.editing = false;
+  t.dirty = false;
+  hideConflict();
+  showEditorChrome(false);
+  renderTabBar();
+  await renderActive({ scrollLock: false });
+}
+
+function showEditorChrome(on) {
+  editorPane.hidden = !on;
+  editorSplitter.hidden = !on;
+  paneBody.classList.toggle("editing", on);
+  saveBtn.hidden = !on;
+  editBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  editBtn.textContent = on ? "Done" : "Edit";
+}
+
+function onEditorChange() {
+  const t = activeTab();
+  if (!t || !t.editing) return;
+  const dirty = isDirty(cm.getValue(), t.savedContent);
+  if (dirty !== t.dirty) {
+    t.dirty = dirty;
+    renderTabBar();
+  }
+  if (previewDebounce) clearTimeout(previewDebounce);
+  previewDebounce = setTimeout(() => {
+    previewDebounce = null;
+    renderFromEditor(t, { scrollLock: true }).catch((e) =>
+      console.error("live preview failed", e),
+    );
+  }, EDITOR_PREVIEW_DEBOUNCE_MS);
+}
+
+/** Render the editor buffer (not disk) into the preview via render_preview. */
+async function renderFromEditor(t, { scrollLock = true } = {}) {
+  if (!cm) return;
+  let html;
+  try {
+    html = await invoke("render_preview", {
+      source: cm.getValue(),
+      path: t.path,
+      theme: currentTheme,
+    });
+  } catch (e) {
+    console.error("render_preview failed", e);
+    return;
+  }
+  await paintHtml(t, html, false, { scrollLock });
+}
+
+async function saveActive() {
+  const t = activeTab();
+  if (!t || !t.editing || !cm) return;
+  const content = cm.getValue();
+  try {
+    await invoke("save_file", {
+      path: t.path,
+      contents: content,
+      expected: t.savedContent,
+    });
+    t.savedContent = content;
+    t.dirty = false;
+    hideConflict();
+    renderTabBar();
+  } catch (e) {
+    if (String(e).includes("changed on disk")) {
+      showConflict(t);
+    } else {
+      showTransientError("Save failed: " + e);
+    }
+  }
+}
+
+// Temporary no-op stubs; replaced by the real conflict banner in the next task.
+function showConflict() {}
+function hideConflict() {}
 
 function hasThemePref() {
   return isValidTheme(localStorage.getItem(THEME_KEY));
@@ -2003,6 +2158,31 @@ previewScroll.addEventListener("scroll", hideContextMenu);
     if (dragging) {
       dragging = false;
       splitter.classList.remove("dragging");
+    }
+  });
+})();
+
+/* ---- Editor splitter ---- */
+(() => {
+  let dragging = false;
+  editorSplitter.addEventListener("mousedown", (e) => {
+    dragging = true;
+    editorSplitter.classList.add("dragging");
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const rect = paneBody.getBoundingClientRect();
+    const min = 200;
+    const max = Math.max(min + 100, rect.width - 200);
+    const w = Math.min(max, Math.max(min, e.clientX - rect.left));
+    document.documentElement.style.setProperty("--editor-width", `${w}px`);
+    if (cm) cm.refresh();
+  });
+  window.addEventListener("mouseup", () => {
+    if (dragging) {
+      dragging = false;
+      editorSplitter.classList.remove("dragging");
     }
   });
 })();
