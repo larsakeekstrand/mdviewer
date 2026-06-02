@@ -107,23 +107,30 @@ jobs:
           CURRENT: ${{ needs.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          PREV=$(git describe --tags --abbrev=0 "${CURRENT}^" 2>/dev/null || true)
-          echo "current=$CURRENT" >&2
-          echo "previous=$PREV" >&2
+          VERSION="${CURRENT#v}"
+          CURATED=$(node scripts/changelog-section.mjs "$VERSION" CHANGELOG.md || true)
 
-          if [ -z "$PREV" ]; then
-            HEADER="Initial release."
-            LOG=$(git log HEAD --pretty=format:'- %s (%h)' --no-merges --reverse)
+          if [ -n "$CURATED" ]; then
+            echo "source=CHANGELOG.md (curated)" >&2
+            BODY="$CURATED"
           else
-            HEADER="Commits since [${PREV}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${PREV}):"
-            LOG=$(git log "${PREV}..HEAD" --pretty=format:'- %s (%h)' --no-merges --reverse)
+            echo "source=git log (fallback)" >&2
+            PREV=$(git describe --tags --abbrev=0 "${CURRENT}^" 2>/dev/null || true)
+            echo "current=$CURRENT" >&2
+            echo "previous=$PREV" >&2
+            if [ -z "$PREV" ]; then
+              HEADER="Initial release."
+              LOG=$(git log HEAD --pretty=format:'- %s (%h)' --no-merges --reverse)
+            else
+              HEADER="Commits since [${PREV}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${PREV}):"
+              LOG=$(git log "${PREV}..HEAD" --pretty=format:'- %s (%h)' --no-merges --reverse)
+            fi
+            BODY=$(printf '%s\n\n%s' "$HEADER" "$LOG")
           fi
 
           {
             echo "value<<CHANGELOG_EOF"
-            echo "$HEADER"
-            echo ""
-            echo "$LOG"
+            echo "$BODY"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 

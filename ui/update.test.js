@@ -6,6 +6,7 @@ import {
   progressPercent,
   progressText,
   extractChangelog,
+  changelogSection,
 } from "./update.js";
 
 test("releaseUrlFor builds a v-prefixed tag URL", () => {
@@ -75,4 +76,51 @@ test("extractChangelog returns empty string for empty/null/undefined", () => {
 
 test("extractChangelog trims surrounding whitespace", () => {
   assert.equal(extractChangelog("## Changes\n\n\n- only\n\n\n"), "- only");
+});
+
+const SAMPLE = `# Changelog
+
+## [1.16.0] - 2026-06-02
+
+- Folder-wide search across the open tree
+- Fixed a crash when exporting docs with broken images
+
+## [1.15.0] - 2026-05-31
+
+- Earlier feature
+`;
+
+test("changelogSection returns only the matching version's bullets", () => {
+  assert.equal(
+    changelogSection(SAMPLE, "1.16.0"),
+    "- Folder-wide search across the open tree\n- Fixed a crash when exporting docs with broken images",
+  );
+});
+
+test("changelogSection stops at the next version heading", () => {
+  assert.equal(changelogSection(SAMPLE, "1.15.0"), "- Earlier feature");
+});
+
+test("changelogSection returns '' for a missing version", () => {
+  assert.equal(changelogSection(SAMPLE, "9.9.9"), "");
+});
+
+test("changelogSection returns '' for a prerelease with no entry", () => {
+  assert.equal(changelogSection(SAMPLE, "1.16.0-rc.1"), "");
+});
+
+test("changelogSection tolerates a heading with no date suffix", () => {
+  const text = "## [2.0.0]\n\n- New thing\n";
+  assert.equal(changelogSection(text, "2.0.0"), "- New thing");
+});
+
+test("changelogSection returns '' for empty input", () => {
+  assert.equal(changelogSection("", "1.0.0"), "");
+});
+
+test("changelogSection selects the right section regardless of order", () => {
+  const text =
+    "# Changelog\n\n## [1.15.0] - 2026-05-31\n\n- Older\n\n## [1.16.0] - 2026-06-02\n\n- Newer\n";
+  assert.equal(changelogSection(text, "1.16.0"), "- Newer");
+  assert.equal(changelogSection(text, "1.15.0"), "- Older");
 });

@@ -188,6 +188,8 @@ CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -- -D wa
 
 ## Cut a release
 
+Before tagging, add a `## [X.Y.Z] - DATE` section to `CHANGELOG.md` with short, user-facing bullets — the workflow extracts it for the release notes (the GitHub release page and the in-app "What's new" modal), falling back to the raw commit log when a version has no section.
+
 Push a `v*` tag to trigger `.github/workflows/release.yml`. It builds for `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`, then attaches the `.dmg`, `.app.tar.gz`, `.exe`, and `.msi` artifacts to a draft GitHub Release that you publish manually.
 
 ```sh
