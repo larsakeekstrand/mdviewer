@@ -1,5 +1,6 @@
 mod commands;
 mod export;
+pub mod fs_ops;
 mod git;
 mod markdown;
 mod menu;
