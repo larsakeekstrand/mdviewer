@@ -1255,6 +1255,74 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
 }
+
+/* CodeMirror ships only a light "default" theme; recolor it for dark mode so the
+   editor follows the app theme. Attribute-driven, so toggling the theme while
+   editing restyles the editor with no JS. Palette mirrors github-markdown dark. */
+[data-theme="dark"] .editor-pane .CodeMirror {
+  background: var(--bg, #0d1117);
+  color: var(--fg, #e6edf3);
+}
+[data-theme="dark"] .editor-pane .CodeMirror-gutters {
+  background: var(--bg, #0d1117);
+  border-right: 1px solid var(--sidebar-border, #30363d);
+}
+[data-theme="dark"] .editor-pane .CodeMirror-linenumber {
+  color: var(--sidebar-muted, #8b949e);
+}
+[data-theme="dark"] .editor-pane .CodeMirror-cursor {
+  border-left-color: var(--fg, #e6edf3);
+}
+[data-theme="dark"] .editor-pane .CodeMirror-selected {
+  background: #264f78;
+}
+[data-theme="dark"] .editor-pane .CodeMirror-focused .CodeMirror-selected {
+  background: #264f78;
+}
+[data-theme="dark"] .editor-pane .CodeMirror-activeline-background {
+  background: rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .editor-pane .CodeMirror-matchingbracket {
+  color: #79c0ff !important;
+  border-bottom: 1px solid #79c0ff;
+}
+/* Markdown-mode (and embedded-code) token colors, github-dark-ish. */
+[data-theme="dark"] .editor-pane .cm-header {
+  color: #79c0ff;
+}
+[data-theme="dark"] .editor-pane .cm-quote {
+  color: #7ee787;
+}
+[data-theme="dark"] .editor-pane .cm-link,
+[data-theme="dark"] .editor-pane .cm-url,
+[data-theme="dark"] .editor-pane .cm-string,
+[data-theme="dark"] .editor-pane .cm-string-2 {
+  color: #a5d6ff;
+}
+[data-theme="dark"] .editor-pane .cm-keyword,
+[data-theme="dark"] .editor-pane .cm-tag {
+  color: #ff7b72;
+}
+[data-theme="dark"] .editor-pane .cm-comment {
+  color: #8b949e;
+}
+[data-theme="dark"] .editor-pane .cm-number,
+[data-theme="dark"] .editor-pane .cm-atom,
+[data-theme="dark"] .editor-pane .cm-attribute {
+  color: #79c0ff;
+}
+[data-theme="dark"] .editor-pane .cm-variable-2,
+[data-theme="dark"] .editor-pane .cm-def {
+  color: #ffa657;
+}
+[data-theme="dark"] .editor-pane .cm-em {
+  color: var(--fg, #e6edf3);
+  font-style: italic;
+}
+[data-theme="dark"] .editor-pane .cm-strong {
+  color: var(--fg, #e6edf3);
+  font-weight: 600;
+}
 .editor-splitter {
   width: 5px;
   cursor: col-resize;
