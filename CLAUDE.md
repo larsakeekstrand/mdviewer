@@ -305,6 +305,14 @@ Windows-specific gotchas:
   of per-user no-admin install). Mirrors the macOS drag-to-Applications
   experience. Note: the plan originally called this `perUser`, which is
   the Tauri 1.x field name — 2.x renamed it.
+- **MSI rejects `-rc.N` versions.** The WiX/MSI `ProductVersion` accepts
+  only a *numeric* pre-release identifier, so a tag like `v1.17.0-rc.1`
+  fails the `msi` target (`pre-release identifier must be numeric-only`)
+  while NSIS builds fine. `release.yml`'s Windows job therefore passes
+  `args: --bundles nsis` when `is_prerelease` is true (stable keeps the
+  config default `"all"` → NSIS + MSI). Don't strip the suffix to a
+  numeric version instead — that desyncs the per-platform `latest.json`
+  `version` from macOS's and confuses the updater's compare.
 - **`.ico` regeneration.** `cargo tauri icon icon.svg` rebuilds the
   full icon set, including `src-tauri/icons/icon.ico`. The `.ico` must
   remain in the `bundle.icon` array in `tauri.conf.json`.

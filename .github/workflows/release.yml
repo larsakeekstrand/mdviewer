@@ -240,6 +240,12 @@ jobs:
           releaseName: ${{ needs.meta.outputs.release_name }}
           releaseDraft: ${{ needs.meta.outputs.is_draft }}
           prerelease: ${{ needs.meta.outputs.is_prerelease }}
+          # The MSI bundler rejects a non-numeric pre-release identifier (WiX
+          # ProductVersion must be numeric-only), so a `-rc.N` tag can never
+          # build the .msi. Restrict prereleases to NSIS only; stable keeps the
+          # config default ("all" → NSIS + MSI). Keeping the real version on both
+          # bundles avoids a cross-platform version mismatch in latest.json.
+          args: ${{ needs.meta.outputs.is_prerelease == 'true' && '--bundles nsis' || '' }}
 
   polish-release:
     name: Rename installers for clarity
