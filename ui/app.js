@@ -841,6 +841,29 @@ function dirForNewEntry(li) {
   return li.dataset.isDir === "1" ? li.dataset.path : parentDir(li.dataset.path);
 }
 
+/** Ensure a directory row is expanded so a new child is visible after creation. */
+async function ensureExpanded(li) {
+  const row = li.querySelector(":scope > .row");
+  if (row && !row.classList.contains("open")) {
+    const entry = { path: li.dataset.path, is_dir: true, name: basename(li.dataset.path) };
+    await onDirClick(entry, li, row, depthOf(li));
+  }
+}
+
+/** The <ul> a new entry should be inserted into for `li`: the folder's own list
+ *  (creating it if missing) when `li` is a dir, else `li`'s parent list. */
+function newEntryContainer(li, isDir) {
+  if (isDir) {
+    let ul = li.querySelector(":scope > ul");
+    if (!ul) {
+      ul = document.createElement("ul");
+      li.appendChild(ul);
+    }
+    return ul;
+  }
+  return li.parentElement || tree;
+}
+
 async function duplicateTreeEntry(li) {
   try {
     const created = await invoke("duplicate_file", { path: li.dataset.path });
@@ -2370,6 +2393,9 @@ document.addEventListener("contextmenu", (ev) => {
     const absolute = treeRow.dataset.path;
     const isDir = treeRow.dataset.isDir === "1";
     const relative = relativeToRoot(absolute, treeRoot);
+    const dir = dirForNewEntry(treeRow);
+    const depth = depthOf(treeRow) + (isDir ? 1 : 0);
+
     if (isDir) {
       items.push({
         label: "Search in Folder…",
@@ -2378,23 +2404,50 @@ document.addEventListener("contextmenu", (ev) => {
       items.push("---");
     }
     items.push({
+      label: "New File…",
+      action: async () => {
+        if (isDir) await ensureExpanded(treeRow);
+        await createTreeEntry(newEntryContainer(treeRow, isDir), dir, depth, false);
+      },
+    });
+    items.push({
+      label: "New Folder…",
+      action: async () => {
+        if (isDir) await ensureExpanded(treeRow);
+        await createTreeEntry(newEntryContainer(treeRow, isDir), dir, depth, true);
+      },
+    });
+    items.push("---");
+    items.push({ label: "Rename…", action: () => renameTreeEntry(treeRow) });
+    if (!isDir) {
+      items.push({ label: "Duplicate", action: () => duplicateTreeEntry(treeRow) });
+    }
+    items.push({ label: "Delete", action: () => deleteTreeEntry(treeRow) });
+    items.push("---");
+    items.push({
       label: "Copy Relative Path",
       action: () => copyText(relative),
       disabled: !relative,
     });
-    items.push({
-      label: "Copy Absolute Path",
-      action: () => copyText(absolute),
-    });
+    items.push({ label: "Copy Absolute Path", action: () => copyText(absolute) });
     buildContextMenu(items, ev.clientX, ev.clientY);
     return;
   }
 
   // Right-click on the sidebar background (header, padding, empty area below
-  // the tree) → offer to search the entire open tree.
+  // the tree) → offer to create files/folders and search the entire open tree.
   const sidebar =
     ev.target instanceof Element ? ev.target.closest("#sidebar") : null;
   if (sidebar && treeRoot) {
+    items.push({
+      label: "New File…",
+      action: () => createTreeEntry(tree, treeRoot, 1, false),
+    });
+    items.push({
+      label: "New Folder…",
+      action: () => createTreeEntry(tree, treeRoot, 1, true),
+    });
+    items.push("---");
     items.push({
       label: "Search in Folder…",
       action: () => enterSearchMode(treeRoot, { treeRoot }),
