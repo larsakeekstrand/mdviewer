@@ -1230,3 +1230,70 @@ body {
 [data-theme="dark"] ::highlight(search-jump) {
   background: #ffd33d44;
 }
+
+/* ---- Source editor (split view) ---- */
+.pane-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.preview-scroll {
+  flex: 1;
+  min-width: 0;
+}
+.editor-pane {
+  width: var(--editor-width, 50%);
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border, #d0d7de);
+  overflow: hidden;
+}
+.editor-pane .CodeMirror {
+  height: 100%;
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+.editor-splitter {
+  width: 5px;
+  cursor: col-resize;
+  background: var(--border, #d0d7de);
+  flex: 0 0 auto;
+}
+.editor-splitter.dragging,
+.editor-splitter:hover {
+  background: var(--accent, #0969da);
+}
+
+/* Dirty (unsaved) indicator on a tab. */
+.tab-dirty {
+  margin-left: 4px;
+  color: var(--fg-muted, #57606a);
+}
+.tab:hover .tab-dirty {
+  display: none;
+}
+.tab .tab-dirty + .tab-close {
+  display: none;
+}
+.tab:hover .tab-dirty + .tab-close {
+  display: inline;
+}
+
+/* External-change conflict banner. */
+.editor-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--banner-bg, #fff8c5);
+  border-top: 1px solid var(--border, #d0d7de);
+  font-size: 13px;
+}
+.editor-conflict-text {
+  flex: 1;
+}
+[data-theme="dark"] .editor-conflict {
+  background: #341a00;
+}

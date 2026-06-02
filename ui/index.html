@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="github-markdown.css" />
     <link rel="stylesheet" href="katex/katex.min.css" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="codemirror/codemirror.min.css" />
   </head>
   <body>
     <div class="update-banner" id="update-banner" hidden role="status">
@@ -132,13 +133,41 @@
           >
             Raw
           </button>
+          <button
+            id="save-file"
+            class="toolbar-btn"
+            type="button"
+            title="Save (⌘S)"
+            hidden
+          >
+            Save
+          </button>
+          <button
+            id="toggle-edit"
+            class="toolbar-btn"
+            type="button"
+            aria-pressed="false"
+            title="Edit this document"
+          >
+            Edit
+          </button>
         </div>
       </div>
-      <div class="preview-scroll" id="preview-scroll">
-        <div class="preview-empty" id="preview-empty">
-          Select a file from the tree to preview.
+      <div class="pane-body" id="pane-body">
+        <div class="editor-pane" id="editor-pane" hidden></div>
+        <div
+          class="editor-splitter"
+          id="editor-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          hidden
+        ></div>
+        <div class="preview-scroll" id="preview-scroll">
+          <div class="preview-empty" id="preview-empty">
+            Select a file from the tree to preview.
+          </div>
+          <article class="markdown-body" id="preview" hidden></article>
         </div>
-        <article class="markdown-body" id="preview" hidden></article>
       </div>
       <div class="find-bar" id="find-bar" hidden role="search">
         <input
@@ -199,6 +228,17 @@
           ×
         </button>
       </div>
+      <div class="editor-conflict" id="editor-conflict" hidden role="alert">
+        <span class="editor-conflict-text" id="editor-conflict-text">
+          This file changed on disk.
+        </span>
+        <button id="editor-conflict-reload" class="update-banner-btn" type="button">
+          Reload from disk
+        </button>
+        <button id="editor-conflict-keep" class="update-banner-btn primary" type="button">
+          Keep my version
+        </button>
+      </div>
     </main>
 
     <div class="notes-modal" id="notes-modal" hidden>
@@ -243,6 +283,11 @@
     <script src="mermaid.min.js"></script>
     <!-- KaTeX 0.16.21 dist/katex.min.js; sets window.katex. -->
     <script src="katex/katex.min.js"></script>
+    <!-- CodeMirror 5 (classic scripts, must run before the app.js module so
+         window.CodeMirror + its modes exist at init). -->
+    <script src="codemirror/codemirror.min.js"></script>
+    <script src="codemirror/xml.min.js"></script>
+    <script src="codemirror/markdown.min.js"></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>
