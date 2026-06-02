@@ -29,6 +29,7 @@ import {
 } from "./theme.js";
 import { isImagePath } from "./filetype.js";
 import { classifyFileChange, isDirty } from "./editor.js";
+import { validateName } from "./treeops.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -680,6 +681,157 @@ function highlightSelectedByPath(path) {
     const row = li.querySelector(":scope > .row");
     if (row) row.classList.add("selected");
   }
+}
+
+/* ---- Tree file operations ---- */
+
+/** Replace a tree row's name span with an <input> for editing. Resolves to the
+ *  committed (validated) name, or null on cancel. Does not touch disk. */
+function promptInlineName(row, initial) {
+  return new Promise((resolve) => {
+    const nameEl = row.querySelector(":scope > .name");
+    const input = document.createElement("input");
+    input.className = "tree-rename-input";
+    input.type = "text";
+    input.value = initial;
+    input.spellcheck = false;
+    if (nameEl) nameEl.replaceWith(input);
+    else row.appendChild(input);
+    input.focus();
+    const dot = initial.lastIndexOf(".");
+    input.setSelectionRange(0, dot > 0 ? dot : initial.length);
+
+    let settled = false;
+    const restore = () => {
+      const span = document.createElement("span");
+      span.className = "name";
+      span.textContent = initial;
+      input.replaceWith(span);
+    };
+    const commit = () => {
+      if (settled) return;
+      const value = input.value;
+      const err = validateName(value);
+      if (err) {
+        input.classList.add("invalid");
+        input.title = err;
+        return;
+      }
+      settled = true;
+      resolve(value.trim());
+    };
+    const cancel = () => {
+      if (settled) return;
+      settled = true;
+      restore();
+      resolve(null);
+    };
+    input.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        commit();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener("blur", cancel);
+  });
+}
+
+async function renameTreeEntry(li) {
+  const from = li.dataset.path;
+  const row = li.querySelector(":scope > .row");
+  if (!row) return;
+  const newName = await promptInlineName(row, basename(from));
+  if (newName == null || newName === basename(from)) {
+    await refreshTree();
+    return;
+  }
+  const to = parentDir(from) + "/" + newName;
+  try {
+    await invoke("rename_path", { from, to });
+  } catch (e) {
+    showTransientError("Rename failed: " + e);
+    await refreshTree();
+    return;
+  }
+  retargetTabsForRename(from, to);
+  await refreshTree();
+}
+
+/** Insert a placeholder row into `container` and inline-edit its name to create
+ *  a new file or folder via the backend. */
+async function createTreeEntry(container, dir, depth, isDir) {
+  const li = document.createElement("li");
+  li.dataset.isDir = isDir ? "1" : "0";
+  li.dataset.depth = String(depth);
+  const row = document.createElement("div");
+  row.className = "row " + (isDir ? "dir" : "file");
+  row.style.setProperty("--row-indent", `${depth * 12 + 4}px`);
+  const icon = document.createElement("span");
+  icon.className = "icon";
+  icon.textContent = isDir ? "\u{1F4C1}" : "·";
+  row.appendChild(icon);
+  const name = document.createElement("span");
+  name.className = "name";
+  row.appendChild(name);
+  li.appendChild(row);
+  container.prepend(li);
+
+  const newName = await promptInlineName(row, isDir ? "untitled" : "untitled.md");
+  if (newName == null) {
+    li.remove();
+    return;
+  }
+  try {
+    const cmd = isDir ? "create_folder" : "create_file";
+    const created = await invoke(cmd, { dir, name: newName });
+    await refreshTree();
+    if (!isDir) {
+      await openSticky(created);
+      const t = activeTab();
+      if (t && t.path === created) await enterEditMode(t);
+    }
+  } catch (e) {
+    showTransientError("Create failed: " + e);
+    li.remove();
+    await refreshTree();
+  }
+}
+
+/** A folder target's directory: the folder itself if `li` is a dir, else its
+ *  parent. Used to decide where New File / New Folder land. */
+function dirForNewEntry(li) {
+  return li.dataset.isDir === "1" ? li.dataset.path : parentDir(li.dataset.path);
+}
+
+async function duplicateTreeEntry(li) {
+  try {
+    const created = await invoke("duplicate_file", { path: li.dataset.path });
+    await refreshTree();
+    await openPreview(created);
+  } catch (e) {
+    showTransientError("Duplicate failed: " + e);
+  }
+}
+
+async function deleteTreeEntry(li) {
+  const path = li.dataset.path;
+  const ok = await dialogApi.ask(`Move "${basename(path)}" to Trash?`, {
+    title: "MDViewer",
+    kind: "warning",
+  });
+  if (!ok) return;
+  try {
+    await invoke("delete_to_trash", { path });
+  } catch (e) {
+    showTransientError("Delete failed: " + e);
+    return;
+  }
+  closeTabsUnder(path);
+  await refreshTree();
 }
 
 /* ---- Tabs ---- */

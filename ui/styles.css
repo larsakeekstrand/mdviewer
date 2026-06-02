@@ -1297,3 +1297,17 @@ body {
 [data-theme="dark"] .editor-conflict {
   background: #341a00;
 }
+
+.tree-rename-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 0 2px;
+  border: 1px solid var(--accent, #0969da);
+  border-radius: 3px;
+  background: var(--bg, #fff);
+  color: inherit;
+}
+.tree-rename-input.invalid {
+  border-color: #cf222e;
+}
