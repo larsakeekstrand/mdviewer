@@ -226,10 +226,14 @@ async function init() {
   await listen("file-changed", async (ev) => {
     const tab = activeTab();
     if (tab && ev.payload === tab.path) {
-      if (isImagePath(tab.path)) {
-        imageVersions.set(tab.path, (imageVersions.get(tab.path) || 0) + 1);
+      if (tab.editing) {
+        await onEditingFileChanged(tab);
+      } else {
+        if (isImagePath(tab.path)) {
+          imageVersions.set(tab.path, (imageVersions.get(tab.path) || 0) + 1);
+        }
+        await renderActive({ scrollLock: true });
       }
-      await renderActive({ scrollLock: true });
     }
     scheduleGitRefresh();
   });
@@ -755,6 +759,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   }
   const same = idx === activeIdx;
   activeIdx = idx;
+  if (typeof hideConflict === "function") hideConflict();
   renderTabBar();
   persistSession();
   highlightSelectedByPath(tabs[idx].path);
@@ -786,6 +791,21 @@ function makeStickyAt(idx) {
 
 function closeTab(idx) {
   if (idx < 0 || idx >= tabs.length) return;
+  const t = tabs[idx];
+  if (t.editing && t.dirty) {
+    dialogApi
+      .ask(`Discard unsaved changes to ${basename(t.path)}?`, {
+        title: "MDViewer",
+        kind: "warning",
+      })
+      .then((discard) => {
+        if (discard) {
+          t.dirty = false;
+          closeTab(idx);
+        }
+      });
+    return;
+  }
   tabs.splice(idx, 1);
   if (tabs.length === 0) {
     activeIdx = -1;
@@ -1019,9 +1039,74 @@ async function saveActive() {
   }
 }
 
-// Temporary no-op stubs; replaced by the real conflict banner in the next task.
-function showConflict() {}
-function hideConflict() {}
+const conflictBanner = document.getElementById("editor-conflict");
+const conflictReload = document.getElementById("editor-conflict-reload");
+const conflictKeep = document.getElementById("editor-conflict-keep");
+
+function showConflict(t) {
+  conflictReload.onclick = () => reloadFromDisk(t);
+  conflictKeep.onclick = () => forceSave(t);
+  conflictBanner.hidden = false;
+}
+
+function hideConflict() {
+  conflictBanner.hidden = true;
+}
+
+async function reloadFromDisk(t) {
+  let disk;
+  try {
+    disk = await invoke("read_source", { path: t.path });
+  } catch (e) {
+    showTransientError("Reload failed: " + e);
+    return;
+  }
+  if (cm) cm.setValue(disk);
+  t.savedContent = disk;
+  t.editBuffer = disk;
+  t.dirty = false;
+  hideConflict();
+  renderTabBar();
+  await renderFromEditor(t, { scrollLock: false });
+}
+
+async function forceSave(t) {
+  if (!cm) return;
+  const content = cm.getValue();
+  try {
+    await invoke("save_file", { path: t.path, contents: content, expected: null });
+    t.savedContent = content;
+    t.editBuffer = content;
+    t.dirty = false;
+    hideConflict();
+    renderTabBar();
+  } catch (e) {
+    showTransientError("Save failed: " + e);
+  }
+}
+
+async function onEditingFileChanged(t) {
+  let disk;
+  try {
+    disk = await invoke("read_source", { path: t.path });
+  } catch (e) {
+    // File may have been removed/renamed externally; leave the buffer intact.
+    console.debug("editing file-changed read skipped:", e);
+    return;
+  }
+  const cls = classifyFileChange({
+    editing: t.editing,
+    dirty: t.dirty,
+    diskContent: disk,
+    savedContent: t.savedContent,
+  });
+  if (cls === "self") return; // our own write; nothing to do
+  if (cls === "reload") {
+    await reloadFromDisk(t);
+  } else {
+    showConflict(t);
+  }
+}
 
 function hasThemePref() {
   return isValidTheme(localStorage.getItem(THEME_KEY));
