@@ -26,9 +26,7 @@ pub fn status(dir: &Path) -> Result<GitStatusReport, String> {
         None => return Ok(GitStatusReport::default()),
     };
 
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let output = hardened_git(dir)
         .args([
             "status",
             "--porcelain=v1",
@@ -54,12 +52,38 @@ pub fn status(dir: &Path) -> Result<GitStatusReport, String> {
     })
 }
 
+/// A `git` command pre-hardened against malicious repositories.
+///
+/// A folder opened in the viewer is untrusted: it may be a hostile git repo
+/// whose config weaponizes git. The classic vector is `core.fsmonitor`, which
+/// `git status` executes as an arbitrary command. We neutralize it by:
+/// - suppressing system (`/etc/gitconfig`) and global (`~/.gitconfig`) config,
+///   so only the explicit overrides below and repo-local config are read;
+/// - forcing `core.fsmonitor` and `core.hooksPath` to inert values via
+///   command-line `-c`, which is git's *highest-precedence* config source — it
+///   overrides repo-local values AND anything a repo-local `include.path`
+///   pulls in;
+/// - `--no-optional-locks`, so a read-only status never writes the index (which
+///   could otherwise trigger index-change hooks).
+fn hardened_git(dir: &Path) -> Command {
+    let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let mut cmd = Command::new("git");
+    cmd.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", null_device)
+        .arg("-c")
+        .arg("core.fsmonitor=")
+        .arg("-c")
+        .arg(format!("core.hooksPath={null_device}"))
+        .arg("--no-optional-locks")
+        .arg("-C")
+        .arg(dir);
+    cmd
+}
+
 /// Resolve `dir`'s git working-tree root. `None` means "not inside a repo"
 /// (or git is unavailable) — caller treats it the same way.
 fn git_toplevel(dir: &Path) -> Option<PathBuf> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let output = hardened_git(dir)
         .args(["rev-parse", "--show-toplevel"])
         .output()
         .ok()?;
@@ -101,6 +125,50 @@ fn parse_porcelain(bytes: &[u8], repo_root: &Path) -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hardened_git_neutralizes_config_exec_vectors() {
+        let cmd = hardened_git(Path::new("/untrusted/repo"));
+
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        // `core.fsmonitor` is the confirmed RCE vector that `git status` runs.
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-c" && w[1] == "core.fsmonitor="),
+            "fsmonitor must be disabled via -c; got {args:?}"
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-c" && w[1].starts_with("core.hooksPath=")),
+            "hooksPath must be redirected via -c; got {args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "--no-optional-locks"),
+            "must pass --no-optional-locks; got {args:?}"
+        );
+
+        let envs: std::collections::HashMap<String, Option<String>> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|s| s.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get("GIT_CONFIG_NOSYSTEM"),
+            Some(&Some("1".to_string())),
+            "system config must be suppressed"
+        );
+        assert!(
+            envs.contains_key("GIT_CONFIG_GLOBAL"),
+            "global config must be suppressed"
+        );
+    }
 
     #[test]
     fn parses_modified_added_untracked() {
