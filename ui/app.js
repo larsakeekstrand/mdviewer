@@ -897,9 +897,7 @@ function showEmptyState() {
   if (findOpen()) closeFind();
 }
 
-async function renderActive(
-  { scrollLock = true, forceMermaid = false } = {},
-) {
+async function renderActive({ scrollLock = true, forceMermaid = false } = {}) {
   const t = activeTab();
   if (!t) {
     showEmptyState();
@@ -921,17 +919,22 @@ async function renderActive(
     showError(String(e));
     return;
   }
+  await paintHtml(t, result.html, result.raw, { scrollLock, forceMermaid });
+}
 
+/** Diff `html` into #preview and run the post-render pipeline. Shared by the
+ *  disk renderer (renderActive) and the editor's live preview. */
+async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false } = {}) {
   previewEmpty.hidden = true;
   preview.hidden = false;
-  preview.classList.toggle("raw-body", result.raw);
+  preview.classList.toggle("raw-body", raw);
 
   const anchor = scrollLock ? captureAnchor() : null;
 
   const incoming = document.createElement("article");
-  incoming.className = "markdown-body" + (result.raw ? " raw-body" : "");
+  incoming.className = "markdown-body" + (raw ? " raw-body" : "");
   incoming.id = "preview";
-  incoming.innerHTML = result.html;
+  incoming.innerHTML = html;
 
   window.morphdom(preview, incoming, {
     onBeforeElUpdated: (fromEl, toEl) => {
@@ -967,7 +970,7 @@ async function renderActive(
   });
 
   const hadPendingJump = t.pendingJumpLine != null;
-  await postRender(t, { raw: result.raw, forceMermaid });
+  await postRender(t, { raw, forceMermaid });
 
   if (!hadPendingJump) {
     if (anchor) restoreAnchor(anchor);
