@@ -749,6 +749,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   if (idx < 0 || idx >= tabs.length) {
     activeIdx = -1;
     renderTabBar();
+    showEditorChrome(false);
     showEmptyState();
     return;
   }
@@ -762,7 +763,18 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   } catch (e) {
     console.warn("open_file failed", e);
   }
-  await renderActive({ scrollLock: same && !forceRender });
+  const t = tabs[idx];
+  if (t.editing) {
+    ensureCm();
+    showEditorChrome(true);
+    cm.setValue(t.editBuffer != null ? t.editBuffer : t.savedContent);
+    cm.clearHistory();
+    cm.refresh();
+    await renderFromEditor(t, { scrollLock: same && !forceRender });
+  } else {
+    showEditorChrome(false);
+    await renderActive({ scrollLock: same && !forceRender });
+  }
 }
 
 function makeStickyAt(idx) {
@@ -912,6 +924,7 @@ async function enterEditMode(t) {
   t.raw = false;
   t.savedContent = src;
   t.dirty = false;
+  t.editBuffer = src;
   ensureCm();
   cm.setValue(src);
   cm.clearHistory();
@@ -942,31 +955,32 @@ function showEditorChrome(on) {
   editorPane.hidden = !on;
   editorSplitter.hidden = !on;
   paneBody.classList.toggle("editing", on);
-  saveBtn.hidden = !on;
-  editBtn.setAttribute("aria-pressed", on ? "true" : "false");
-  editBtn.textContent = on ? "Done" : "Edit";
 }
 
 function onEditorChange() {
   const t = activeTab();
   if (!t || !t.editing) return;
-  const dirty = isDirty(cm.getValue(), t.savedContent);
+  t.editBuffer = cm.getValue();
+  const dirty = isDirty(t.editBuffer, t.savedContent);
   if (dirty !== t.dirty) {
     t.dirty = dirty;
     renderTabBar();
   }
   if (previewDebounce) clearTimeout(previewDebounce);
+  const path = t.path;
   previewDebounce = setTimeout(() => {
     previewDebounce = null;
-    renderFromEditor(t, { scrollLock: true }).catch((e) =>
+    const current = activeTab();
+    if (!current || !current.editing || current.path !== path) return;
+    renderFromEditor(current, { scrollLock: true }).catch((e) =>
       console.error("live preview failed", e),
     );
   }, EDITOR_PREVIEW_DEBOUNCE_MS);
 }
 
 /** Render the editor buffer (not disk) into the preview via render_preview. */
-async function renderFromEditor(t, { scrollLock = true } = {}) {
-  if (!cm) return;
+async function renderFromEditor(t, { scrollLock = true, forceMermaid = false } = {}) {
+  if (!cm || !t.editing) return;
   let html;
   try {
     html = await invoke("render_preview", {
@@ -978,7 +992,7 @@ async function renderFromEditor(t, { scrollLock = true } = {}) {
     console.error("render_preview failed", e);
     return;
   }
-  await paintHtml(t, html, false, { scrollLock });
+  await paintHtml(t, html, false, { scrollLock, forceMermaid });
 }
 
 async function saveActive() {
@@ -992,6 +1006,7 @@ async function saveActive() {
       expected: t.savedContent,
     });
     t.savedContent = content;
+    t.editBuffer = content;
     t.dirty = false;
     hideConflict();
     renderTabBar();
@@ -1024,8 +1039,14 @@ async function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   initMermaid();
   updateThemeButton();
-  if (activeTab())
-    await renderActive({ scrollLock: false, forceMermaid: true });
+  const t = activeTab();
+  if (t) {
+    if (t.editing) {
+      await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
+    } else {
+      await renderActive({ scrollLock: false, forceMermaid: true });
+    }
+  }
 }
 
 let themeToggling = false;
