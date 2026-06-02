@@ -7,7 +7,31 @@ import {
   inlineFontUrls,
   forceLightCss,
   buildHtmlDocument,
+  isPathInsideDir,
 } from "./export.js";
+
+test("isPathInsideDir accepts the dir itself and nested paths", () => {
+  assert.equal(isPathInsideDir("/work", "/work"), true);
+  assert.equal(isPathInsideDir("/work/doc/img.png", "/work"), true);
+  assert.equal(isPathInsideDir("/work/assets/logo.svg", "/work"), true);
+});
+
+test("isPathInsideDir rejects paths outside the dir", () => {
+  assert.equal(isPathInsideDir("/etc/passwd", "/work"), false);
+  assert.equal(isPathInsideDir("/Users/me/.ssh/id_rsa", "/work"), false);
+  // Prefix collision must not count as inside.
+  assert.equal(isPathInsideDir("/work-secret/x", "/work"), false);
+});
+
+test("isPathInsideDir collapses .. so escapes can't slip through", () => {
+  assert.equal(isPathInsideDir("/work/../etc/passwd", "/work"), false);
+  assert.equal(isPathInsideDir("/work/sub/../img.png", "/work"), true);
+});
+
+test("isPathInsideDir is false on empty inputs", () => {
+  assert.equal(isPathInsideDir("", "/work"), false);
+  assert.equal(isPathInsideDir("/work/x", ""), false);
+});
 
 test("baseName returns the final path segment", () => {
   assert.equal(baseName("/a/b/README.md"), "README.md");

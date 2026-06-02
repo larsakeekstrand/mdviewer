@@ -1,6 +1,27 @@
 // Pure helpers for document export. No DOM or Tauri imports, so this runs under
 // `node --test` as well as in the WebView (mirrors search.js).
 
+/** Whether absolute path `path` is `dir` itself or nested inside it. Both are
+ *  normalized (`.`/`..`/empty segments collapsed) so a `..` escape can't slip
+ *  through, and the boundary is matched on a path separator so `/work` does not
+ *  count `/work-secret` as inside. Used to gate which local files export may
+ *  inline — embedding a file outside the opened workspace would leak it. */
+export function isPathInsideDir(path, dir) {
+  if (!path || !dir) return false;
+  const norm = (s) => {
+    const out = [];
+    for (const seg of String(s).split("/")) {
+      if (seg === "" || seg === ".") continue;
+      if (seg === "..") out.pop();
+      else out.push(seg);
+    }
+    return "/" + out.join("/");
+  };
+  const p = norm(path);
+  const d = norm(dir);
+  return p === d || p.startsWith(d === "/" ? "/" : d + "/");
+}
+
 /** Final path segment of a Unix or Windows path. Falls back to the whole
  *  input when the path ends in a separator (no usable basename). */
 export function baseName(path) {

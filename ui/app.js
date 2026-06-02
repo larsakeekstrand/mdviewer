@@ -12,6 +12,7 @@ import {
   inlineFontUrls,
   forceLightCss,
   buildHtmlDocument,
+  isPathInsideDir,
 } from "./export.js";
 import {
   releaseUrlFor,
@@ -1273,6 +1274,12 @@ async function inlineImages(root) {
     imgs.map(async (img) => {
       const src = img.getAttribute("src") || "";
       if (!src || src.startsWith("data:") || /^https?:/i.test(src)) return;
+      // resolveImages flagged local files outside the workspace; never embed
+      // their bytes. Drop the src so the export leaks neither contents nor path.
+      if (img.dataset.exportBlocked === "1") {
+        img.removeAttribute("src");
+        return;
+      }
       try {
         const blob = await (await fetch(src)).blob();
         const mime = blob.type || "image/png";
@@ -1588,9 +1595,21 @@ function localImageUrl(baseDir, src) {
  *  next to the document (a bare relative/absolute path is not fetchable from
  *  the tauri://localhost origin). */
 function resolveImages(baseDir) {
+  // Files outside the opened workspace must never be embedded into an export
+  // (a malicious doc could reference ~/.ssh/id_rsa). Use the tree root as the
+  // boundary so in-project images still inline; fall back to the document's own
+  // directory when no folder is open.
+  const boundary = treeRoot || baseDir;
   for (const img of preview.querySelectorAll("img[src]")) {
-    const url = localImageUrl(baseDir, img.getAttribute("src"));
-    if (url) img.src = url;
+    const rawSrc = img.getAttribute("src");
+    const url = localImageUrl(baseDir, rawSrc);
+    if (!url) continue;
+    img.src = url;
+    if (isPathInsideDir(resolveRelative(baseDir, rawSrc), boundary)) {
+      delete img.dataset.exportBlocked;
+    } else {
+      img.dataset.exportBlocked = "1";
+    }
   }
 }
 
