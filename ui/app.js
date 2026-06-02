@@ -82,7 +82,7 @@ let gitRefreshTimer = null;
 const GIT_REFRESH_DEBOUNCE_MS = 200;
 
 // Tabs model
-const tabs = []; // [{ path, sticky, raw }]
+const tabs = []; // [{ path, sticky, raw, editing, dirty, savedContent }]
 let activeIdx = -1;
 let restoring = true; // suppress session persistence until init() finishes restoring
 
@@ -678,10 +678,13 @@ async function openPreview(path) {
   if (previewIdx !== -1) {
     tabs[previewIdx].path = path;
     tabs[previewIdx].raw = false;
+    tabs[previewIdx].editing = false;
+    tabs[previewIdx].dirty = false;
+    tabs[previewIdx].savedContent = null;
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
-  tabs.push({ path, sticky: false, raw: false });
+  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -692,7 +695,7 @@ async function openSticky(path) {
     await setActiveTab(existing);
     return;
   }
-  tabs.push({ path, sticky: true, raw: false });
+  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -722,7 +725,7 @@ function persistSession() {
 
 async function restoreSession(paths, active) {
   for (const p of paths) {
-    tabs.push({ path: p, sticky: true, raw: false });
+    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null });
   }
   if (tabs.length === 0) return;
   const idx =
@@ -809,6 +812,14 @@ function makeTabEl(tab, idx) {
   name.className = "tab-name";
   name.textContent = basename(tab.path);
   el.appendChild(name);
+
+  if (tab.dirty) {
+    const dot = document.createElement("span");
+    dot.className = "tab-dirty";
+    dot.textContent = "●";
+    dot.title = "Unsaved changes";
+    el.appendChild(dot);
+  }
 
   const close = document.createElement("span");
   close.className = "tab-close";
