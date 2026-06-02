@@ -821,6 +821,7 @@ async function createTreeEntry(container, dir, depth, isDir) {
   try {
     const cmd = isDir ? "create_folder" : "create_file";
     const created = await invoke(cmd, { dir, name: newName });
+    li.remove();
     await refreshTree();
     if (!isDir) {
       await openSticky(created);
