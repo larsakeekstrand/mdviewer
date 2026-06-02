@@ -1,10 +1,11 @@
 # CLAUDE.md — mdviewer project guide
 
-A markdown viewer for macOS and Windows, in Rust on Tauri 2. VS Code–style file tree + tabbed
+A markdown viewer and editor for macOS and Windows, in Rust on Tauri 2. VS Code–style file tree + tabbed
 preview, GitHub-flavored markdown rendering, Mermaid diagrams, KaTeX math,
 copy-button on code blocks, git status decoration in the tree, live reload,
 an Open Recent menu, an in-app update check against GitHub Releases, a custom
-right-click context menu, and a default-app file association for markdown files.
+right-click context menu, a default-app file association for markdown files,
+in-app source editing with live preview, and file management from the tree.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
 
@@ -19,9 +20,11 @@ Repo: https://github.com/larsakeekstrand/mdviewer
 - **Frontend** (`ui/`): vanilla HTML / CSS / JS, no build step, no framework.
   Vendored `morphdom` for scroll-preserving diffs, vendored `mermaid` for
   diagram rendering, vendored `katex` for math (`ui/katex/`, ~600K including
-  woff2 fonts), and vendored `github-markdown.css` for typography.
+  woff2 fonts), vendored `github-markdown.css` for typography, and vendored
+  **CodeMirror 5** for the source editor (`ui/codemirror/`).
   `withGlobalTauri: true` in `tauri.conf.json` exposes the IPC API at
   `window.__TAURI__`.
+- **`trash` crate** (Rust): moves files to the system Trash on delete (cross-platform recycle).
 
 ## File layout (each file's purpose in one line)
 
@@ -31,9 +34,11 @@ src-tauri/
     main.rs       — CLI parse (argv[1] → tree root / initial file)
     lib.rs        — Tauri builder, AppState, command registration, setup hook;
                     app.run handles macOS RunEvent::Opened (files from Finder)
-    commands.rs   — #[tauri::command]: list_dir, render_file, open_file,
-                    read_source, check_for_updates, open_url, open_path,
-                    frontend_ready (drains the Finder-open buffer)
+    commands.rs   — #[tauri::command]: list_dir, render_file, render_preview,
+                    open_file, read_source, save_file, open_url, open_path,
+                    frontend_ready (drains the Finder-open buffer),
+                    create_file, create_folder, rename_path, duplicate_file,
+                    delete_to_trash
     open_files.rs — file:// URL → markdown path; RunEvent::Opened handler:
                     emit open-file + focus window, or buffer until ready
     markdown.rs   — comrak + syntect; sourcepos for scroll anchoring;
@@ -42,16 +47,23 @@ src-tauri/
     watcher.rs    — notify-debouncer-full, 200 ms debounce, watches PARENT dir
     menu.rs       — native menu bar; on_menu_event handler emits JS events
     recent.rs     — JSON-persisted recent-folders list + last_folder (app_data_dir)
-    updates.rs    — GitHub /releases/latest probe, semver compare
+    fs_ops.rs     — validate_name, duplicate_candidate, within_root, create_file,
+                    create_folder, rename_path, duplicate_file; pure + IO helpers
+                    for file-tree operations, all unit-tested
   tauri.conf.json — productName MDViewer, withGlobalTauri true, ad-hoc signing
   Cargo.toml      — bin name "mdviewer" (lowercase, CLI convention)
   icons/          — 32, 128, 128@2x PNG + icon.icns (built from icon.svg)
 ui/
   index.html      — banner + sidebar + splitter + tab-bar + preview-scroll
   app.js          — tabs model, tree, IPC, scroll-anchor, link interception,
-                    mermaid render (renderMermaid) + live-reload preservation
+                    mermaid render (renderMermaid) + live-reload preservation;
+                    CodeMirror editor wiring (enter/exit edit, save, conflict)
+  editor.js       — pure helpers: isDirty, classifyFileChange (unit-tested)
+  treeops.js      — pure helper: validateName for inline-rename (unit-tested)
   styles.css      — grid layout, CSS variables for light/dark, pre.mermaid
   github-markdown.css, morphdom-umd.min.js, mermaid.min.js  — vendored
+  codemirror/     — vendored CodeMirror 5: codemirror.min.js + .css,
+                    xml.min.js, markdown.min.js; loaded as classic scripts
 icon.svg          — source for icon regeneration
 .github/workflows/
   ci.yml          — fmt, clippy -D warnings, test, debug build on push/PR
@@ -61,9 +73,11 @@ icon.svg          — source for icon regeneration
 
 ## Architecture quick-tour
 
-- **Tab model**: `tabs[]` of `{ path, sticky, raw }` + `activeIdx`. Single-click
+- **Tab model**: `tabs[]` of `{ path, sticky, raw, editing, dirty, savedContent, editBuffer }` + `activeIdx`. Single-click
   on a tree file replaces the non-sticky "preview" tab (or creates one);
-  double-click promotes to sticky. Each tab tracks its own raw/rendered state.
+  double-click promotes to sticky. Each tab tracks its own raw/rendered state
+  and its own in-progress editor buffer (`editBuffer`), so switching tabs
+  preserves unsaved edits.
 - **Watcher**: rewires on tab switch (`setActiveTab` → `open_file`). Watches the
   **parent directory** with `RecursiveMode::NonRecursive` because editors like
   VS Code and IntelliJ do atomic-save rename, which orphans path-level
@@ -151,8 +165,8 @@ icon.svg          — source for icon regeneration
   cache-bust. The Raw button is hidden and Copy Source / Export are guarded for
   image tabs.
 - **Menu actions** fire as Tauri events into the frontend:
-  `edit-action` (copy / copy-source / toggle-raw), `open-file`, `open-folder`,
-  `menu-check-updates`.
+  `edit-action` (copy / copy-source / toggle-raw / toggle-edit / save),
+  `open-file`, `open-folder`, `menu-check-updates`.
 - **Update check** runs after `init()` on every launch and then on a
   `setInterval` of `UPDATE_CHECK_INTERVAL_MS` (1 h) for the lifetime of the
   process (silent on failure / current; the silent path also respects the
@@ -206,6 +220,42 @@ icon.svg          — source for icon regeneration
   element into view, and pulses `CSS.highlights["search-jump"]` for
   1.5 s. `restoreAnchor` is skipped on that one render so the jump's
   scroll position survives.
+- **Split-view editor**: the **Edit** toolbar button (and **Actions ▸ Toggle Edit** /
+  `edit-action:"toggle-edit"` event) enters a side-by-side split — CodeMirror 5
+  (markdown mode, line numbers, line-wrap) on the left, the live-rendered
+  preview on the right, re-rendering via `render_preview` (renders the editor
+  buffer, not disk) debounced ~150 ms. Hidden/disabled for image tabs. Entering
+  edit calls `read_source` → primes `savedContent` + `editBuffer`; the editor
+  follows the active tab by sharing a single CodeMirror instance re-initialized
+  per `setActiveTab`. **Save** (⌘S / Actions ▸ Save) calls `save_file(path,
+  contents, expected)`: read-verify-write — refuses if disk diverged from
+  `expected` (the last-saved content), unless forced. Atomic write via
+  `write_atomically` (shared with `toggle_task`). Unsaved tabs show a ● dirty
+  dot (`tab.dirty`). Closing a dirty tab prompts to discard.
+- **Editor conflict handling**: `file-changed` events while editing are
+  classified by `classifyFileChange` (`ui/editor.js`, pure/unit-tested) into
+  `"self"` (disk equals `savedContent` — our own write, ignore), `"reload"` (not
+  editing or editor is clean — auto-reload as before), or `"conflict"` (disk
+  diverged AND dirty — show banner offering **Reload from disk** / **Keep my
+  version**). The `"self"` path suppresses the watcher feedback loop that
+  follows every `save_file` write.
+- **File operations**: tree right-click menu (file/folder row and sidebar
+  background) offers **New File…**, **New Folder…**, **Rename…**, **Duplicate**
+  (files), **Delete**. Backend: `src-tauri/src/fs_ops.rs` (pure helpers
+  `validate_name`, `duplicate_candidate`, `within_root` + IO `create_file`,
+  `create_folder`, `rename_path`, `duplicate_file`) + thin command wrappers in
+  `commands.rs` (`create_file`, `create_folder`, `rename_path`, `duplicate_file`,
+  `delete_to_trash`). Delete uses the `trash` crate (recoverable). **Inline
+  rename**: the row becomes a `<input>` (VS Code style); Enter commits, Esc
+  cancels; `validateName` (`ui/treeops.js`, mirrors `fs_ops::validate_name`)
+  rejects on the fly. Open tabs are retargeted on rename (descendants too) and
+  closed on delete.
+- **Security containment for file ops**: all five file-op commands resolve paths
+  against `AppState.current_root` via `fs_ops::within_root` (canonicalizes the
+  nearest existing ancestor, component-wise `starts_with`). `current_root` is a
+  `Mutex<Option<PathBuf>>` on `AppState`, seeded from `Startup.tree_root` in
+  `get_initial_state` and updated by the `remember_folder` command whenever the
+  frontend changes the sidebar root.
 
 ## Platform support
 
@@ -343,10 +393,10 @@ Windows-specific gotchas:
     The verify step rejects when the file changed on disk between render
     and click. Without it, a stale click after an external edit silently
     overwrites the user's change.
-  - Atomic write via tempfile + `std::fs::rename` in the same directory
-    (a different directory crosses filesystems on macOS and rename loses
-    atomicity). Filename is `.<stem>.tasklist-<nanos>.tmp` so it's both
-    hidden and unmistakably temporary.
+  - Atomic write via `write_atomically` (shared with `save_file`) + `std::fs::rename`
+    in the same directory (a different directory crosses filesystems on macOS
+    and rename loses atomicity). Filename is `.<stem>.mdviewer-<nanos>.tmp`
+    so it's both hidden and unmistakably temporary.
   - Watcher feedback loop is intentional: our write fires `file-changed`,
     the frontend re-renders, the checkbox visually matches what we wrote.
     The 200 ms watcher debounce smooths multiple rapid writes into one
