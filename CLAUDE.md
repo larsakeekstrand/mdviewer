@@ -477,14 +477,18 @@ cargo tauri build
    release (Features list, Usage, Menus), and fix any now-stale claims. The
    README is the user-facing source of truth and drifts silently otherwise —
    every release must leave it accurate.
-2. Bump version in `src-tauri/Cargo.toml` AND `src-tauri/tauri.conf.json`.
-3. `cd src-tauri && cargo update -p mdviewer` to refresh `Cargo.lock`.
-4. Commit (`Bump to 0.x.y` or include the user-facing change).
-5. `git tag v0.x.y && git push && git push origin v0.x.y`.
-6. Release workflow auto-builds aarch64, generates the changelog from
-   commits since the previous tag, attaches `.dmg` + `.app.tar.gz` to a
-   **draft** Release.
-7. `gh release edit v0.x.y --draft=false` to publish.
+2. Add a `## [X.Y.Z] - <date>` section to `CHANGELOG.md` with short,
+   user-facing bullets (no commit hashes, no internal/test/bump commits) —
+   this is what the GitHub release page and the in-app "What's new" modal
+   show. If omitted, the workflow falls back to the raw commit log.
+3. Bump version in `src-tauri/Cargo.toml` AND `src-tauri/tauri.conf.json`.
+4. `cd src-tauri && cargo update -p mdviewer` to refresh `Cargo.lock`.
+5. Commit (`Bump to 0.x.y` or include the user-facing change).
+6. `git tag v0.x.y && git push && git push origin v0.x.y`.
+7. Release workflow auto-builds aarch64, extracts the matching `CHANGELOG.md`
+   section for the release notes (falling back to commits since the previous
+   tag when absent), attaches `.dmg` + `.app.tar.gz` to a **draft** Release.
+8. `gh release edit v0.x.y --draft=false` to publish.
 
 The release workflow signs the `.app.tar.gz` and attaches `latest.json` when the
 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are
@@ -498,7 +502,9 @@ detects the `-` and publishes to the rolling `beta` release (prerelease,
 non-draft) instead of a draft — beta-opted installs pick it up automatically.
 When the matching stable `vX.Y.Z` is later published, `promote-beta.yml` rolls
 beta testers onto it. Smoke-test the manifest with
-`gh release view beta --json assets` after the run.
+`gh release view beta --json assets` after the run. A prerelease tag gets
+curated notes only if `CHANGELOG.md` has a matching `## [1.16.0-rc.1]` section;
+otherwise it falls back to the commit log (fine for testers).
 
 ### Icon regeneration
 
