@@ -41,3 +41,20 @@ export function extractChangelog(body) {
   if (idx === -1) return body.trim();
   return lines.slice(idx + 1).join("\n").trim();
 }
+
+/** Extract one version's notes from a Keep-a-Changelog `CHANGELOG.md` body.
+ *  `version` is the semver without a leading `v` (e.g. "1.16.0"). Matches a
+ *  heading `## [<version>]` (a trailing ` - DATE` and surrounding whitespace
+ *  are tolerated) and returns the lines up to the next `## ` heading, trimmed.
+ *  Returns "" when no matching section exists (caller decides the fallback). */
+export function changelogSection(text, version) {
+  if (!text || !version) return "";
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const heading = new RegExp(`^##\\s+\\[${escaped}\\]`);
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => heading.test(l));
+  if (start === -1) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^##\s/.test(l));
+  return (end === -1 ? rest : rest.slice(0, end)).join("\n").trim();
+}
