@@ -67,6 +67,7 @@ pub fn run(startup: Startup) {
             commands::check_update,
             commands::open_url,
             commands::open_path,
+            commands::path_within_dir,
             commands::save_export,
             export::export_pdf,
             commands::toggle_task,
