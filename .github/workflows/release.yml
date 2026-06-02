@@ -263,10 +263,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Tauri's bundler embeds the bare semver (no leading "v", no pre-release
-          # suffix) in installer filenames. Derive it from the tag so this works
-          # for both vX.Y.Z and vX.Y.Z-rc.N tags.
-          VERSION=$(echo "$TAG" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          # Tauri's bundler embeds the FULL version — including any pre-release
+          # suffix, minus the leading "v" — in installer filenames (e.g.
+          # MDViewer_1.17.0-rc.2_x64-setup.exe). Use the tag verbatim minus "v"
+          # so the asset renames + latest.json URL patch match on both stable
+          # (vX.Y.Z) and prerelease (vX.Y.Z-rc.N) tags.
+          VERSION="${TAG#v}"
           # Release operations target the *published* release tag, which is the
           # rolling "beta" for prereleases and the actual tag for stable.
           RELEASE_ID=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")
