@@ -469,8 +469,9 @@ fn save_file_inner(path: &Path, contents: &str, expected: Option<String>) -> Res
         match std::fs::read_to_string(path) {
             Ok(disk) if disk != expected => return Err("file changed on disk".to_string()),
             Ok(_) => {}
-            // A missing file is fine to (re)create — e.g. saving a brand-new file
-            // whose on-disk bytes were just created empty.
+            // The file is gone (never existed, or was deleted between load and
+            // save). Treat it as creatable and let the write recreate it, rather
+            // than as a conflict — the user keeps their edited content.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(format!("cannot read '{}': {e}", path.display())),
         }
@@ -488,12 +489,12 @@ fn write_atomically(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let stem = target
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or("tasklist");
+        .unwrap_or("mdviewer");
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp = dir.join(format!(".{stem}.tasklist-{nanos}.tmp"));
+    let tmp = dir.join(format!(".{stem}.mdviewer-{nanos}.tmp"));
     {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -944,5 +945,17 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "forced");
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_file_recreates_when_disk_file_is_missing() {
+        let dir = std::env::temp_dir().join(format!("mdv-save4-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("gone.md");
+        // expected=Some but the file does not exist → recreate, don't refuse.
+        save_file_inner(&f, "recreated", Some("ignored".to_string())).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "recreated");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
