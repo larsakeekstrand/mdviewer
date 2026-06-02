@@ -162,6 +162,35 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn within_root_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = tmp("symesc");
+        let secret_parent =
+            std::env::temp_dir().join(format!("mdv-fsops-secret-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&secret_parent);
+        std::fs::create_dir_all(&secret_parent).unwrap();
+
+        // A symlink INSIDE the root that points OUTSIDE it.
+        let link = root.join("escape");
+        let _ = std::fs::remove_file(&link);
+        symlink(&secret_parent, &link).unwrap();
+
+        // The link itself, and any child of it, must be judged outside the root.
+        assert!(!within_root(&link, &root));
+        assert!(!within_root(&link.join("payload.md"), &root));
+
+        // Sanity: a genuine in-root path is still accepted.
+        let real = root.join("real.md");
+        std::fs::write(&real, b"x").unwrap();
+        assert!(within_root(&real, &root));
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&secret_parent);
+    }
+
+    #[test]
     fn within_root_accepts_inside_and_rejects_outside() {
         let root = tmp("within");
         let inside = root.join("sub");
