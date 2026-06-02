@@ -685,6 +685,39 @@ function highlightSelectedByPath(path) {
 
 /* ---- Tree file operations ---- */
 
+/** After a rename, rewrite any open tab whose path is the renamed entry or
+ *  nested under it (folder rename), and rewire the active tab's watcher. */
+function retargetTabsForRename(from, to) {
+  let activeChanged = false;
+  for (let i = 0; i < tabs.length; i++) {
+    const p = tabs[i].path;
+    if (p === from) {
+      tabs[i].path = to;
+      if (i === activeIdx) activeChanged = true;
+    } else if (p.startsWith(from + "/")) {
+      tabs[i].path = to + p.slice(from.length);
+      if (i === activeIdx) activeChanged = true;
+    }
+  }
+  renderTabBar();
+  if (activeChanged && activeIdx >= 0) {
+    invoke("open_file", { path: tabs[activeIdx].path }).catch((e) =>
+      console.warn("rewire watcher after rename failed", e),
+    );
+  }
+}
+
+/** Close any tab pointing at `path` or nested under it (folder delete). */
+function closeTabsUnder(path) {
+  for (let i = tabs.length - 1; i >= 0; i--) {
+    const p = tabs[i].path;
+    if (p === path || p.startsWith(path + "/")) {
+      tabs[i].dirty = false; // deleted on disk — don't prompt to save
+      closeTab(i);
+    }
+  }
+}
+
 /** Replace a tree row's name span with an <input> for editing. Resolves to the
  *  committed (validated) name, or null on cancel. Does not touch disk. */
 function promptInlineName(row, initial) {
