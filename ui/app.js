@@ -1198,11 +1198,18 @@ async function exportDocument(format, path) {
     initMermaid();
     await renderActive({ scrollLock: false, forceMermaid: true });
 
+    // Files outside the opened workspace must not be embedded (HTML) or
+    // rendered (PDF). Use the tree root as the boundary, falling back to the
+    // document's own directory when no folder is open.
+    const boundary = treeRoot || parentDir(t.path);
     if (format === "html") {
-      await exportHtml(t, path);
+      await exportHtml(t, path, boundary);
     } else if (format === "pdf") {
       // The native print uses WebKit's print pipeline, so the @media print
       // stylesheet (chrome hidden, preview reflowed) applies during capture.
+      // Strip out-of-workspace images from the live preview first; the finally
+      // block's re-render restores them.
+      await neutralizeOutsideWorkspaceImages(preview, boundary);
       await invoke("export_pdf", { path });
     }
   } catch (e) {
@@ -1223,7 +1230,7 @@ async function exportDocument(format, path) {
 
 /** Serialize the (already light-rendered) preview into one standalone HTML file
  *  and write it via the save_export command. */
-async function exportHtml(t, path) {
+async function exportHtml(t, path, boundary) {
   const clone = preview.cloneNode(true);
   // Drop UI chrome injected after render (copy buttons, mermaid export buttons).
   clone
@@ -1234,7 +1241,7 @@ async function exportHtml(t, path) {
   clone
     .querySelectorAll('input[type="checkbox"]')
     .forEach((cb) => cb.setAttribute("disabled", ""));
-  await inlineImages(clone);
+  await inlineImages(clone, boundary);
   const bodyHtml = clone.innerHTML;
 
   // github-markdown.css is attribute-driven (light base, dark only under
@@ -1268,18 +1275,14 @@ async function fetchText(url) {
  *  left as-is. Per-image failures are logged and skipped (the original src
  *  stays, still valid online). macOS asset URLs use the asset:// scheme, so the
  *  http(s) check below correctly leaves only true remote images alone. */
-async function inlineImages(root) {
+async function inlineImages(root, boundary) {
+  // Drop out-of-workspace images first so their bytes are never fetched/embedded.
+  await neutralizeOutsideWorkspaceImages(root, boundary);
   const imgs = [...root.querySelectorAll("img")];
   await Promise.all(
     imgs.map(async (img) => {
       const src = img.getAttribute("src") || "";
       if (!src || src.startsWith("data:") || /^https?:/i.test(src)) return;
-      // resolveImages flagged local files outside the workspace; never embed
-      // their bytes. Drop the src so the export leaks neither contents nor path.
-      if (img.dataset.exportBlocked === "1") {
-        img.removeAttribute("src");
-        return;
-      }
       try {
         const blob = await (await fetch(src)).blob();
         const mime = blob.type || "image/png";
@@ -1605,12 +1608,37 @@ function resolveImages(baseDir) {
     const url = localImageUrl(baseDir, rawSrc);
     if (!url) continue;
     img.src = url;
-    if (isPathInsideDir(resolveRelative(baseDir, rawSrc), boundary)) {
+    const resolved = resolveRelative(baseDir, rawSrc);
+    img.dataset.localPath = resolved;
+    if (isPathInsideDir(resolved, boundary)) {
       delete img.dataset.exportBlocked;
     } else {
       img.dataset.exportBlocked = "1";
     }
   }
+}
+
+/** Strip the `src` from any local image that escapes `boundary`, so export
+ *  never embeds (HTML) or renders (PDF) a file outside the opened workspace.
+ *  `data-export-blocked` is a fast textual first pass; `path_within_dir` (Rust)
+ *  is the authoritative check — it canonicalizes, so an in-workspace symlink
+ *  pointing at e.g. ~/.ssh/id_rsa is caught too. */
+async function neutralizeOutsideWorkspaceImages(root, boundary) {
+  await Promise.all(
+    [...root.querySelectorAll("img")].map(async (img) => {
+      const local = img.dataset.localPath;
+      if (!local) return; // remote / data: image — not a local file
+      if (img.dataset.exportBlocked === "1") {
+        img.removeAttribute("src");
+        return;
+      }
+      const ok = await invoke("path_within_dir", {
+        path: local,
+        dir: boundary,
+      }).catch(() => false);
+      if (!ok) img.removeAttribute("src");
+    }),
+  );
 }
 
 /** Resolve a markdown link's href against the active tab's directory. */

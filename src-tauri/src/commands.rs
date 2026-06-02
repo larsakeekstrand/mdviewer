@@ -333,6 +333,19 @@ pub fn open_path(path: String) -> Result<(), String> {
     opener::open(&path).map_err(|e| format!("failed to open path: {e}"))
 }
 
+/// Whether `path`, with symlinks resolved, is `dir` itself or nested inside it.
+/// Export uses this to refuse inlining files that escape the opened workspace:
+/// the canonicalize step closes the symlink-escape a textual path check misses
+/// (e.g. an in-workspace `logo.png` that is a symlink to `~/.ssh/id_rsa`).
+/// `Path::starts_with` is component-wise, so `/work` never matches `/work-x`.
+#[tauri::command]
+pub fn path_within_dir(path: String, dir: String) -> bool {
+    match (std::fs::canonicalize(&path), std::fs::canonicalize(&dir)) {
+        (Ok(p), Ok(d)) => p.starts_with(&d),
+        _ => false,
+    }
+}
+
 /// Whether the system opener must refuse `p`. Checks both the literal path and,
 /// because `opener::open` follows symlinks, the symlink-resolved target — so a
 /// link named `notes.txt` pointing at `/Applications/Evil.app` can't smuggle a
@@ -646,6 +659,30 @@ pub fn search_in_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn path_within_dir_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("mdviewer-within-{}", std::process::id()));
+        let work = base.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let secret = base.join("secret.key"); // outside the workspace
+        std::fs::write(&secret, b"top secret").unwrap();
+        let inside = work.join("logo.png");
+        std::fs::write(&inside, b"img").unwrap();
+        let escaping = work.join("evil.png"); // inside workspace, points outside
+        let _ = std::fs::remove_file(&escaping);
+        symlink(&secret, &escaping).unwrap();
+
+        let w = work.to_string_lossy().into_owned();
+        assert!(path_within_dir(inside.to_string_lossy().into_owned(), w.clone()));
+        assert!(!path_within_dir(escaping.to_string_lossy().into_owned(), w.clone()));
+        assert!(!path_within_dir(secret.to_string_lossy().into_owned(), w));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     #[cfg(unix)]
