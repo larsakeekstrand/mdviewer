@@ -30,6 +30,7 @@ import {
 import { isImagePath } from "./filetype.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName } from "./treeops.js";
+import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -65,6 +66,7 @@ const rawBtn = document.getElementById("toggle-raw");
 const themeBtn = document.getElementById("toggle-theme");
 const splitter = document.getElementById("splitter");
 const editBtn = document.getElementById("toggle-edit");
+const reviewBtn = document.getElementById("toggle-review");
 const saveBtn = document.getElementById("save-file");
 const editorPane = document.getElementById("editor-pane");
 const editorSplitter = document.getElementById("editor-splitter");
@@ -287,6 +289,7 @@ async function init() {
 
   rawBtn.addEventListener("click", onToggleRaw);
   editBtn.addEventListener("click", onToggleEdit);
+  reviewBtn.addEventListener("click", onToggleReview);
   saveBtn.addEventListener("click", () => saveActive());
   themeBtn.addEventListener("click", onToggleTheme);
   updateThemeButton();
@@ -909,7 +912,7 @@ async function openPreview(path) {
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
-  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null });
+  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -920,7 +923,7 @@ async function openSticky(path) {
     await setActiveTab(existing);
     return;
   }
-  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null });
+  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -950,7 +953,7 @@ function persistSession() {
 
 async function restoreSession(paths, active) {
   for (const p of paths) {
-    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null });
+    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
   }
   if (tabs.length === 0) return;
   const idx =
@@ -1056,6 +1059,10 @@ function renderTabBar() {
       rawBtn.textContent = t.raw ? "Rendered" : "Raw";
       rawBtn.setAttribute("aria-pressed", t.raw ? "true" : "false");
     }
+    reviewBtn.hidden = image || t.editing || t.raw;
+    if (!reviewBtn.hidden) {
+      reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
+    }
   }
 }
 
@@ -1110,6 +1117,14 @@ function onToggleRaw() {
   t.raw = !t.raw;
   renderTabBar();
   renderActive({ scrollLock: false });
+}
+
+function onToggleReview() {
+  const t = activeTab();
+  if (!t) return;
+  t.reviewMode = !t.reviewMode;
+  reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
+  renderReviewMarkers(t);
 }
 
 /* ---- Source editor ---- */
