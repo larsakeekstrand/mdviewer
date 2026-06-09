@@ -38,7 +38,10 @@ function startLine(sourcepos) {
 
 /** Re-locate each review against freshly-rendered blocks by matching its
  *  quotedText. Matched reviews get the new sourcepos; unmatched become orphaned.
- *  newBlocks: [{ sourcepos, text }] with text normalized like quoteBlock input. */
+ *  newBlocks: [{ sourcepos, text }] where `text` MUST equal quoteBlock(rawBlockText)
+ *  — already normalized — since quotedText is stored post-normalization; a
+ *  mismatch silently orphans the review. The first matching block wins, so pass
+ *  newBlocks in document order. */
 export function reanchorReviews(reviews, newBlocks) {
   const anchored = [];
   const orphaned = [];
