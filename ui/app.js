@@ -2253,6 +2253,27 @@ function renderReviewBar(t) {
   preview.prepend(bar);
 }
 
+async function copyReview(t, btn) {
+  const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
+  const text = formatReview(
+    t.reviews || [],
+    t.generalNote || "",
+    rel,
+    t.orphanedReviews || [],
+  );
+  await copyText(text);
+  t.reviews = [];
+  t.orphanedReviews = [];
+  t.generalNote = "";
+  if (btn) {
+    btn.textContent = "Copied";
+    setTimeout(() => {
+      btn.textContent = "Copy Review";
+    }, 1200);
+  }
+  renderReviewMarkers(t);
+}
+
 /* ---- Link handling ---- */
 
 const URL_SCHEME = /^[a-z][a-z0-9+.\-]*:/i;
