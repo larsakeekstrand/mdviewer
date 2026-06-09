@@ -5,7 +5,9 @@ preview, GitHub-flavored markdown rendering, Mermaid diagrams, KaTeX math,
 copy-button on code blocks, git status decoration in the tree, live reload,
 an Open Recent menu, an in-app update check against GitHub Releases, a custom
 right-click context menu, a default-app file association for markdown files,
-in-app source editing with live preview, and file management from the tree.
+in-app source editing with live preview, file management from the tree, and a
+Review Mode that annotates rendered blocks and copies a structured review to the
+clipboard for pasting into an AI coding assistant.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
 
@@ -60,6 +62,8 @@ ui/
                     CodeMirror editor wiring (enter/exit edit, save, conflict)
   editor.js       — pure helpers: isDirty, classifyFileChange (unit-tested)
   treeops.js      — pure helper: validateName for inline-rename (unit-tested)
+  review.js       — pure helpers: quoteBlock, formatReview, reanchorReviews
+                    for Review Mode (unit-tested); DOM wiring lives in app.js
   styles.css      — grid layout, CSS variables for light/dark, pre.mermaid
   github-markdown.css, morphdom-umd.min.js, mermaid.min.js  — vendored
   codemirror/     — vendored CodeMirror 5: codemirror.min.js + .css,
@@ -73,7 +77,7 @@ icon.svg          — source for icon regeneration
 
 ## Architecture quick-tour
 
-- **Tab model**: `tabs[]` of `{ path, sticky, raw, editing, dirty, savedContent, editBuffer }` + `activeIdx`. Single-click
+- **Tab model**: `tabs[]` of `{ path, sticky, raw, editing, dirty, savedContent, editBuffer, reviewMode, reviews, generalNote, orphanedReviews }` + `activeIdx`. The last four are Review Mode state (ephemeral; never serialized in session restore). Single-click
   on a tree file replaces the non-sticky "preview" tab (or creates one);
   double-click promotes to sticky. Each tab tracks its own raw/rendered state
   and its own in-progress editor buffer (`editBuffer`), so switching tabs
@@ -116,8 +120,9 @@ icon.svg          — source for icon regeneration
   rules apply during capture and never flash on screen.
 - **`postRender()`**: single seam that runs after every morphdom patch —
   `annotateLinks` → `resolveImages` → `addCopyButtons` → `renderMath` →
-  `renderMermaid`. Order matters: math/mermaid change element heights and
-  must run before `restoreAnchor`. New post-render hooks go here.
+  `renderMermaid` → `renderReviewMarkers`. Order matters: math/mermaid change
+  element heights and must run before `restoreAnchor`. New post-render hooks go
+  here.
 - **Interactive task lists**: `commands::toggle_task` (Rust) toggles a `[ ]`
   / `[x]` checkbox at a sourcepos-derived line under a process-wide
   `tasklist_lock` mutex. The pure rewrite lives in `tasklist.rs` and is
@@ -260,6 +265,29 @@ icon.svg          — source for icon regeneration
   `Mutex<Option<PathBuf>>` on `AppState`, seeded from `Startup.tree_root` in
   `get_initial_state` and updated by the `remember_folder` command whenever the
   frontend changes the sidebar root.
+- **Review Mode**: a frontend-only feature (no Rust, no IPC). The **⊕ Review**
+  toolbar toggle (`#toggle-review`, gated like Raw/Edit — hidden for raw/edit/
+  image tabs) flips per-tab `reviewMode`. `renderReviewMarkers(t)` is a
+  `postRender` hook (so markers survive live-reload like copy buttons): it
+  strips its own prior nodes, then injects a left-gutter **+** on each
+  annotatable block (`ANNOTATABLE_TAGS`: P/H1-6/LI/PRE/BLOCKQUOTE, excluding
+  `pre.mermaid`), a comment card on annotated blocks, and a top **review bar**
+  (general-note textarea + **Copy Review** button). Comments are
+  `{ sourcepos, quotedText, comment }`; the anchor key is `blockText()` =
+  `quoteBlock(textContent, Infinity)` of the block with injected UI stripped —
+  the SAME normalization on both save (`openCommentBox`) and re-anchor, or
+  matching breaks. On every render `renderReviewMarkers` re-anchors via
+  `reanchorReviews` (pure, `ui/review.js`): matches by `quotedText`, refreshes
+  `sourcepos`, and moves non-matches into `orphanedReviews` (surfaced with a
+  "⚠ this block changed" tag — never silently dropped; count is conserved, so
+  re-anchor alone can't empty both arrays). **Copy Review** → `formatReview`
+  (pure) builds the clipboard markdown (relative path, general note, `---`
+  divider only when comments follow, blocks in document order), then clears all
+  review state. The comment box commits via Save/Enter and dismisses via
+  Cancel/Esc (shared `commit`/`dismiss` closures). `exportDocument` forces
+  `reviewMode` off during its re-render (like `prevRaw`) so review chrome never
+  leaks into HTML/PDF. State is ephemeral — excluded from session restore and
+  reset on the `openPreview` tab-reuse path.
 
 ## Platform support
 
