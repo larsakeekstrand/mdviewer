@@ -95,7 +95,7 @@ let gitRefreshTimer = null;
 const GIT_REFRESH_DEBOUNCE_MS = 200;
 
 // Tabs model
-const tabs = []; // [{ path, sticky, raw, editing, dirty, savedContent }]
+const tabs = []; // [{ path, sticky, raw, editing, dirty, savedContent, reviewMode, reviews, generalNote, orphanedReviews }]
 let activeIdx = -1;
 let restoring = true; // suppress session persistence until init() finishes restoring
 
@@ -909,6 +909,10 @@ async function openPreview(path) {
     tabs[previewIdx].editing = false;
     tabs[previewIdx].dirty = false;
     tabs[previewIdx].savedContent = null;
+    tabs[previewIdx].reviewMode = false;
+    tabs[previewIdx].reviews = [];
+    tabs[previewIdx].generalNote = "";
+    tabs[previewIdx].orphanedReviews = [];
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
@@ -1123,7 +1127,7 @@ function onToggleReview() {
   const t = activeTab();
   if (!t) return;
   t.reviewMode = !t.reviewMode;
-  reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
+  renderTabBar();
   renderReviewMarkers(t);
 }
 
