@@ -3,6 +3,15 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.17.1] - 2026-06-09
+
+Security hardening.
+
+- Hardened the "open in default app" check so a launchable file can't slip past
+  it with a crafted name (a trailing dot or space, which the OS ignores when
+  launching).
+- Restricted document export to its actual output formats (HTML, PDF, SVG, PNG).
+
 ## [1.17.0] - 2026-06-02
 
 MDViewer is now an editor, not just a viewer.

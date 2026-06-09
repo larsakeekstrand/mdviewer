@@ -338,7 +338,18 @@ const UNSAFE_OPEN_EXTS: &[&str] = &[
 ];
 
 fn is_unsafe_to_open(path: &Path) -> bool {
-    match path.extension().and_then(|s| s.to_str()) {
+    // `Path::extension()` parses `payload.exe.` as an empty extension and
+    // `payload.exe ` as `"exe "` — neither matches the denylist, yet Win32
+    // strips trailing dots/spaces before execution and launches the PE.
+    // Normalize the final component the same way before extracting the type.
+    let ext = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.trim_end_matches(['.', ' ']))
+        .map(Path::new)
+        .and_then(|p| p.extension())
+        .and_then(|s| s.to_str());
+    match ext {
         Some(ext) => UNSAFE_OPEN_EXTS.contains(&ext.to_ascii_lowercase().as_str()),
         None => false,
     }
@@ -396,10 +407,30 @@ pub fn open_file(app: AppHandle, state: State<'_, AppState>, path: String) -> Re
 /// Writes export data (SVG text or base64-encoded PNG bytes) to a user-picked
 /// path. Path is supplied by the frontend after going through the native save
 /// dialog, so we trust it — the dialog is the consent boundary.
+/// The only formats the export pipeline ever produces. Even though the path
+/// comes from a native save dialog, gating on the format means a caller that
+/// bypasses that dialog (e.g. via injected script) still can't drop a binary
+/// payload — `.plist`, an extensionless dotfile, or a `.command` — outside the
+/// export use case.
+const EXPORT_EXTS: &[&str] = &["html", "pdf", "svg", "png"];
+
+fn is_exportable_path(path: &Path) -> bool {
+    match path.extension().and_then(|s| s.to_str()) {
+        Some(ext) => EXPORT_EXTS.contains(&ext.to_ascii_lowercase().as_str()),
+        None => false,
+    }
+}
+
 #[tauri::command]
 pub fn save_export(path: String, data: String, base64_encoded: bool) -> Result<(), String> {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine as _;
+
+    if !is_exportable_path(Path::new(&path)) {
+        return Err(format!(
+            "refusing to export to a non-export file type: {path}"
+        ));
+    }
 
     let bytes = if base64_encoded {
         STANDARD
@@ -873,6 +904,25 @@ mod tests {
     }
 
     #[test]
+    fn flags_trailing_dot_and_space_evasion() {
+        // Win32 strips trailing dots/spaces before execution, so these all
+        // launch despite `Path::extension()` parsing to a non-denied value.
+        for name in [
+            "payload.exe.",
+            "payload.exe ",
+            "payload.exe. ",
+            "setup.command.",
+            "App.app ",
+            "RUN.SH. .",
+        ] {
+            assert!(
+                is_unsafe_to_open(Path::new(name)),
+                "{name} should be refused"
+            );
+        }
+    }
+
+    #[test]
     fn allows_viewable_files() {
         for name in [
             "photo.png",
@@ -972,6 +1022,35 @@ mod tests {
             assert!(!unsafe_path("foo.png"));
             assert!(!unsafe_path("foo.pdf"));
         }
+    }
+
+    #[test]
+    fn export_path_allows_only_export_formats() {
+        for name in [
+            "doc.html",
+            "doc.HTML",
+            "doc.pdf",
+            "diagram.svg",
+            "diagram.PNG",
+        ] {
+            assert!(is_exportable_path(Path::new(name)), "{name} should export");
+        }
+        for name in [
+            "evil.plist",
+            "evil.command",
+            "noext",
+            ".zshrc",
+            "doc.html.command",
+        ] {
+            assert!(!is_exportable_path(Path::new(name)), "{name} must refuse");
+        }
+    }
+
+    #[test]
+    fn save_export_refuses_non_export_extension() {
+        let err = save_export("/tmp/evil.plist".to_string(), "x".to_string(), false)
+            .expect_err("must refuse a non-export extension");
+        assert!(err.contains("export"), "got: {err}");
     }
 
     #[test]
