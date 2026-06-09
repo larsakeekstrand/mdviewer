@@ -1409,9 +1409,9 @@ body {
 }
 
 .markdown-body .reviewed {
+  box-sizing: border-box;
   border-left: 3px solid #0969da;
   padding-left: 0.6em;
-  margin-left: -0.6em;
 }
 
 .review-card {
