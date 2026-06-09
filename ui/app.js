@@ -2197,31 +2197,60 @@ function openCommentBox(t, block, existing) {
   const input = document.createElement("textarea");
   input.rows = 2;
   input.value = existing ? existing.comment : "";
-  input.placeholder = "Comment — Enter to save, Esc to cancel";
+  input.placeholder = "Comment…";
   box.appendChild(input);
+
+  const actions = document.createElement("div");
+  actions.className = "review-input-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "review-save-btn";
+  saveBtn.textContent = "Save";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "review-cancel-btn";
+  cancelBtn.textContent = "Cancel";
+  actions.append(saveBtn, cancelBtn);
+  box.appendChild(actions);
+
   host.appendChild(box);
   input.focus();
 
+  const commit = () => {
+    const val = input.value.trim();
+    if (val) {
+      if (existing) {
+        existing.comment = val;
+      } else {
+        if (!t.reviews) t.reviews = [];
+        t.reviews.push({
+          sourcepos: host.dataset.sourcepos,
+          quotedText: blockText(host),
+          comment: val,
+        });
+      }
+    }
+    renderReviewMarkers(t);
+  };
+  const dismiss = () => renderReviewMarkers(t);
+
+  saveBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    commit();
+  });
+  cancelBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    dismiss();
+  });
   input.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
-      const val = input.value.trim();
-      if (val) {
-        if (existing) {
-          existing.comment = val;
-        } else {
-          if (!t.reviews) t.reviews = [];
-          t.reviews.push({
-            sourcepos: host.dataset.sourcepos,
-            quotedText: blockText(host),
-            comment: val,
-          });
-        }
-      }
-      renderReviewMarkers(t);
+      commit();
     } else if (ev.key === "Escape") {
       ev.preventDefault();
-      renderReviewMarkers(t);
+      dismiss();
     }
   });
 }
