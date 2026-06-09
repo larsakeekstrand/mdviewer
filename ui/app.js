@@ -2081,8 +2081,8 @@ const ANNOTATABLE_TAGS = new Set([
 ]);
 
 function annotatableBlocks() {
-  return [...preview.querySelectorAll("[data-sourcepos]")].filter((el) =>
-    ANNOTATABLE_TAGS.has(el.tagName),
+  return [...preview.querySelectorAll("[data-sourcepos]")].filter(
+    (el) => ANNOTATABLE_TAGS.has(el.tagName) && !el.classList.contains("mermaid"),
   );
 }
 
@@ -2107,7 +2107,12 @@ function renderReviewMarkers(t) {
     el.remove();
   }
   preview.classList.toggle("reviewing", !!t.reviewMode);
-  if (!t.reviewMode) return;
+  if (!t.reviewMode) {
+    for (const el of preview.querySelectorAll(".reviewed")) {
+      el.classList.remove("reviewed");
+    }
+    return;
+  }
 
   if (t.reviews && t.reviews.length) {
     const newBlocks = annotatableBlocks().map((b) => ({
@@ -2246,14 +2251,14 @@ function renderReviewBar(t) {
   copy.textContent = "Copy Review";
   copy.addEventListener("click", (ev) => {
     ev.preventDefault();
-    copyReview(t, copy);
+    copyReview(t);
   });
 
   bar.append(note, copy);
   preview.prepend(bar);
 }
 
-async function copyReview(t, btn) {
+async function copyReview(t) {
   const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
   const text = formatReview(
     t.reviews || [],
@@ -2265,13 +2270,14 @@ async function copyReview(t, btn) {
   t.reviews = [];
   t.orphanedReviews = [];
   t.generalNote = "";
-  if (btn) {
-    btn.textContent = "Copied";
+  renderReviewMarkers(t);
+  const freshBtn = preview.querySelector(".review-copy-btn");
+  if (freshBtn) {
+    freshBtn.textContent = "Copied";
     setTimeout(() => {
-      btn.textContent = "Copy Review";
+      freshBtn.textContent = "Copy Review";
     }, 1200);
   }
-  renderReviewMarkers(t);
 }
 
 /* ---- Link handling ---- */
