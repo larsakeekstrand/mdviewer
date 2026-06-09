@@ -54,6 +54,11 @@ test("formatReview omits the general-note line and divider when note is blank", 
   assert.equal(out, "Review of a.md\n\n> hello\n↳ fix\n");
 });
 
+test("formatReview omits the divider when a general note has no block comments", () => {
+  const out = formatReview([], "Just a thought.", "a.md", []);
+  assert.equal(out, "Review of a.md\n\nGeneral note: Just a thought.\n");
+});
+
 test("formatReview lists orphaned comments first with a changed tag", () => {
   const out = formatReview(
     [{ sourcepos: "10:1-10:5", quotedText: "still here", comment: "keep" }],

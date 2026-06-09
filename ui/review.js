@@ -14,9 +14,6 @@ export function quoteBlock(sourceText, max = 80) {
  *  then orphaned comments (tagged), then anchored comments in document order. */
 export function formatReview(reviews, generalNote, relativePath, orphaned = []) {
   const note = (generalNote || "").trim();
-  const out = [`Review of ${relativePath}`, ""];
-  if (note) out.push(`General note: ${note}`, "", "---", "");
-
   const ordered = [...reviews].sort(
     (a, b) => startLine(a.sourcepos) - startLine(b.sourcepos),
   );
@@ -24,6 +21,12 @@ export function formatReview(reviews, generalNote, relativePath, orphaned = []) 
     ...orphaned.map((o) => ({ ...o, changed: true })),
     ...ordered,
   ];
+
+  const out = [`Review of ${relativePath}`, ""];
+  if (note) {
+    out.push(`General note: ${note}`, "");
+    if (items.length) out.push("---", "");
+  }
   for (const it of items) {
     const tag = it.changed ? "  ⚠ this block changed" : "";
     out.push(`> ${quoteBlock(it.quotedText)}${tag}`, `↳ ${it.comment}`, "");
