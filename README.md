@@ -18,6 +18,7 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Interactive task lists** — click a `- [ ]` / `- [x]` checkbox in the rendered view and the change is written back to the source file atomically
 - **In-app editing** — click **Edit** (or **Actions ▸ Toggle Edit**) to open a side-by-side split: a CodeMirror source editor on the left, the live-rendered preview on the right (re-renders as you type). Save with ⌘S (**Actions ▸ Save**). Unsaved tabs show a ● dot. If the file changes on disk while you have unsaved edits, a banner lets you choose to reload or keep your version. The editor is hidden for image tabs.
 - **File management from the tree** — right-click any file or folder row (or the sidebar background) for **New File…**, **New Folder…**, **Rename…**, **Duplicate** (files only), and **Delete**. Rename uses VS Code–style inline editing; Enter commits, Esc cancels. Delete moves to the system **Trash** (recoverable). Open tabs follow a rename, and tabs under a deleted path are closed.
+- **Review Mode** — click **⊕ Review** to annotate a rendered document: hover any block for a gutter **+**, attach a comment, and add a document-wide general note. **Copy Review** puts a structured markdown summary (the file path, your note, and each quoted block with its comment, in document order) on the clipboard — ready to paste into an AI coding assistant like Claude Code. Comments re-anchor to their blocks across live reloads; ones whose text changed are flagged. Annotations are per-tab and ephemeral (not saved to disk).
 - **In-document find** (⌘F) with case-sensitive and whole-word toggles, match count, and next/previous navigation
 - **Folder content search** (⌘⇧F) — recursively search every file in the open tree (or a single folder via right-click). Case-sensitive, whole-word, and an "include .gitignored files" toggle (off by default — `.gitignore` / `.ignore` / global gitignore are honored like ripgrep). Click a result to open the file and jump the preview to the matching line.
 - **Document export** — export the rendered page to **self-contained HTML** (CSS, fonts, and local images inlined; always light-themed) or **PDF** (native WebKit print pipeline)
@@ -122,6 +123,17 @@ that case.
 ### Raw vs rendered view
 
 Each tab can be viewed rendered (default) or raw. Toggle with the **Raw** button at the top-right of the tab bar, or via the **Actions ▸ Toggle Raw** menu item, or via the right-click context menu. The toggle is per tab.
+
+### Review Mode
+
+Click **⊕ Review** at the top-right of the tab bar to turn the rendered document into a review surface — useful when you're reading a plan, spec, or report produced by an AI coding assistant and want to send back precise feedback.
+
+- Hover any block (paragraph, heading, list item, code block) to reveal a **+** in the left margin; click it to attach a comment. **Save** (or Enter) commits it; **Cancel** (or Esc) discards. Saved blocks get a blue left-border and a comment card; click a card to edit, **×** to delete.
+- The **general note** field at the top captures document-wide feedback.
+- **Copy Review** assembles everything into one markdown block — the file's path, the general note, and each annotated block quoted with its comment in document order — and copies it to the clipboard, then clears the annotations. Paste it straight into your assistant.
+- Comments are anchored to block text, so they survive live reloads and follow their block when the document is rewritten above them; a comment whose block text changed is surfaced separately with a "⚠ this block changed" tag. Annotations live only for the session — they aren't written to disk, and they're excluded from exports.
+
+Review Mode is available on rendered markdown only (hidden in Raw view, Edit mode, and on image tabs).
 
 ### Theme
 
