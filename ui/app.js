@@ -1519,6 +1519,7 @@ async function postRender(t, { raw = false, forceMermaid = false } = {}) {
     renderMath();
     await renderMermaid({ force: forceMermaid });
     addMermaidExportButtons();
+    renderReviewMarkers(t);
   }
   if (t.pendingJumpLine != null) {
     const line = t.pendingJumpLine;
@@ -2071,6 +2072,185 @@ async function onCopyButtonClick(btn, pre) {
     btn.textContent = "Copy";
     btn.classList.remove("ok");
   }, 1200);
+}
+
+/* ---- Review Mode ---- */
+
+const ANNOTATABLE_TAGS = new Set([
+  "P", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "PRE", "BLOCKQUOTE",
+]);
+
+function annotatableBlocks() {
+  return [...preview.querySelectorAll("[data-sourcepos]")].filter((el) =>
+    ANNOTATABLE_TAGS.has(el.tagName),
+  );
+}
+
+/** A block's source text with our injected UI stripped, normalized the same way
+ *  quoteBlock normalizes — so it matches reanchorReviews keys exactly. */
+function blockText(block) {
+  const clone = block.cloneNode(true);
+  for (const el of clone.querySelectorAll(
+    ".review-gutter, .review-card, .review-input, .copy-btn",
+  )) {
+    el.remove();
+  }
+  return quoteBlock(clone.textContent, Infinity);
+}
+
+/** postRender hook: re-anchor against the fresh DOM, then inject gutter + and
+ *  cards. Removes its own prior nodes first so it is idempotent across patches. */
+function renderReviewMarkers(t) {
+  for (const el of preview.querySelectorAll(
+    ".review-gutter, .review-card, .review-input, .review-bar",
+  )) {
+    el.remove();
+  }
+  preview.classList.toggle("reviewing", !!t.reviewMode);
+  if (!t.reviewMode) return;
+
+  if (t.reviews && t.reviews.length) {
+    const newBlocks = annotatableBlocks().map((b) => ({
+      sourcepos: b.dataset.sourcepos,
+      text: blockText(b),
+    }));
+    const { anchored, orphaned } = reanchorReviews(t.reviews, newBlocks);
+    t.reviews = anchored;
+    if (orphaned.length) {
+      t.orphanedReviews = (t.orphanedReviews || []).concat(orphaned);
+    }
+  }
+
+  renderReviewBar(t);
+
+  for (const block of annotatableBlocks()) {
+    const sp = block.dataset.sourcepos;
+    const existing = (t.reviews || []).find((r) => r.sourcepos === sp);
+    block.appendChild(makeGutterButton(t, block));
+    if (existing) {
+      block.classList.add("reviewed");
+      block.appendChild(makeReviewCard(t, existing));
+    } else {
+      block.classList.remove("reviewed");
+    }
+  }
+}
+
+function makeGutterButton(t, block) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "review-gutter";
+  btn.textContent = "+";
+  btn.setAttribute("aria-label", "Add review comment");
+  btn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openCommentBox(t, block, null);
+  });
+  return btn;
+}
+
+function makeReviewCard(t, review) {
+  const card = document.createElement("div");
+  card.className = "review-card";
+
+  const text = document.createElement("span");
+  text.className = "review-comment-text";
+  text.textContent = review.comment;
+  text.title = "Click to edit";
+  text.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openCommentBox(t, null, review);
+  });
+
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "review-delete";
+  del.textContent = "×";
+  del.setAttribute("aria-label", "Delete comment");
+  del.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    t.reviews = (t.reviews || []).filter((r) => r !== review);
+    renderReviewMarkers(t);
+  });
+
+  card.append(text, del);
+  return card;
+}
+
+/** Inline editor under a block. `block` for a new comment, `existing` to edit. */
+function openCommentBox(t, block, existing) {
+  const prior = preview.querySelector(".review-input");
+  if (prior) prior.remove();
+
+  const host = block || findBlockForSourcepos(existing.sourcepos);
+  if (!host) return;
+
+  const box = document.createElement("div");
+  box.className = "review-input";
+  const input = document.createElement("textarea");
+  input.rows = 2;
+  input.value = existing ? existing.comment : "";
+  input.placeholder = "Comment — Enter to save, Esc to cancel";
+  box.appendChild(input);
+  host.appendChild(box);
+  input.focus();
+
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      const val = input.value.trim();
+      if (val) {
+        if (existing) {
+          existing.comment = val;
+        } else {
+          if (!t.reviews) t.reviews = [];
+          t.reviews.push({
+            sourcepos: host.dataset.sourcepos,
+            quotedText: blockText(host),
+            comment: val,
+          });
+        }
+      }
+      renderReviewMarkers(t);
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      renderReviewMarkers(t);
+    }
+  });
+}
+
+function findBlockForSourcepos(sp) {
+  return [...preview.querySelectorAll("[data-sourcepos]")].find(
+    (el) => el.dataset.sourcepos === sp,
+  );
+}
+
+function renderReviewBar(t) {
+  const bar = document.createElement("div");
+  bar.className = "review-bar";
+
+  const note = document.createElement("textarea");
+  note.className = "review-general-note";
+  note.rows = 2;
+  note.placeholder = "General note about this document (optional)";
+  note.value = t.generalNote || "";
+  note.addEventListener("input", () => {
+    t.generalNote = note.value;
+  });
+
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "review-copy-btn";
+  copy.textContent = "Copy Review";
+  copy.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    copyReview(t, copy);
+  });
+
+  bar.append(note, copy);
+  preview.prepend(bar);
 }
 
 /* ---- Link handling ---- */
