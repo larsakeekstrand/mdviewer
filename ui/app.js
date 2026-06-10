@@ -1070,6 +1070,10 @@ function renderTabBar() {
     reviewBtn.hidden = image || t.editing || t.raw;
     if (!reviewBtn.hidden) {
       reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
+      reviewBtn.textContent = t.reviewMode ? "✓ Finish & Copy" : "💬 Review";
+      reviewBtn.title = t.reviewMode
+        ? "Copy your review to the clipboard and exit review mode"
+        : "Comment on this document and copy your review for Claude Code";
     }
   }
 }
