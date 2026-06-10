@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod claude_hook;
 mod commands;
 mod export;
