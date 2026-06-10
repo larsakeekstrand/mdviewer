@@ -31,6 +31,9 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "install-cli" => {
                 let _ = app.emit("menu-install-cli", ());
             }
+            "install-claude-hook" => {
+                let _ = app.emit("menu-install-claude-hook", ());
+            }
             "github-source" => {
                 let _ = crate::commands::open_url(SOURCE_URL.to_string());
             }
@@ -100,6 +103,8 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     let install_cli =
         MenuItemBuilder::with_id("install-cli", "Install Command Line Tool…").build(app)?;
+    let install_claude_hook =
+        MenuItemBuilder::with_id("install-claude-hook", "Install Claude Code Hook…").build(app)?;
     let github_source =
         MenuItemBuilder::with_id("github-source", "View Source on GitHub").build(app)?;
 
@@ -109,6 +114,7 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .item(&check_updates);
     #[cfg(target_os = "macos")]
     let app_menu_builder = app_menu_builder.item(&install_cli);
+    let app_menu_builder = app_menu_builder.item(&install_claude_hook);
     let app_menu = app_menu_builder
         .separator()
         .item(&settings)
