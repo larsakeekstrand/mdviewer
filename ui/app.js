@@ -2276,6 +2276,11 @@ function renderReviewBar(t) {
   const bar = document.createElement("div");
   bar.className = "review-bar";
 
+  const hint = document.createElement("div");
+  hint.className = "review-hint";
+  hint.textContent =
+    "Comment on any block (hover for the +), then Finish & Copy to paste your review into Claude Code.";
+
   const note = document.createElement("textarea");
   note.className = "review-general-note";
   note.rows = 2;
@@ -2285,16 +2290,7 @@ function renderReviewBar(t) {
     t.generalNote = note.value;
   });
 
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "review-copy-btn";
-  copy.textContent = "Copy Review";
-  copy.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    copyReview(t);
-  });
-
-  bar.append(note, copy);
+  bar.append(hint, note);
   preview.prepend(bar);
 }
 
