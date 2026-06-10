@@ -29,7 +29,7 @@ import {
 } from "./theme.js";
 import { isImagePath } from "./filetype.js";
 import { classifyFileChange, isDirty } from "./editor.js";
-import { validateName } from "./treeops.js";
+import { validateName, treeAncestors } from "./treeops.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
 
 // mdviewer frontend
@@ -578,7 +578,7 @@ async function setTreeRoot(path) {
   refreshGitStatus();
   rememberFolder(path);
   const tab = activeTab();
-  if (tab) highlightSelectedByPath(tab.path);
+  if (tab) revealInTree(tab.path);
 }
 
 async function openExternalFolder(path) {
@@ -636,21 +636,19 @@ function makeNode(entry, depth) {
   return li;
 }
 
-async function onDirClick(entry, li, row, depth) {
-  const open = li.querySelector(":scope > ul");
-  if (open) {
-    open.remove();
-    row.classList.remove("open");
-    // Bust the cache so a folder that changes while collapsed (and thus
-    // unwatched) reads fresh on the next expand.
-    childCache.delete(entry.path);
-    updateTreeWatch();
-    return;
-  }
+/** Expand a directory `<li>` (lazy-load + render its children). No-op if it
+ *  isn't a directory row or is already open. Shared by onDirClick and
+ *  revealInTree so click-expand and reveal-expand behave identically. */
+async function expandDir(li) {
+  const row = li.querySelector(":scope > .row");
+  if (!row || li.dataset.isDir !== "1") return;
+  if (li.querySelector(":scope > ul")) return; // already open
+  const path = li.dataset.path;
+  const depth = parseInt(li.dataset.depth, 10);
   row.classList.add("open");
   let children;
   try {
-    children = await listDir(entry.path);
+    children = await listDir(path);
   } catch (e) {
     console.error("list_dir failed", e);
     row.classList.remove("open");
@@ -663,6 +661,20 @@ async function onDirClick(entry, li, row, depth) {
   li.appendChild(ul);
   applyGitDecorations(ul);
   updateTreeWatch();
+}
+
+async function onDirClick(entry, li, row, depth) {
+  const open = li.querySelector(":scope > ul");
+  if (open) {
+    open.remove();
+    row.classList.remove("open");
+    // Bust the cache so a folder that changes while collapsed (and thus
+    // unwatched) reads fresh on the next expand.
+    childCache.delete(entry.path);
+    updateTreeWatch();
+    return;
+  }
+  await expandDir(li);
 }
 
 async function onTreeFileSingle(path) {
@@ -678,15 +690,27 @@ async function onTreeFileDouble(path) {
   await openSticky(path);
 }
 
-function highlightSelectedByPath(path) {
+/** Reveal a file in the tree for the active tab: clear any prior selection,
+ *  expand the collapsed ancestor folders, then highlight + scroll the file's
+ *  row into view. A file not under the current tree root (treeAncestors → null)
+ *  is a no-op beyond clearing the selection. */
+async function revealInTree(path) {
   for (const el of document.querySelectorAll(".tree .row.selected")) {
     el.classList.remove("selected");
   }
-  if (!path) return;
+  const ancestors = treeAncestors(treeRoot, path);
+  if (ancestors === null) return;
+  for (const dir of ancestors) {
+    const li = tree.querySelector(`li[data-path="${cssEscape(dir)}"]`);
+    if (!li) return; // an ancestor row is missing (e.g. stale tab) — give up quietly
+    await expandDir(li);
+  }
   const li = tree.querySelector(`li[data-path="${cssEscape(path)}"]`);
-  if (li) {
-    const row = li.querySelector(":scope > .row");
-    if (row) row.classList.add("selected");
+  if (!li) return;
+  const row = li.querySelector(":scope > .row");
+  if (row) {
+    row.classList.add("selected");
+    row.scrollIntoView({ block: "nearest" });
   }
 }
 
@@ -982,7 +1006,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   if (typeof hideConflict === "function") hideConflict();
   renderTabBar();
   persistSession();
-  highlightSelectedByPath(tabs[idx].path);
+  revealInTree(tabs[idx].path);
   try {
     await invoke("open_file", { path: tabs[idx].path });
   } catch (e) {
