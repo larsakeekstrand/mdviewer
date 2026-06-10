@@ -279,6 +279,10 @@ async function init() {
     await installCli();
   });
 
+  await listen("menu-install-claude-hook", async () => {
+    await installClaudeHook();
+  });
+
   window
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", async () => {
@@ -3187,6 +3191,31 @@ async function installCli() {
     outcome === "already_installed"
       ? "The mdviewer command line tool is already installed."
       : "Installed. You can now run mdviewer from a terminal.";
+  await dialogApi.message(msg, { title: "MDViewer", kind: "info" });
+}
+
+async function installClaudeHook() {
+  if (!treeRoot) {
+    await dialogApi.message("Open a folder first to install the hook there.", {
+      title: "MDViewer",
+      kind: "info",
+    });
+    return;
+  }
+  let outcome;
+  try {
+    outcome = await invoke("install_claude_hook");
+  } catch (e) {
+    await dialogApi.message("Couldn't install the Claude Code hook.\n\n" + e, {
+      title: "MDViewer",
+      kind: "error",
+    });
+    return;
+  }
+  const msg =
+    outcome === "updated"
+      ? "Already installed — updated the MDViewer path."
+      : "Installed. Plan, spec, and design files Claude Code writes in this project will now open in MDViewer.";
   await dialogApi.message(msg, { title: "MDViewer", kind: "info" });
 }
 

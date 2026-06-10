@@ -722,6 +722,41 @@ pub fn install_cli() -> Result<InstallOutcome, String> {
     Err("CLI install is only supported on macOS".to_string())
 }
 
+/// Merge the MDViewer `--claude-hook` PostToolUse hook into the open project's
+/// `.claude/settings.local.json`. Idempotent: updates an existing entry's path
+/// rather than duplicating. The target dir is the current sidebar root.
+#[tauri::command]
+pub fn install_claude_hook(
+    state: State<'_, AppState>,
+) -> Result<crate::claude_hook::HookOutcome, String> {
+    let root = current_root(&state)?;
+    let exe =
+        std::env::current_exe().map_err(|e| format!("cannot resolve app binary path: {e}"))?;
+    let command = crate::claude_hook::hook_command(&exe.to_string_lossy());
+
+    let claude_dir = root.join(".claude");
+    std::fs::create_dir_all(&claude_dir)
+        .map_err(|e| format!("cannot create {}: {e}", claude_dir.display()))?;
+    let settings_path = claude_dir.join("settings.local.json");
+
+    let existing: serde_json::Value = match std::fs::read_to_string(&settings_path) {
+        Ok(s) if !s.trim().is_empty() => serde_json::from_str(&s).map_err(|e| {
+            format!(
+                "{} is not valid JSON; not modified ({e})",
+                settings_path.display()
+            )
+        })?,
+        _ => serde_json::json!({}),
+    };
+
+    let (merged, outcome) = crate::claude_hook::merge_hook(existing, &command)?;
+    let bytes = serde_json::to_vec_pretty(&merged)
+        .map_err(|e| format!("cannot serialize settings: {e}"))?;
+    write_atomically(&settings_path, &bytes)
+        .map_err(|e| format!("cannot write {}: {e}", settings_path.display()))?;
+    Ok(outcome)
+}
+
 #[tauri::command]
 pub fn search_in_folder(
     root: String,

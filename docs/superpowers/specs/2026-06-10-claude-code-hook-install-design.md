@@ -20,7 +20,7 @@ instance.
 
 | Question | Decision |
 |---|---|
-| What triggers an open | **Markdown that is either** (a) named with a stem (case-insensitive) containing `plan`, `spec`, or `design`, **or** (b) located under a directory component named exactly `plans` or `specs` (case-insensitive). Covers ad-hoc names *and* date-prefixed superpowers files like `plans/2026-06-10-foo.md`. |
+| What triggers an open | **Markdown that is either** (a) named with a stem (case-insensitive) containing `plan`, `spec`, or `design`, **or** (b) located under a directory component named exactly `plans`, `specs`, or `designs` (case-insensitive). Covers ad-hoc names *and* date-prefixed superpowers files like `plans/2026-06-10-foo.md`. |
 | Where the hook is written | **`<project>/.claude/settings.local.json`** — personal, machine-specific, gitignored by Claude Code's defaults. Never the committed `settings.json`. |
 | How the hook does its work | **Self-hook**: the hook command is the absolute path to MDViewer's own binary + `--claude-hook`. MDViewer reads the PostToolUse JSON from stdin, matches, and opens the file. No `jq`, no shell script, no `chmod`; cross-platform; logic is pure/testable Rust. |
 | Hook event / matcher | **`PostToolUse`** matching the **`Write`** tool only (fires on file creation, not every edit). |
@@ -174,7 +174,7 @@ pure-helper convention:
 - `is_plan_file(path: &str) -> bool` — true when the extension is `md` or
   `markdown` **and** either (a) the filename stem (case-insensitive) contains
   `plan`, `spec`, or `design`, **or** (b) any path component (directory) equals
-  `plans` or `specs` (case-insensitive, exact component — not substring). Cases:
+  `plans`, `specs`, or `designs` (case-insensitive, exact component — not substring). Cases:
   - `migration-plan.md` → true (stem keyword)
   - `auth-design.md` → true (stem keyword)
   - `api-spec.markdown` → true (stem keyword)

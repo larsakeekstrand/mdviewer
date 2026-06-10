@@ -1,3 +1,4 @@
+mod claude_hook;
 mod commands;
 mod export;
 mod fs_ops;
@@ -40,6 +41,11 @@ pub struct AppState {
     /// The folder the sidebar is currently showing. File operations are confined
     /// within it. Set by the frontend on every sidebar-root change.
     pub current_root: Mutex<Option<PathBuf>>,
+}
+
+/// Run the `--claude-hook` PostToolUse handler and return (never launches the GUI).
+pub fn run_claude_hook() {
+    claude_hook::run_hook();
 }
 
 pub fn run(startup: Startup) {
@@ -87,6 +93,7 @@ pub fn run(startup: Startup) {
             commands::delete_to_trash,
             commands::save_session,
             commands::install_cli,
+            commands::install_claude_hook,
             commands::platform,
             commands::search_in_folder,
         ])

@@ -56,6 +56,10 @@ fn resolve_args() -> Result<mdviewer_lib::Startup, String> {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("--claude-hook") {
+        mdviewer_lib::run_claude_hook();
+        return ExitCode::SUCCESS;
+    }
     let startup = match resolve_args() {
         Ok(s) => s,
         Err(e) => {
