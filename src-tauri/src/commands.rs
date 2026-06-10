@@ -732,7 +732,7 @@ pub fn install_claude_hook(
     let root = current_root(&state)?;
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve app binary path: {e}"))?;
-    let command = format!("\"{}\" --claude-hook", exe.display());
+    let command = crate::claude_hook::hook_command(&exe.to_string_lossy());
 
     let claude_dir = root.join(".claude");
     std::fs::create_dir_all(&claude_dir)

@@ -196,6 +196,26 @@ fn open_in_mdviewer(path: &str) {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn open_in_mdviewer(_path: &str) {}
 
+/// Build the command string stored in `settings.local.json` for the hook,
+/// quoting the executable path so it survives the shell Claude Code runs hooks
+/// through. POSIX single-quoting on Unix; double-quoting on Windows (where `"`
+/// is an illegal path character, so it is always safe).
+pub fn hook_command(exe: &str) -> String {
+    format!("{} --claude-hook", quote_arg(exe))
+}
+
+#[cfg(not(windows))]
+fn quote_arg(s: &str) -> String {
+    // POSIX: wrap in single quotes, escaping any embedded ' as '\''.
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+#[cfg(windows)]
+fn quote_arg(s: &str) -> String {
+    // Windows paths cannot contain '"', so double-quoting is sufficient.
+    format!("\"{}\"", s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +322,19 @@ mod tests {
         let existing = json!({ "hooks": { "PostToolUse": "oops-not-an-array" } });
         let result = merge_hook(existing, "\"/x/mdviewer\" --claude-hook");
         assert!(result.is_err());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn hook_command_posix_quotes_executable_path() {
+        assert_eq!(
+            hook_command("/Applications/MDViewer.app/Contents/MacOS/mdviewer"),
+            "'/Applications/MDViewer.app/Contents/MacOS/mdviewer' --claude-hook"
+        );
+        // embedded single quote is escaped
+        assert_eq!(
+            hook_command("/a/o'brien/mdviewer"),
+            "'/a/o'\\''brien/mdviewer' --claude-hook"
+        );
     }
 }
