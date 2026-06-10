@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 mod claude_hook;
 mod commands;
 mod export;
@@ -94,6 +93,7 @@ pub fn run(startup: Startup) {
             commands::delete_to_trash,
             commands::save_session,
             commands::install_cli,
+            commands::install_claude_hook,
             commands::platform,
             commands::search_in_folder,
         ])
