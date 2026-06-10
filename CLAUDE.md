@@ -7,7 +7,8 @@ an Open Recent menu, an in-app update check against GitHub Releases, a custom
 right-click context menu, a default-app file association for markdown files,
 in-app source editing with live preview, file management from the tree, and a
 Review Mode that annotates rendered blocks and copies a structured review to the
-clipboard for pasting into an AI coding assistant.
+clipboard for pasting into an AI coding assistant, and a one-click installer for
+a Claude Code hook that auto-opens the plan/spec files Claude writes.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
 
@@ -43,6 +44,9 @@ src-tauri/
                     delete_to_trash
     open_files.rs — file:// URL → markdown path; RunEvent::Opened handler:
                     emit open-file + focus window, or buffer until ready
+    claude_hook.rs— Claude Code hook: pure is_plan_file / extract_file_path /
+                    merge_hook / hook_command (unit-tested) + run_hook runtime
+                    for `--claude-hook` (stdin JSON → open plan in MDViewer)
     markdown.rs   — comrak + syntect; sourcepos for scroll anchoring;
                     mermaid fences → <pre class="mermaid"> (codefence renderer)
     tree.rs       — std::fs::read_dir depth-1, unfiltered (shows all files)
@@ -171,7 +175,7 @@ icon.svg          — source for icon regeneration
   image tabs.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw / toggle-edit / save),
-  `open-file`, `open-folder`, `menu-check-updates`.
+  `open-file`, `open-folder`, `menu-check-updates`, `menu-install-claude-hook`.
 - **Update check** runs after `init()` on every launch and then on a
   `setInterval` of `UPDATE_CHECK_INTERVAL_MS` (1 h) for the lifetime of the
   process (silent on failure / current; the silent path also respects the
@@ -288,6 +292,26 @@ icon.svg          — source for icon regeneration
   `reviewMode` off during its re-render (like `prevRaw`) so review chrome never
   leaks into HTML/PDF. State is ephemeral — excluded from session restore and
   reset on the `openPreview` tab-reuse path.
+- **Claude Code hook install**: **MDViewer ▸ Install Claude Code Hook…**
+  (`menu.rs` emits `menu-install-claude-hook`, un-gated so it shows on both
+  platforms) → frontend `installClaudeHook()` (guards on an open `treeRoot`) →
+  `commands::install_claude_hook`. The command resolves the open root via
+  `current_root`, builds the hook command with `claude_hook::hook_command()`
+  (POSIX single-quote / Windows double-quote escaping of `current_exe()`), and
+  merges a `Write` `PostToolUse` hook into `<root>/.claude/settings.local.json`
+  via the pure `claude_hook::merge_hook` (idempotent: updates an existing
+  `--claude-hook` entry's path → `Updated`, else appends → `Installed`; refuses
+  to clobber wrong-typed or unparseable settings), written with the shared
+  `write_atomically`. The hook command is mdviewer's own binary + `--claude-hook`;
+  `main.rs` checks `args().nth(1) == "--claude-hook"` *before* GUI launch and
+  calls `run_claude_hook` → `claude_hook::run_hook`: read PostToolUse JSON from
+  stdin → `extract_file_path` → `is_plan_file` (md/markdown whose stem contains
+  plan/spec/design OR under a `plans`/`specs`/`designs` dir) → `open_in_mdviewer`
+  (macOS `open -a <bundle>` → warm tab, or the dev binary directly when not a
+  `.app`; Windows re-spawns the exe → new window; child stdio detached). Errors
+  and non-matches exit 0 silently so the hook never disrupts Claude. No new IPC
+  beyond the one command; no recursion risk (opening a file is a viewer action,
+  not a Write).
 
 ## Platform support
 
