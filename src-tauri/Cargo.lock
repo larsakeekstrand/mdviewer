@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "mdviewer"
-version = "1.18.0-rc.1"
+version = "1.18.0"
 dependencies = [
  "base64 0.22.1",
  "comrak",

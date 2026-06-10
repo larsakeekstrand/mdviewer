@@ -3,7 +3,7 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
-## [1.18.0-rc.1] - 2026-06-10
+## [1.18.0] - 2026-06-10
 
 Reviewing AI-generated documents — and always knowing which file you're on.
 
