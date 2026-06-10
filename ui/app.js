@@ -690,11 +690,14 @@ async function onTreeFileDouble(path) {
   await openSticky(path);
 }
 
+let revealSeq = 0;
+
 /** Reveal a file in the tree for the active tab: clear any prior selection,
  *  expand the collapsed ancestor folders, then highlight + scroll the file's
  *  row into view. A file not under the current tree root (treeAncestors → null)
  *  is a no-op beyond clearing the selection. */
 async function revealInTree(path) {
+  const token = ++revealSeq;
   for (const el of document.querySelectorAll(".tree .row.selected")) {
     el.classList.remove("selected");
   }
@@ -704,7 +707,9 @@ async function revealInTree(path) {
     const li = tree.querySelector(`li[data-path="${cssEscape(dir)}"]`);
     if (!li) return; // an ancestor row is missing (e.g. stale tab) — give up quietly
     await expandDir(li);
+    if (revealSeq !== token) return; // a newer reveal superseded us mid-expand
   }
+  if (revealSeq !== token) return; // superseded after the last await (or when no IPC was needed)
   const li = tree.querySelector(`li[data-path="${cssEscape(path)}"]`);
   if (!li) return;
   const row = li.querySelector(":scope > .row");
