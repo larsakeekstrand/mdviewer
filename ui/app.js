@@ -2321,7 +2321,16 @@ function renderReviewBar(t) {
 
 /** Finish a review: copy it (when there's anything to send), clear the
  *  annotations, exit review mode, and confirm with a toast. */
+/** Finish a review: commit any open comment box, copy the review (when there's
+ *  anything to send), clear the annotations, exit review mode, and confirm with
+ *  a toast. On copy failure the review is kept so the user can retry. */
 async function finishReview(t) {
+  // Commit an in-progress comment box first, via its own Save button, so an
+  // unsaved comment isn't silently discarded by the re-render below. The Save
+  // handler correctly handles both new and edited comments.
+  const pendingSave = preview.querySelector(".review-input .review-save-btn");
+  if (pendingSave) pendingSave.click();
+
   const hasContent =
     (t.reviews && t.reviews.length > 0) ||
     (t.orphanedReviews && t.orphanedReviews.length > 0) ||
@@ -2334,7 +2343,11 @@ async function finishReview(t) {
       rel,
       t.orphanedReviews || [],
     );
-    await copyText(text);
+    const copied = await copyText(text);
+    if (!copied) {
+      showTransientError("Couldn't copy the review to the clipboard");
+      return; // keep the review intact so the user can retry
+    }
     showTransientMessage("Review copied — paste into Claude Code");
   }
   t.reviews = [];
@@ -2657,11 +2670,13 @@ function selectedText() {
 }
 
 async function copyText(text) {
-  if (!text) return;
+  if (!text) return false;
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch (e) {
     console.error("clipboard write failed", e);
+    return false;
   }
 }
 
