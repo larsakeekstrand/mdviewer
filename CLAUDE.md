@@ -65,7 +65,8 @@ ui/
                     mermaid render (renderMermaid) + live-reload preservation;
                     CodeMirror editor wiring (enter/exit edit, save, conflict)
   editor.js       — pure helpers: isDirty, classifyFileChange (unit-tested)
-  treeops.js      — pure helper: validateName for inline-rename (unit-tested)
+  treeops.js      — pure helpers: validateName (inline-rename) + treeAncestors
+                    (folders to expand to reveal a file); unit-tested
   review.js       — pure helpers: quoteBlock, formatReview, reanchorReviews
                     for Review Mode (unit-tested); DOM wiring lives in app.js
   styles.css      — grid layout, CSS variables for light/dark, pre.mermaid

@@ -110,6 +110,7 @@ that case.
 - Click a folder to expand or collapse it.
 - **Single-click** a file → opens it in the *preview* tab (italic title). Single-clicking another file replaces it.
 - **Double-click** a file → opens it as a *sticky* tab (regular title) that won't be replaced by future single-clicks.
+- The **active tab's file is revealed in the tree** — its folders expand, its row scrolls into view, and it's highlighted with an accent bar — so you always know which file you're looking at. (Files opened from outside the current folder simply aren't highlighted.)
 - Every file on disk is shown — including dotfiles, entries matched by `.gitignore`, and `node_modules` / `target`.
 - The tree updates live: files added, removed, or renamed by other apps in the root or any expanded folder appear without reopening the folder, and git badges refresh with them.
 - Markdown files render as a preview; image files open as images; anything else is shown as plain text.
