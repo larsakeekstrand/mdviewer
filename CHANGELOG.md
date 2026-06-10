@@ -3,6 +3,23 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.18.0-rc.1] - 2026-06-10
+
+Reviewing AI-generated documents — and always knowing which file you're on.
+
+- **Review Mode.** Click **💬 Review** on any Markdown document to comment on it:
+  hover a block for a **+**, attach a comment, and add a document-wide note. When
+  you're done, click **✓ Finish & Copy** to put a structured review (the file
+  path, your note, and each quoted block with its comment) on the clipboard —
+  ready to paste back to an AI coding assistant like Claude Code. Comments follow
+  their blocks as the document changes; ones whose text moved on are flagged.
+- **Install Claude Code Hook.** **MDViewer ▸ Install Claude Code Hook…** sets up
+  the open project so that plan, spec, and design Markdown files Claude Code
+  writes there open automatically in MDViewer.
+- **The active tab's file is revealed in the tree.** Switching tabs now expands
+  the file's folders, scrolls its row into view, and highlights it with an accent
+  bar — so you always know which file you're looking at.
+
 ## [1.17.1] - 2026-06-09
 
 Security hardening.
