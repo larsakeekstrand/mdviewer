@@ -124,6 +124,57 @@ pub fn extract_file_path(stdin_json: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Entry point for `mdviewer --claude-hook`: read the PostToolUse JSON from
+/// stdin, and if it announces a written plan/spec/design markdown file, open it
+/// in MDViewer. Any error or non-match is swallowed (exit 0) so the hook never
+/// disrupts Claude's tool call.
+pub fn run_hook() {
+    use std::io::Read as _;
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+    let path = match extract_file_path(&input) {
+        Some(p) => p,
+        None => return,
+    };
+    if !is_plan_file(&path) {
+        return;
+    }
+    open_in_mdviewer(&path);
+}
+
+#[cfg(target_os = "macos")]
+fn open_in_mdviewer(path: &str) {
+    use std::process::Command;
+    // current_exe is …/MDViewer.app/Contents/MacOS/mdviewer; the .app is 3 up.
+    let bundle = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.ancestors().nth(3).map(|p| p.to_path_buf()))
+        .filter(|p| p.extension().map(|e| e == "app").unwrap_or(false));
+    let mut cmd = Command::new("open");
+    match bundle {
+        Some(app) => {
+            cmd.arg("-a").arg(app);
+        }
+        None => {
+            cmd.arg("-b").arg("com.mdviewer.app");
+        }
+    }
+    cmd.arg(path);
+    let _ = cmd.spawn();
+}
+
+#[cfg(target_os = "windows")]
+fn open_in_mdviewer(path: &str) {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).arg(path).spawn();
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn open_in_mdviewer(_path: &str) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
