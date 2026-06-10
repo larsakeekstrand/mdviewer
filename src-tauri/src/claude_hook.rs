@@ -53,32 +53,35 @@ pub enum HookOutcome {
     Updated,
 }
 
-/// Ensure `settings.hooks.PostToolUse` exists as an array and return it,
-/// coercing non-object/non-array intermediates and preserving other keys.
-fn ensure_post_array(settings: &mut Value) -> &mut Vec<Value> {
+/// Navigate to `settings.hooks.PostToolUse`, creating missing intermediates as
+/// empty object/array. Returns an error (rather than overwriting) if an existing
+/// value has the wrong type, so we never clobber a user's settings file.
+fn post_array_mut(settings: &mut Value) -> Result<&mut Vec<Value>, String> {
     if !settings.is_object() {
-        *settings = json!({});
+        return Err("settings root is not a JSON object".to_string());
     }
     let obj = settings.as_object_mut().unwrap();
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
     if !hooks.is_object() {
-        *hooks = json!({});
+        return Err("`hooks` is not a JSON object".to_string());
     }
     let hooks_obj = hooks.as_object_mut().unwrap();
     let post = hooks_obj.entry("PostToolUse").or_insert_with(|| json!([]));
     if !post.is_array() {
-        *post = json!([]);
+        return Err("`hooks.PostToolUse` is not a JSON array".to_string());
     }
-    post.as_array_mut().unwrap()
+    Ok(post.as_array_mut().unwrap())
 }
 
 /// Merge our `Write` PostToolUse hook into a Claude Code settings document.
-/// If a command containing `--claude-hook` already exists, update its path
-/// (`Updated`); otherwise append a new entry (`Installed`). Other keys and
-/// hooks are preserved.
-pub fn merge_hook(mut settings: Value, command: &str) -> (Value, HookOutcome) {
+/// If any command containing `--claude-hook` already exists, update every such
+/// command's path (collapsing duplicates) and return `Updated`; otherwise append
+/// a new entry and return `Installed`. Unrelated keys and hooks are preserved.
+/// Errors (without modifying) if an existing `hooks`/`PostToolUse` value has an
+/// unexpected type, so a user's settings file is never clobbered.
+pub fn merge_hook(mut settings: Value, command: &str) -> Result<(Value, HookOutcome), String> {
     let outcome = {
-        let arr = ensure_post_array(&mut settings);
+        let arr = post_array_mut(&mut settings)?;
         let mut updated = false;
         for matcher_entry in arr.iter_mut() {
             if let Some(inner) = matcher_entry
@@ -108,7 +111,7 @@ pub fn merge_hook(mut settings: Value, command: &str) -> (Value, HookOutcome) {
             HookOutcome::Installed
         }
     };
-    (settings, outcome)
+    Ok((settings, outcome))
 }
 
 /// Extract `tool_input.file_path` from a PostToolUse hook's stdin JSON.
@@ -164,7 +167,7 @@ mod tests {
 
     #[test]
     fn merge_into_empty_installs_full_chain() {
-        let (merged, outcome) = merge_hook(json!({}), "\"/x/mdviewer\" --claude-hook");
+        let (merged, outcome) = merge_hook(json!({}), "\"/x/mdviewer\" --claude-hook").unwrap();
         assert_eq!(outcome, HookOutcome::Installed);
         let entry = &merged["hooks"]["PostToolUse"][0];
         assert_eq!(entry["matcher"], "Write");
@@ -183,7 +186,7 @@ mod tests {
                 {"matcher": "Edit", "hooks": [{"type": "command", "command": "echo hi"}]}
             ]}
         });
-        let (merged, outcome) = merge_hook(existing, "\"/x/mdviewer\" --claude-hook");
+        let (merged, outcome) = merge_hook(existing, "\"/x/mdviewer\" --claude-hook").unwrap();
         assert_eq!(outcome, HookOutcome::Installed);
         assert_eq!(merged["permissions"]["allow"][0], "Bash");
         let arr = merged["hooks"]["PostToolUse"].as_array().unwrap();
@@ -202,7 +205,7 @@ mod tests {
                 {"matcher": "Write", "hooks": [{"type": "command", "command": "\"/old/mdviewer\" --claude-hook"}]}
             ]}
         });
-        let (merged, outcome) = merge_hook(existing, "\"/new/mdviewer\" --claude-hook");
+        let (merged, outcome) = merge_hook(existing, "\"/new/mdviewer\" --claude-hook").unwrap();
         assert_eq!(outcome, HookOutcome::Updated);
         let arr = merged["hooks"]["PostToolUse"].as_array().unwrap();
         assert_eq!(arr.len(), 1);
@@ -210,5 +213,22 @@ mod tests {
             arr[0]["hooks"][0]["command"],
             "\"/new/mdviewer\" --claude-hook"
         );
+    }
+
+    #[test]
+    fn merge_creates_post_tool_use_when_only_other_hook_kinds_exist() {
+        let existing = json!({ "hooks": { "PreToolUse": [] } });
+        let (merged, outcome) = merge_hook(existing, "\"/x/mdviewer\" --claude-hook").unwrap();
+        assert_eq!(outcome, HookOutcome::Installed);
+        assert_eq!(merged["hooks"]["PreToolUse"], json!([])); // preserved
+        assert!(merged["hooks"]["PostToolUse"].is_array());
+        assert_eq!(merged["hooks"]["PostToolUse"][0]["matcher"], "Write");
+    }
+
+    #[test]
+    fn merge_refuses_when_post_tool_use_is_wrong_type() {
+        let existing = json!({ "hooks": { "PostToolUse": "oops-not-an-array" } });
+        let result = merge_hook(existing, "\"/x/mdviewer\" --claude-hook");
+        assert!(result.is_err());
     }
 }
