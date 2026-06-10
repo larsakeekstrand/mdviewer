@@ -146,29 +146,50 @@ pub fn run_hook() {
 
 #[cfg(target_os = "macos")]
 fn open_in_mdviewer(path: &str) {
-    use std::process::Command;
-    // current_exe is …/MDViewer.app/Contents/MacOS/mdviewer; the .app is 3 up.
-    let bundle = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.ancestors().nth(3).map(|p| p.to_path_buf()))
+    use std::process::{Command, Stdio};
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    // …/MDViewer.app/Contents/MacOS/mdviewer → the .app bundle is 3 ancestors up.
+    let bundle = exe
+        .ancestors()
+        .nth(3)
         .filter(|p| p.extension().map(|e| e == "app").unwrap_or(false));
-    let mut cmd = Command::new("open");
-    match bundle {
+    let mut cmd = match bundle {
+        // Installed build: hand the file to the app bundle so the running
+        // instance opens it (warm-open adds a tab).
         Some(app) => {
-            cmd.arg("-a").arg(app);
+            let mut c = Command::new("open");
+            c.arg("-a").arg(app).arg(path);
+            c
         }
+        // Dev build (target/debug/mdviewer has no .app): launch this binary
+        // directly. `open -b com.mdviewer.app` would route to a stale installed
+        // bundle, which is confusing during development.
         None => {
-            cmd.arg("-b").arg("com.mdviewer.app");
+            let mut c = Command::new(&exe);
+            c.arg(path);
+            c
         }
-    }
-    cmd.arg(path);
-    let _ = cmd.spawn();
+    };
+    let _ = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
 }
 
 #[cfg(target_os = "windows")]
 fn open_in_mdviewer(path: &str) {
+    use std::process::{Command, Stdio};
     if let Ok(exe) = std::env::current_exe() {
-        let _ = std::process::Command::new(exe).arg(path).spawn();
+        let _ = Command::new(exe)
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
     }
 }
 
