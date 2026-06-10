@@ -179,6 +179,11 @@ body {
 
 .tree .row.selected {
   background: var(--sidebar-selected);
+  box-shadow: inset 2px 0 0 0 var(--accent, #0969da);
+}
+
+[data-theme="dark"] .tree .row.selected {
+  box-shadow: inset 2px 0 0 0 #2f81f7;
 }
 
 .tree .chev {
