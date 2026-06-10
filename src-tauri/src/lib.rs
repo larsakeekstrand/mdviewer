@@ -44,6 +44,11 @@ pub struct AppState {
     pub current_root: Mutex<Option<PathBuf>>,
 }
 
+/// Run the `--claude-hook` PostToolUse handler and return (never launches the GUI).
+pub fn run_claude_hook() {
+    claude_hook::run_hook();
+}
+
 pub fn run(startup: Startup) {
     let state = AppState {
         current_root: Mutex::new(startup.tree_root.clone()),
