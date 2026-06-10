@@ -1130,9 +1130,13 @@ function onToggleRaw() {
 function onToggleReview() {
   const t = activeTab();
   if (!t) return;
-  t.reviewMode = !t.reviewMode;
-  renderTabBar();
-  renderReviewMarkers(t);
+  if (t.reviewMode) {
+    finishReview(t);
+  } else {
+    t.reviewMode = true;
+    renderTabBar();
+    renderReviewMarkers(t);
+  }
 }
 
 /* ---- Source editor ---- */
@@ -2294,26 +2298,30 @@ function renderReviewBar(t) {
   preview.prepend(bar);
 }
 
-async function copyReview(t) {
-  const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
-  const text = formatReview(
-    t.reviews || [],
-    t.generalNote || "",
-    rel,
-    t.orphanedReviews || [],
-  );
-  await copyText(text);
+/** Finish a review: copy it (when there's anything to send), clear the
+ *  annotations, exit review mode, and confirm with a toast. */
+async function finishReview(t) {
+  const hasContent =
+    (t.reviews && t.reviews.length > 0) ||
+    (t.orphanedReviews && t.orphanedReviews.length > 0) ||
+    (t.generalNote || "").trim() !== "";
+  if (hasContent) {
+    const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
+    const text = formatReview(
+      t.reviews || [],
+      t.generalNote || "",
+      rel,
+      t.orphanedReviews || [],
+    );
+    await copyText(text);
+    showTransientMessage("Review copied — paste into Claude Code");
+  }
   t.reviews = [];
   t.orphanedReviews = [];
   t.generalNote = "";
+  t.reviewMode = false;
+  renderTabBar();
   renderReviewMarkers(t);
-  const freshBtn = preview.querySelector(".review-copy-btn");
-  if (freshBtn) {
-    freshBtn.textContent = "Copied";
-    setTimeout(() => {
-      freshBtn.textContent = "Copy Review";
-    }, 1200);
-  }
 }
 
 /* ---- Link handling ---- */
