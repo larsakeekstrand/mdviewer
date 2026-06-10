@@ -269,14 +269,16 @@ icon.svg          — source for icon regeneration
   `Mutex<Option<PathBuf>>` on `AppState`, seeded from `Startup.tree_root` in
   `get_initial_state` and updated by the `remember_folder` command whenever the
   frontend changes the sidebar root.
-- **Review Mode**: a frontend-only feature (no Rust, no IPC). The **⊕ Review**
+- **Review Mode**: a frontend-only feature (no Rust, no IPC). The **💬 Review**
   toolbar toggle (`#toggle-review`, gated like Raw/Edit — hidden for raw/edit/
-  image tabs) flips per-tab `reviewMode`. `renderReviewMarkers(t)` is a
+  image tabs) is the whole lifecycle: clicking it enters review (`reviewMode`
+  true, label becomes **✓ Finish & Copy**); clicking again calls `finishReview`.
+  `renderReviewMarkers(t)` is a
   `postRender` hook (so markers survive live-reload like copy buttons): it
   strips its own prior nodes, then injects a left-gutter **+** on each
   annotatable block (`ANNOTATABLE_TAGS`: P/H1-6/LI/PRE/BLOCKQUOTE, excluding
   `pre.mermaid`), a comment card on annotated blocks, and a top **review bar**
-  (general-note textarea + **Copy Review** button). Comments are
+  (an instructional hint + general-note textarea). Comments are
   `{ sourcepos, quotedText, comment }`; the anchor key is `blockText()` =
   `quoteBlock(textContent, Infinity)` of the block with injected UI stripped —
   the SAME normalization on both save (`openCommentBox`) and re-anchor, or
@@ -284,11 +286,15 @@ icon.svg          — source for icon regeneration
   `reanchorReviews` (pure, `ui/review.js`): matches by `quotedText`, refreshes
   `sourcepos`, and moves non-matches into `orphanedReviews` (surfaced with a
   "⚠ this block changed" tag — never silently dropped; count is conserved, so
-  re-anchor alone can't empty both arrays). **Copy Review** → `formatReview`
-  (pure) builds the clipboard markdown (relative path, general note, `---`
-  divider only when comments follow, blocks in document order), then clears all
-  review state. The comment box commits via Save/Enter and dismisses via
-  Cancel/Esc (shared `commit`/`dismiss` closures). `exportDocument` forces
+  re-anchor alone can't empty both arrays). **Finish & Copy** (toggling review
+  off) → `finishReview`: commits any open comment box (clicks its Save button),
+  and if there's content, `formatReview` (pure) builds the clipboard markdown
+  (relative path, general note, `---` divider only when comments follow, blocks
+  in document order), `copyText` copies it (returns a bool — on failure a toast
+  warns and the review is **kept** for retry), a success toast confirms
+  (`showTransientMessage`, neutral `.info` reuse of the transient banner), then
+  all review state is cleared and the mode exits. The comment box commits via
+  Save/Enter and dismisses via Cancel/Esc (shared `commit`/`dismiss` closures). `exportDocument` forces
   `reviewMode` off during its re-render (like `prevRaw`) so review chrome never
   leaks into HTML/PDF. State is ephemeral — excluded from session restore and
   reset on the `openPreview` tab-reuse path.
