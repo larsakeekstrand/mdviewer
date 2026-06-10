@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 /// True when `path` is a markdown file (`.md`/`.markdown`) that either has a
 /// filename stem containing `plan`/`spec`/`design` (case-insensitive) or lives
-/// under a directory component named exactly `plans` or `specs`.
+/// under a directory component named exactly `plans`, `specs`, or `designs`.
 pub fn is_plan_file(path: &str) -> bool {
     use std::path::{Component, Path};
     let p = Path::new(path);
@@ -38,7 +38,7 @@ pub fn is_plan_file(path: &str) -> bool {
             .to_str()
             .map(|s| {
                 let s = s.to_lowercase();
-                s == "plans" || s == "specs"
+                s == "plans" || s == "specs" || s == "designs"
             })
             .unwrap_or(false),
         _ => false,
@@ -232,6 +232,7 @@ mod tests {
     fn matches_plans_and_specs_directories() {
         assert!(is_plan_file("docs/superpowers/plans/2026-06-10-foo.md"));
         assert!(is_plan_file("docs/specs/x.md"));
+        assert!(is_plan_file("docs/designs/architecture.md"));
     }
 
     #[test]
