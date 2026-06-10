@@ -42,6 +42,16 @@ pub fn is_plan_file(path: &str) -> bool {
     })
 }
 
+/// Extract `tool_input.file_path` from a PostToolUse hook's stdin JSON.
+/// Returns `None` for malformed JSON or a missing field.
+pub fn extract_file_path(stdin_json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(stdin_json).ok()?;
+    v.get("tool_input")?
+        .get("file_path")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +77,18 @@ mod tests {
         assert!(!is_plan_file("plans/notes.txt"));
         assert!(!is_plan_file("templates/x.md"));
         assert!(!is_plan_file("myplans/x.md"));
+    }
+
+    #[test]
+    fn extracts_file_path_from_post_tool_use_json() {
+        let json = r#"{"tool_name":"Write","tool_input":{"file_path":"/a/b/plan.md","file_text":"x"}}"#;
+        assert_eq!(extract_file_path(json).as_deref(), Some("/a/b/plan.md"));
+    }
+
+    #[test]
+    fn extract_file_path_handles_missing_and_malformed() {
+        assert_eq!(extract_file_path("{}"), None);
+        assert_eq!(extract_file_path(r#"{"tool_input":{}}"#), None);
+        assert_eq!(extract_file_path("not json"), None);
     }
 }
