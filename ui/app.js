@@ -1070,6 +1070,10 @@ function renderTabBar() {
     reviewBtn.hidden = image || t.editing || t.raw;
     if (!reviewBtn.hidden) {
       reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
+      reviewBtn.textContent = t.reviewMode ? "✓ Finish & Copy" : "💬 Review";
+      reviewBtn.title = t.reviewMode
+        ? "Copy your review to the clipboard and exit review mode"
+        : "Comment on this document and copy your review for Claude Code";
     }
   }
 }
@@ -1130,9 +1134,13 @@ function onToggleRaw() {
 function onToggleReview() {
   const t = activeTab();
   if (!t) return;
-  t.reviewMode = !t.reviewMode;
-  renderTabBar();
-  renderReviewMarkers(t);
+  if (t.reviewMode) {
+    finishReview(t);
+  } else {
+    t.reviewMode = true;
+    renderTabBar();
+    renderReviewMarkers(t);
+  }
 }
 
 /* ---- Source editor ---- */
@@ -1646,10 +1654,31 @@ function showTransientError(msg) {
     document.body.appendChild(banner);
   }
   banner.textContent = msg;
+  banner.classList.remove("info");
   banner.hidden = false;
   if (transientErrorTimer) clearTimeout(transientErrorTimer);
   transientErrorTimer = setTimeout(() => {
     banner.hidden = true;
+  }, 3000);
+}
+
+/** Neutral, auto-dismissing toast (reuses the transient banner element with an
+ *  `info` style). Unlike showError, it never clears the preview. */
+function showTransientMessage(msg) {
+  let banner = document.getElementById("task-error-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "task-error-banner";
+    banner.className = "task-error-banner";
+    document.body.appendChild(banner);
+  }
+  banner.textContent = msg;
+  banner.classList.add("info");
+  banner.hidden = false;
+  if (transientErrorTimer) clearTimeout(transientErrorTimer);
+  transientErrorTimer = setTimeout(() => {
+    banner.hidden = true;
+    banner.classList.remove("info");
   }, 3000);
 }
 
@@ -2272,6 +2301,11 @@ function renderReviewBar(t) {
   const bar = document.createElement("div");
   bar.className = "review-bar";
 
+  const hint = document.createElement("div");
+  hint.className = "review-hint";
+  hint.textContent =
+    "Comment on any block (hover for the +), then Finish & Copy to paste your review into Claude Code.";
+
   const note = document.createElement("textarea");
   note.className = "review-general-note";
   note.rows = 2;
@@ -2281,39 +2315,47 @@ function renderReviewBar(t) {
     t.generalNote = note.value;
   });
 
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "review-copy-btn";
-  copy.textContent = "Copy Review";
-  copy.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    copyReview(t);
-  });
-
-  bar.append(note, copy);
+  bar.append(hint, note);
   preview.prepend(bar);
 }
 
-async function copyReview(t) {
-  const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
-  const text = formatReview(
-    t.reviews || [],
-    t.generalNote || "",
-    rel,
-    t.orphanedReviews || [],
-  );
-  await copyText(text);
+/** Finish a review: copy it (when there's anything to send), clear the
+ *  annotations, exit review mode, and confirm with a toast. */
+/** Finish a review: commit any open comment box, copy the review (when there's
+ *  anything to send), clear the annotations, exit review mode, and confirm with
+ *  a toast. On copy failure the review is kept so the user can retry. */
+async function finishReview(t) {
+  // Commit an in-progress comment box first, via its own Save button, so an
+  // unsaved comment isn't silently discarded by the re-render below. The Save
+  // handler correctly handles both new and edited comments.
+  const pendingSave = preview.querySelector(".review-input .review-save-btn");
+  if (pendingSave) pendingSave.click();
+
+  const hasContent =
+    (t.reviews && t.reviews.length > 0) ||
+    (t.orphanedReviews && t.orphanedReviews.length > 0) ||
+    (t.generalNote || "").trim() !== "";
+  if (hasContent) {
+    const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
+    const text = formatReview(
+      t.reviews || [],
+      t.generalNote || "",
+      rel,
+      t.orphanedReviews || [],
+    );
+    const copied = await copyText(text);
+    if (!copied) {
+      showTransientError("Couldn't copy the review to the clipboard");
+      return; // keep the review intact so the user can retry
+    }
+    showTransientMessage("Review copied — paste into Claude Code");
+  }
   t.reviews = [];
   t.orphanedReviews = [];
   t.generalNote = "";
+  t.reviewMode = false;
+  renderTabBar();
   renderReviewMarkers(t);
-  const freshBtn = preview.querySelector(".review-copy-btn");
-  if (freshBtn) {
-    freshBtn.textContent = "Copied";
-    setTimeout(() => {
-      freshBtn.textContent = "Copy Review";
-    }, 1200);
-  }
 }
 
 /* ---- Link handling ---- */
@@ -2628,11 +2670,13 @@ function selectedText() {
 }
 
 async function copyText(text) {
-  if (!text) return;
+  if (!text) return false;
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch (e) {
     console.error("clipboard write failed", e);
+    return false;
   }
 }
 
