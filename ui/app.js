@@ -1650,10 +1650,31 @@ function showTransientError(msg) {
     document.body.appendChild(banner);
   }
   banner.textContent = msg;
+  banner.classList.remove("info");
   banner.hidden = false;
   if (transientErrorTimer) clearTimeout(transientErrorTimer);
   transientErrorTimer = setTimeout(() => {
     banner.hidden = true;
+  }, 3000);
+}
+
+/** Neutral, auto-dismissing toast (reuses the transient banner element with an
+ *  `info` style). Unlike showError, it never clears the preview. */
+function showTransientMessage(msg) {
+  let banner = document.getElementById("task-error-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "task-error-banner";
+    banner.className = "task-error-banner";
+    document.body.appendChild(banner);
+  }
+  banner.textContent = msg;
+  banner.classList.add("info");
+  banner.hidden = false;
+  if (transientErrorTimer) clearTimeout(transientErrorTimer);
+  transientErrorTimer = setTimeout(() => {
+    banner.hidden = true;
+    banner.classList.remove("info");
   }, 3000);
 }
 
