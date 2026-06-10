@@ -639,6 +639,18 @@ body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
+.task-error-banner.info {
+  background: #ddf4ff;
+  color: #0a3069;
+  border-color: #b6e3ff;
+}
+
+[data-theme="dark"] .task-error-banner.info {
+  background: #121d2f;
+  color: #e6edf3;
+  border-color: #1f3b5c;
+}
+
 /* ---- KaTeX math ---- */
 
 /* Display math: comrak wraps $$..$$ as <p><span data-math-style="display">…</span></p>.
@@ -1491,6 +1503,17 @@ body {
   border-color: #30363d;
 }
 
+.review-hint {
+  font-size: 0.85em;
+  color: #57606a;
+  margin-bottom: 0.5em;
+  line-height: 1.4;
+}
+
+[data-theme="dark"] .review-hint {
+  color: #8b949e;
+}
+
 .review-bar {
   display: flex;
   gap: 0.5em;
@@ -1504,15 +1527,6 @@ body {
   flex: 1;
 }
 
-.review-copy-btn {
-  flex: 0 0 auto;
-  padding: 0.4em 0.8em;
-  border-radius: 6px;
-  border: 1px solid var(--border, #d0d7de);
-  background: #0969da;
-  color: #fff;
-  cursor: pointer;
-}
 
 [data-theme="dark"] .review-card {
   background: #121d2f;
