@@ -20,7 +20,7 @@ instance.
 
 | Question | Decision |
 |---|---|
-| What triggers an open | **Filename-based, anywhere**: any markdown whose filename stem (case-insensitive) contains `plan`, `spec`, or `design`. Works in any project, not just superpowers layouts. |
+| What triggers an open | **Markdown that is either** (a) named with a stem (case-insensitive) containing `plan`, `spec`, or `design`, **or** (b) located under a directory component named exactly `plans` or `specs` (case-insensitive). Covers ad-hoc names *and* date-prefixed superpowers files like `plans/2026-06-10-foo.md`. |
 | Where the hook is written | **`<project>/.claude/settings.local.json`** — personal, machine-specific, gitignored by Claude Code's defaults. Never the committed `settings.json`. |
 | How the hook does its work | **Self-hook**: the hook command is the absolute path to MDViewer's own binary + `--claude-hook`. MDViewer reads the PostToolUse JSON from stdin, matches, and opens the file. No `jq`, no shell script, no `chmod`; cross-platform; logic is pure/testable Rust. |
 | Hook event / matcher | **`PostToolUse`** matching the **`Write`** tool only (fires on file creation, not every edit). |
@@ -171,19 +171,22 @@ The match + stdin parsing are platform-neutral. Only the open step differs:
 `#[cfg(test)]` unit tests in `claude_hook.rs` (no I/O), matching the project's
 pure-helper convention:
 
-- `is_plan_file(path: &str) -> bool` — true when the filename stem
-  (case-insensitive) contains `plan`, `spec`, or `design` **and** the extension
-  is `md` or `markdown`. Cases:
-  - `migration-plan.md` → true
-  - `auth-design.md` → true
-  - `api-spec.markdown` → true
-  - `SPEC.MD` → true (case-insensitive)
-  - `docs/plans/2026-01-01-foo.md` → false (stem `2026-01-01-foo` has none of the
-    keywords) — **NOTE:** filename-based, so a superpowers plan named without a
-    keyword won't match; this is the accepted trade-off of choosing filename
-    matching over folder matching.
-  - `README.md` → false
-  - `plan.txt` → false (wrong extension)
+- `is_plan_file(path: &str) -> bool` — true when the extension is `md` or
+  `markdown` **and** either (a) the filename stem (case-insensitive) contains
+  `plan`, `spec`, or `design`, **or** (b) any path component (directory) equals
+  `plans` or `specs` (case-insensitive, exact component — not substring). Cases:
+  - `migration-plan.md` → true (stem keyword)
+  - `auth-design.md` → true (stem keyword)
+  - `api-spec.markdown` → true (stem keyword)
+  - `SPEC.MD` → true (case-insensitive stem)
+  - `docs/superpowers/plans/2026-06-10-foo.md` → true (under `plans/`, no stem
+    keyword needed)
+  - `docs/specs/x.md` → true (under `specs/`)
+  - `templates/x.md` → false (`templates` is not exactly `plans`/`specs`)
+  - `myplans/x.md` → false (component `myplans` ≠ `plans`; exact-component match
+    avoids over-matching)
+  - `README.md` → false (no keyword, not under plans/specs)
+  - `plans/notes.txt` → false (wrong extension, even under `plans/`)
 - `extract_file_path(stdin_json: &str) -> Option<String>` — parses JSON, returns
   `tool_input.file_path` as a `String`; `None` on malformed JSON or missing key.
   Cases: valid PostToolUse Write payload → `Some(path)`; `{}` → `None`; non-JSON
