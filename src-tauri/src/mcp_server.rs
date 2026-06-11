@@ -45,7 +45,6 @@ impl McpPending {
     /// proxy received it — the trigger for the frontend's clipboard fallback.
     /// Errors on an unknown id (already resolved, or fabricated by the
     /// webview) and on a dead or failing connection.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn resolve(&self, id: u64, reply: Reply) -> Result<(), String> {
         let tx = self
             .waiting

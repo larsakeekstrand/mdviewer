@@ -757,6 +757,33 @@ pub fn install_claude_hook(
     Ok(outcome)
 }
 
+/// Generic reply for a pending MCP request (open_document, get_viewer_state,
+/// and rejections like "a review is already in progress"). Only resolves ids
+/// the pending map knows — the webview can't fabricate responses.
+#[tauri::command]
+pub fn mcp_respond(
+    pending: State<'_, crate::mcp_server::McpPending>,
+    request_id: u64,
+    text: String,
+    is_error: bool,
+) -> Result<(), String> {
+    let reply = if is_error { Err(text) } else { Ok(text) };
+    pending.resolve(request_id, reply)
+}
+
+/// Finish or decline an MCP-requested review. `review: None` means declined —
+/// a successful tool result, not an error, so Claude proceeds gracefully.
+/// Errors when the proxy is gone, which the frontend turns into the
+/// clipboard fallback.
+#[tauri::command]
+pub fn mcp_review_result(
+    pending: State<'_, crate::mcp_server::McpPending>,
+    request_id: u64,
+    review: Option<String>,
+) -> Result<(), String> {
+    pending.resolve(request_id, Ok(crate::mcp::review_reply_text(review)))
+}
+
 #[tauri::command]
 pub fn search_in_folder(
     root: String,
