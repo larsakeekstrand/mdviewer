@@ -316,12 +316,30 @@ async function init() {
       await invoke("mcp_respond", { requestId, text: String(e), isError: true }).catch(() => {});
       return;
     }
-    const t = activeTab();
+    // Resolve by path — the user may have clicked another tab during the await.
+    const idx = findTab(path);
+    if (idx === -1) {
+      await invoke("mcp_respond", { requestId, text: "could not open the document", isError: true }).catch(() => {});
+      return;
+    }
+    const t = tabs[idx];
+    // Second busy-check after the await: two near-simultaneous requests can
+    // both pass the pre-await guard; decline the loser so no Claude session hangs.
+    if (t.reviewMode || t.mcpRequestId != null || reviewBusy(tabs)) {
+      await invoke("mcp_respond", {
+        requestId,
+        text: "a review is already in progress",
+        isError: true,
+      }).catch(() => {});
+      return;
+    }
+    // Ensure rendered view — a review is a rendered-view activity.
+    t.raw = false;
     t.reviewMode = true;
     t.mcpRequestId = requestId;
     t.mcpInstructions = instructions || "";
     renderTabBar();
-    renderReviewMarkers(t);
+    if (t === activeTab()) await renderActive({ scrollLock: false });
   });
 
   await listen("mcp-get-state", async (ev) => {
@@ -1007,6 +1025,7 @@ async function openPreview(path) {
     }
     tabs[previewIdx].mcpRequestId = null;
     tabs[previewIdx].mcpInstructions = "";
+    tabs[previewIdx].pendingJumpLine = null;
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
@@ -2446,7 +2465,7 @@ function declineMcpReview(t) {
   t.mcpRequestId = null;
   t.mcpInstructions = "";
   renderTabBar();
-  renderReviewMarkers(t);
+  if (t === activeTab()) renderReviewMarkers(t);
   invoke("mcp_review_result", { requestId, review: null }).catch(() => {});
 }
 
@@ -2470,6 +2489,9 @@ async function finishReview(t) {
 
   if (t.mcpRequestId != null) {
     const requestId = t.mcpRequestId;
+    const instructions = t.mcpInstructions;
+    t.mcpRequestId = null;
+    t.mcpInstructions = "";
     const review = hasContent
       ? text
       : `Review of ${rel}\n\nThe user finished the review without comments.\n`;
@@ -2481,13 +2503,13 @@ async function finishReview(t) {
       // Claude's session is gone — preserve the user's work on the clipboard.
       const copied = hasContent ? await copyText(text) : true;
       if (!copied) {
+        t.mcpRequestId = requestId;
+        t.mcpInstructions = instructions;
         showTransientError("Couldn't deliver or copy the review");
         return; // keep the review intact so the user can retry
       }
       showTransientError("Claude is gone — review copied to clipboard instead");
     }
-    t.mcpRequestId = null;
-    t.mcpInstructions = "";
   } else if (hasContent) {
     const copied = await copyText(text);
     if (!copied) {
@@ -2501,7 +2523,7 @@ async function finishReview(t) {
   t.generalNote = "";
   t.reviewMode = false;
   renderTabBar();
-  renderReviewMarkers(t);
+  if (t === activeTab()) renderReviewMarkers(t);
 }
 
 /* ---- Link handling ---- */
