@@ -224,9 +224,40 @@ pub fn event_payload(gui_id: u64, req: &GuiRequest) -> Value {
     p
 }
 
+/// Merge our MCP server into a `.mcp.json` document. The command is the raw
+/// executable path — args are a JSON array, so no shell quoting is needed
+/// (unlike claude_hook::hook_command). Refuses (without modifying) on
+/// unexpected types so a user's config is never clobbered.
+pub fn merge_mcp_config(
+    mut config: Value,
+    exe: &str,
+) -> Result<(Value, crate::claude_hook::HookOutcome), String> {
+    use crate::claude_hook::HookOutcome;
+    if !config.is_object() {
+        return Err("config root is not a JSON object".to_string());
+    }
+    let obj = config.as_object_mut().unwrap();
+    let servers = obj.entry("mcpServers").or_insert_with(|| json!({}));
+    if !servers.is_object() {
+        return Err("`mcpServers` is not a JSON object".to_string());
+    }
+    let servers_obj = servers.as_object_mut().unwrap();
+    let outcome = if servers_obj.contains_key("mdviewer") {
+        HookOutcome::Updated
+    } else {
+        HookOutcome::Installed
+    };
+    servers_obj.insert(
+        "mdviewer".to_string(),
+        json!({ "command": exe, "args": ["--mcp"] }),
+    );
+    Ok((config, outcome))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::claude_hook::HookOutcome;
     use serde_json::json;
 
     #[test]
@@ -454,5 +485,34 @@ mod tests {
         assert_eq!(p["path"], "p.md");
         assert_eq!(p["instructions"], "focus");
         assert!(p.get("evil").is_none());
+    }
+
+    #[test]
+    fn merge_into_empty_installs_server_entry() {
+        let (merged, outcome) = merge_mcp_config(json!({}), "/x/mdviewer").unwrap();
+        assert_eq!(outcome, HookOutcome::Installed);
+        let entry = &merged["mcpServers"]["mdviewer"];
+        assert_eq!(entry["command"], "/x/mdviewer");
+        assert_eq!(entry["args"], json!(["--mcp"]));
+    }
+
+    #[test]
+    fn merge_preserves_other_servers_and_updates_ours() {
+        let existing = json!({
+            "mcpServers": {
+                "other": { "command": "npx", "args": ["x"] },
+                "mdviewer": { "command": "/old/mdviewer", "args": ["--mcp"] }
+            }
+        });
+        let (merged, outcome) = merge_mcp_config(existing, "/new/mdviewer").unwrap();
+        assert_eq!(outcome, HookOutcome::Updated);
+        assert_eq!(merged["mcpServers"]["other"]["command"], "npx");
+        assert_eq!(merged["mcpServers"]["mdviewer"]["command"], "/new/mdviewer");
+    }
+
+    #[test]
+    fn merge_refuses_wrong_types() {
+        assert!(merge_mcp_config(json!([]), "/x").is_err());
+        assert!(merge_mcp_config(json!({"mcpServers": "oops"}), "/x").is_err());
     }
 }
