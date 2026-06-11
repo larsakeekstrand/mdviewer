@@ -331,7 +331,11 @@ pub fn run_proxy() {
         }
         match handle_message(&line) {
             Dispatch::Ignore => {}
-            Dispatch::Reply(v) => write_json_line(&stdout, &v),
+            Dispatch::Reply(v) => {
+                if write_json_line(&stdout, &v).is_err() {
+                    break;
+                }
+            }
             Dispatch::Call {
                 rpc_id,
                 tool,
@@ -353,16 +357,18 @@ pub fn run_proxy() {
                     },
                     Err(e) => rpc_error(rpc_id, -32000, &e),
                 };
-                write_json_line(&stdout, &response);
+                if write_json_line(&stdout, &response).is_err() {
+                    break;
+                }
             }
         }
     }
 }
 
-fn write_json_line(stdout: &Arc<Mutex<std::io::Stdout>>, v: &Value) {
+fn write_json_line(stdout: &Arc<Mutex<std::io::Stdout>>, v: &Value) -> std::io::Result<()> {
     let mut out = stdout.lock().unwrap();
-    let _ = writeln!(out, "{v}");
-    let _ = out.flush();
+    writeln!(out, "{v}")?;
+    out.flush()
 }
 
 /// Make relative paths from the client absolute against OUR cwd (Claude Code
@@ -411,6 +417,12 @@ fn forward_call(
             let _ticker = ProgressTicker::start(stdout.clone(), progress_token.clone());
             read_reply(conn)?
         };
+        if reply.id != req.id {
+            return Err(format!(
+                "mdviewer answered request {} while {} was pending",
+                reply.id, req.id
+            ));
+        }
         if reply.error.as_deref() == Some(STARTING_ERR) {
             std::thread::sleep(Duration::from_millis(500));
             continue;
@@ -421,7 +433,10 @@ fn forward_call(
 }
 
 /// One reply per request is the protocol invariant, so a throwaway BufReader
-/// can't buffer-steal bytes that belong to a later reply.
+/// can't buffer-steal bytes that belong to a later reply. A request that died
+/// at read time is deliberately NOT resent — it may have already executed
+/// GUI-side (e.g. opened a document), and re-sending risks double execution;
+/// the caller surfaces the error instead.
 fn read_reply(conn: &mut Option<Stream>) -> Result<GuiReply, String> {
     let stream = conn.as_mut().expect("caller ensured connection");
     let mut reader = BufReader::new(&*stream);

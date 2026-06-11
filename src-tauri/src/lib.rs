@@ -50,7 +50,8 @@ pub fn run_claude_hook() {
     claude_hook::run_hook();
 }
 
-/// Run the `--mcp` stdio MCP proxy and return (never launches the GUI).
+/// Run the `--mcp` stdio MCP proxy and return (never starts the Tauri runtime
+/// in this process; the proxy may spawn the GUI as a separate process).
 pub fn run_mcp_proxy() {
     mcp::run_proxy();
 }

@@ -17,6 +17,11 @@ fn proxy_round_trips_and_reports_eof_mid_request() {
     let sock = test_socket_id();
     std::env::set_var("MDVIEWER_MCP_SOCKET", &sock);
 
+    // Remove any stale socket file left by a previous run (PID reuse in $TMPDIR
+    // can make ListenerOptions::create_sync fail with "address already in use").
+    #[cfg(not(windows))]
+    let _ = std::fs::remove_file(&sock);
+
     let listener = ListenerOptions::new()
         .name(mdviewer_lib::mcp::socket_name().unwrap())
         .create_sync()
