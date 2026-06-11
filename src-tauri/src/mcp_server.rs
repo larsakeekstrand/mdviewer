@@ -9,23 +9,19 @@ use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
 /// The webview's answer for one tool call: Ok(text) or Err(message).
-#[cfg_attr(not(test), allow(dead_code))]
 pub type Reply = Result<String, String>;
 /// Reply plus an ack channel the connection thread reports its write on.
-#[cfg_attr(not(test), allow(dead_code))]
 type Handoff = (Reply, mpsc::Sender<std::io::Result<()>>);
 
 /// In-flight MCP requests, keyed by a GUI-generated id (NOT the proxy's
 /// JSON-RPC id, which can collide across connections). Managed Tauri state.
 #[derive(Default)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct McpPending {
     next_id: AtomicU64,
     waiting: Mutex<HashMap<u64, mpsc::Sender<Handoff>>>,
 }
 
 // Used by the socket listener (Task 6) and commands (Task 7).
-#[cfg_attr(not(test), allow(dead_code))]
 impl McpPending {
     /// Register a new in-flight request. The connection thread blocks on the
     /// returned receiver until a command resolves it.
@@ -41,6 +37,7 @@ impl McpPending {
     /// proxy received it — the trigger for the frontend's clipboard fallback.
     /// Errors on an unknown id (already resolved, or fabricated by the
     /// webview) and on a dead or failing connection.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn resolve(&self, id: u64, reply: Reply) -> Result<(), String> {
         let tx = self
             .waiting
@@ -61,6 +58,169 @@ impl McpPending {
     /// Drop a request without replying (failed emit, app teardown).
     pub fn forget(&self, id: u64) {
         self.waiting.lock().unwrap().remove(&id);
+    }
+}
+
+use std::io::{BufRead, BufReader, Write};
+
+use interprocess::local_socket::prelude::*;
+use interprocess::local_socket::{ListenerOptions, Stream};
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::mcp::{self, GuiReply, GuiRequest};
+
+/// Spawn the MCP socket listener. Failure to bind only disables MCP — the
+/// viewer itself must keep working — so errors are logged, never fatal.
+pub fn start(app: AppHandle) {
+    std::thread::spawn(move || {
+        if let Err(e) = listen_loop(app) {
+            eprintln!("mdviewer: MCP listener disabled: {e}");
+        }
+    });
+}
+
+fn listen_loop(app: AppHandle) -> std::io::Result<()> {
+    let name = mcp::socket_name()?;
+    // Stale-socket handling: probe before binding. A live instance answers
+    // the connect — back off rather than steal its socket. A dead leftover
+    // file (crash) is handled by try_overwrite(true) on the bind below.
+    if Stream::connect(name.borrow()).is_ok() {
+        eprintln!("mdviewer: another instance owns the MCP socket; MCP disabled here");
+        return Ok(());
+    }
+    let listener = ListenerOptions::new()
+        .name(name)
+        .try_overwrite(true)
+        .create_sync()?;
+    for stream in listener.flatten() {
+        let app = app.clone();
+        std::thread::spawn(move || handle_connection(app, stream));
+    }
+    Ok(())
+}
+
+/// One proxy connection. Strictly sequential — the proxy forwards one call
+/// and waits for its reply before reading the next stdin line, so a
+/// one-request-at-a-time loop is consistent end-to-end.
+fn handle_connection(app: AppHandle, stream: Stream) {
+    let mut reader = BufReader::new(&stream);
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        let req: GuiRequest = match serde_json::from_str(line.trim()) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        match prepare_request(&app, &req) {
+            // Rejected before reaching the webview (validation, not ready).
+            Err(e) => {
+                let reply = GuiReply {
+                    id: req.id,
+                    result: None,
+                    error: Some(e),
+                };
+                if write_line(&stream, &reply).is_err() {
+                    return;
+                }
+            }
+            // Parked: block until a command resolves it, write the reply, and
+            // ack with the WRITE outcome. That ack is what resolve() returns
+            // to mcp_review_result — the frontend learns synchronously whether
+            // the proxy actually received the review (its clipboard-fallback
+            // trigger). Acking before the write would report success for a
+            // review the dead proxy never saw.
+            Ok(rx) => match rx.recv() {
+                Ok((reply, ack)) => {
+                    let gui_reply = match reply {
+                        Ok(text) => GuiReply {
+                            id: req.id,
+                            result: Some(text),
+                            error: None,
+                        },
+                        Err(e) => GuiReply {
+                            id: req.id,
+                            result: None,
+                            error: Some(e),
+                        },
+                    };
+                    let res = write_line(&stream, &gui_reply);
+                    let failed = res.is_err();
+                    let _ = ack.send(res);
+                    if failed {
+                        return;
+                    }
+                }
+                Err(_) => return, // app shutting down
+            },
+        }
+    }
+}
+
+fn write_line(mut stream: &Stream, reply: &GuiReply) -> std::io::Result<()> {
+    let mut line = serde_json::to_string(reply).map_err(std::io::Error::other)?;
+    line.push('\n');
+    stream.write_all(line.as_bytes())
+}
+
+/// Validate and forward one tool call to the webview. The returned receiver
+/// resolves when an mcp_respond / mcp_review_result command answers it.
+fn prepare_request(
+    app: &AppHandle,
+    req: &GuiRequest,
+) -> Result<std::sync::mpsc::Receiver<Handoff>, String> {
+    if !app.state::<crate::AppState>().opens.lock().unwrap().ready {
+        return Err(mcp::STARTING_ERR.to_string());
+    }
+    validate(req)?;
+    let event = mcp::event_name(&req.tool).ok_or_else(|| format!("unknown tool '{}'", req.tool))?;
+
+    let pending = app.state::<McpPending>();
+    let (gui_id, rx) = pending.register();
+    if app.emit(event, mcp::event_payload(gui_id, req)).is_err() {
+        pending.forget(gui_id);
+        return Err("cannot reach the MDViewer window".to_string());
+    }
+    if req.tool == "request_review" {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.set_focus();
+        }
+    }
+    Ok(rx)
+}
+
+fn validate(req: &GuiRequest) -> Result<(), String> {
+    let path = || -> Result<&str, String> {
+        req.args
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "missing required argument 'path'".to_string())
+    };
+    match req.tool.as_str() {
+        "open_document" => {
+            let p = path()?;
+            if !mcp::viewable_path(p) {
+                return Err(format!("'{p}' is not a markdown or image file"));
+            }
+            if !std::path::Path::new(p).is_file() {
+                return Err(format!("file not found: {p}"));
+            }
+            Ok(())
+        }
+        "request_review" => {
+            let p = path()?;
+            if !mcp::markdown_path(p) {
+                return Err(format!("'{p}' is not a markdown file"));
+            }
+            if !std::path::Path::new(p).is_file() {
+                return Err(format!("file not found: {p}"));
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 

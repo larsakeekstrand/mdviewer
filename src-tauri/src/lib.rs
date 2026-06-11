@@ -65,6 +65,7 @@ pub fn run(startup: Startup) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .manage(mcp_server::McpPending::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_initial_state,
             commands::list_dir,
@@ -110,6 +111,7 @@ pub fn run(startup: Startup) {
                 recent::push(&handle, root);
             }
             menu::install(&handle)?;
+            mcp_server::start(handle.clone());
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
             }

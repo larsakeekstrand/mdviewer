@@ -46,6 +46,7 @@ opener = "0.7"
 
 # Cross-platform move-to-Trash / Recycle Bin for tree Delete.
 trash = "5"
+interprocess = "2"
 
 # macOS-only: native WKWebView print-to-PDF (paginated, silent save).
 # objc2 0.6 core with the 0.3 framework wrappers Tauri 2.11 uses internally.

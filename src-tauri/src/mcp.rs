@@ -213,7 +213,10 @@ pub fn event_name(tool: &str) -> Option<&'static str> {
 }
 
 /// Webview event payload: requestId + whitelisted args only, so an odd field
-/// from a hostile client never reaches the frontend.
+/// from a hostile client never reaches the frontend. `gui_id` is the
+/// GUI-global pending-map key, distinct from `req.id` (the per-connection
+/// socket id), because two concurrent proxy connections can both use socket
+/// id 1.
 pub fn event_payload(gui_id: u64, req: &GuiRequest) -> Value {
     let mut p = json!({ "requestId": gui_id });
     for key in ["path", "line", "instructions"] {
@@ -222,6 +225,42 @@ pub fn event_payload(gui_id: u64, req: &GuiRequest) -> Value {
         }
     }
     p
+}
+
+/// The local-socket name both sides agree on. Named pipe on Windows; a
+/// filesystem path in the per-user `$TMPDIR` on Unix (macOS UDS paths cap at
+/// ~104 bytes, so never `app_data_dir`). `MDVIEWER_MCP_SOCKET` overrides for
+/// tests and dev.
+pub fn socket_name() -> std::io::Result<interprocess::local_socket::Name<'static>> {
+    #[cfg(windows)]
+    {
+        use interprocess::local_socket::{GenericNamespaced, ToNsName};
+        let name = std::env::var("MDVIEWER_MCP_SOCKET")
+            .unwrap_or_else(|_| "mdviewer-mcp.sock".to_string());
+        name.to_ns_name::<GenericNamespaced>()
+    }
+    #[cfg(not(windows))]
+    {
+        use interprocess::local_socket::{GenericFilePath, ToFsName};
+        socket_fs_path().unwrap().to_fs_name::<GenericFilePath>()
+    }
+}
+
+/// The socket's filesystem path, when it has one (Unix). Used to probe for a
+/// live server before binding. `None` on Windows (named pipes have no path).
+pub fn socket_fs_path() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        Some(
+            std::env::var("MDVIEWER_MCP_SOCKET")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::env::temp_dir().join("mdviewer-mcp.sock")),
+        )
+    }
 }
 
 /// Merge our MCP server into a `.mcp.json` document. The command is the raw
