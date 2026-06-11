@@ -103,6 +103,7 @@ pub fn run(startup: Startup) {
             commands::save_session,
             commands::install_cli,
             commands::install_claude_hook,
+            commands::install_mcp_server,
             commands::mcp_respond,
             commands::mcp_review_result,
             commands::platform,

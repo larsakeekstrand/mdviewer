@@ -289,6 +289,10 @@ async function init() {
     await installClaudeHook();
   });
 
+  await listen("menu-install-mcp-server", async () => {
+    await installMcpServer();
+  });
+
   await listen("mcp-open-document", async (ev) => {
     const { requestId, path, line } = ev.payload;
     try {
@@ -3403,6 +3407,31 @@ async function installCli() {
     outcome === "already_installed"
       ? "The mdviewer command line tool is already installed."
       : "Installed. You can now run mdviewer from a terminal.";
+  await dialogApi.message(msg, { title: "MDViewer", kind: "info" });
+}
+
+async function installMcpServer() {
+  if (!treeRoot) {
+    await dialogApi.message("Open a folder first to install the MCP server there.", {
+      title: "MDViewer",
+      kind: "info",
+    });
+    return;
+  }
+  let outcome;
+  try {
+    outcome = await invoke("install_mcp_server");
+  } catch (e) {
+    await dialogApi.message("Couldn't install the MCP server.\n\n" + e, {
+      title: "MDViewer",
+      kind: "error",
+    });
+    return;
+  }
+  const msg =
+    outcome === "updated"
+      ? "Already installed — updated the MDViewer path in .mcp.json."
+      : "Installed. Claude Code sessions in this project can now open documents in MDViewer and request reviews (approve the 'mdviewer' MCP server when Claude Code asks).";
   await dialogApi.message(msg, { title: "MDViewer", kind: "info" });
 }
 
