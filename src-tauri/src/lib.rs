@@ -4,6 +4,7 @@ mod export;
 mod fs_ops;
 mod git;
 mod markdown;
+pub mod mcp;
 mod menu;
 #[cfg(target_os = "macos")]
 mod open_files;
