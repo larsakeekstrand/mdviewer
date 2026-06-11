@@ -231,12 +231,21 @@ pub fn event_payload(gui_id: u64, req: &GuiRequest) -> Value {
 /// filesystem path in the per-user `$TMPDIR` on Unix (macOS UDS paths cap at
 /// ~104 bytes, so never `app_data_dir`). `MDVIEWER_MCP_SOCKET` overrides for
 /// tests and dev.
+///
+/// Windows: the default pipe name embeds the username to avoid collisions
+/// across local users. Pipe squatting by another user on the same machine
+/// remains theoretically possible (documented trade-off; mitigated by the
+/// per-user component).
 pub fn socket_name() -> std::io::Result<interprocess::local_socket::Name<'static>> {
     #[cfg(windows)]
     {
         use interprocess::local_socket::{GenericNamespaced, ToNsName};
-        let name = std::env::var("MDVIEWER_MCP_SOCKET")
-            .unwrap_or_else(|_| "mdviewer-mcp.sock".to_string());
+        let name = std::env::var("MDVIEWER_MCP_SOCKET").unwrap_or_else(|_| {
+            let user = std::env::var("USERNAME")
+                .or_else(|_| std::env::var("USER"))
+                .unwrap_or_else(|_| "user".to_string());
+            format!("mdviewer-mcp-{user}.sock")
+        });
         name.to_ns_name::<GenericNamespaced>()
     }
     #[cfg(not(windows))]

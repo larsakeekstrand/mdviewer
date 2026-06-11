@@ -4,9 +4,17 @@
 //! listener/connection runtime is IO, covered by the manual smoke test.
 
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
+
+use interprocess::local_socket::prelude::*;
+use interprocess::local_socket::{ListenerOptions, Stream};
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::mcp::{self, GuiReply, GuiRequest};
 
 /// The webview's answer for one tool call: Ok(text) or Err(message).
 pub type Reply = Result<String, String>;
@@ -61,14 +69,8 @@ impl McpPending {
     }
 }
 
-use std::io::{BufRead, BufReader, Write};
-
-use interprocess::local_socket::prelude::*;
-use interprocess::local_socket::{ListenerOptions, Stream};
-use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager};
-
-use crate::mcp::{self, GuiReply, GuiRequest};
+/// Maximum bytes accepted for a single request line before dropping the connection.
+const MAX_REQUEST_LINE: usize = 1024 * 1024;
 
 /// Spawn the MCP socket listener. Failure to bind only disables MCP — the
 /// viewer itself must keep working — so errors are logged, never fatal.
@@ -93,11 +95,18 @@ fn listen_loop(app: AppHandle) -> std::io::Result<()> {
         .name(name)
         .try_overwrite(true)
         .create_sync()?;
-    for stream in listener.flatten() {
-        let app = app.clone();
-        std::thread::spawn(move || handle_connection(app, stream));
+    loop {
+        match listener.accept() {
+            Ok(stream) => {
+                let app = app.clone();
+                std::thread::spawn(move || handle_connection(app, stream));
+            }
+            Err(e) => {
+                eprintln!("mdviewer: MCP accept error: {e}");
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
     }
-    Ok(())
 }
 
 /// One proxy connection. Strictly sequential — the proxy forwards one call
@@ -111,9 +120,16 @@ fn handle_connection(app: AppHandle, stream: Stream) {
             Ok(0) | Err(_) => return,
             Ok(_) => {}
         }
+        if line.len() > MAX_REQUEST_LINE {
+            eprintln!("mdviewer: MCP request line too long; dropping connection");
+            return;
+        }
         let req: GuiRequest = match serde_json::from_str(line.trim()) {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(_) => {
+                eprintln!("mdviewer: ignoring malformed MCP request line");
+                continue;
+            }
         };
         match prepare_request(&app, &req) {
             // Rejected before reaching the webview (validation, not ready).
