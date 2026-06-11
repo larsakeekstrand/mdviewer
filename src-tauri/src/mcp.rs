@@ -31,7 +31,11 @@ pub fn handle_message(line: &str) -> Dispatch {
         Err(_) => return Dispatch::Ignore,
     };
     let id = msg.get("id").cloned();
-    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let Some(method) = msg.get("method").and_then(|m| m.as_str()) else {
+        // A message with an id but no method is a JSON-RPC *response* —
+        // responses are never themselves responded to.
+        return Dispatch::Ignore;
+    };
     match (id, method) {
         (None, _) => Dispatch::Ignore,
         (Some(id), "initialize") => {
@@ -256,5 +260,28 @@ mod tests {
         assert_eq!(n["params"]["progressToken"], "p1");
         assert_eq!(n["params"]["progress"], 3);
         assert!(n.get("id").is_none());
+    }
+
+    #[test]
+    fn response_objects_are_ignored() {
+        assert_eq!(
+            handle_message(r#"{"jsonrpc":"2.0","id":9,"result":{}}"#),
+            Dispatch::Ignore
+        );
+        assert_eq!(
+            handle_message(r#"{"jsonrpc":"2.0","id":9,"error":{"code":-1,"message":"x"}}"#),
+            Dispatch::Ignore
+        );
+    }
+
+    #[test]
+    fn known_tools_matches_tool_defs() {
+        let names: Vec<String> = tool_defs()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, KNOWN_TOOLS);
     }
 }
