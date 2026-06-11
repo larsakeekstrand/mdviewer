@@ -31,6 +31,12 @@ import { isImagePath } from "./filetype.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
+import {
+  reviewButtonLabel,
+  mcpHintText,
+  reviewBusy,
+  viewerState,
+} from "./mcp.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -95,7 +101,7 @@ let gitRefreshTimer = null;
 const GIT_REFRESH_DEBOUNCE_MS = 200;
 
 // Tabs model
-const tabs = []; // [{ path, sticky, raw, editing, dirty, savedContent, reviewMode, reviews, generalNote, orphanedReviews }]
+const tabs = []; // [{ path, sticky, raw, editing, dirty, savedContent, reviewMode, reviews, generalNote, orphanedReviews, mcpRequestId, mcpInstructions }]
 let activeIdx = -1;
 let restoring = true; // suppress session persistence until init() finishes restoring
 
@@ -281,6 +287,50 @@ async function init() {
 
   await listen("menu-install-claude-hook", async () => {
     await installClaudeHook();
+  });
+
+  await listen("mcp-open-document", async (ev) => {
+    const { requestId, path, line } = ev.payload;
+    try {
+      if (line != null) await openTabAtLine(path, line);
+      else await openSticky(path);
+      await invoke("mcp_respond", { requestId, text: `Opened ${path}`, isError: false });
+    } catch (e) {
+      await invoke("mcp_respond", { requestId, text: String(e), isError: true }).catch(() => {});
+    }
+  });
+
+  await listen("mcp-request-review", async (ev) => {
+    const { requestId, path, instructions } = ev.payload;
+    if (reviewBusy(tabs)) {
+      await invoke("mcp_respond", {
+        requestId,
+        text: "a review is already in progress",
+        isError: true,
+      }).catch(() => {});
+      return;
+    }
+    try {
+      await openSticky(path);
+    } catch (e) {
+      await invoke("mcp_respond", { requestId, text: String(e), isError: true }).catch(() => {});
+      return;
+    }
+    const t = activeTab();
+    t.reviewMode = true;
+    t.mcpRequestId = requestId;
+    t.mcpInstructions = instructions || "";
+    renderTabBar();
+    renderReviewMarkers(t);
+  });
+
+  await listen("mcp-get-state", async (ev) => {
+    const { requestId } = ev.payload;
+    await invoke("mcp_respond", {
+      requestId,
+      text: JSON.stringify(viewerState(tabs, activeIdx)),
+      isError: false,
+    }).catch(() => {});
   });
 
   window
@@ -946,6 +996,17 @@ async function openPreview(path) {
     tabs[previewIdx].reviews = [];
     tabs[previewIdx].generalNote = "";
     tabs[previewIdx].orphanedReviews = [];
+    if (tabs[previewIdx].mcpRequestId != null) {
+      // Reusing a tab with a parked MCP review orphans Claude's request —
+      // decline it so the agent isn't left hanging. (Shouldn't happen: MCP
+      // reviews open sticky tabs. Defense in depth.)
+      invoke("mcp_review_result", {
+        requestId: tabs[previewIdx].mcpRequestId,
+        review: null,
+      }).catch(() => {});
+    }
+    tabs[previewIdx].mcpRequestId = null;
+    tabs[previewIdx].mcpInstructions = "";
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
@@ -1055,6 +1116,10 @@ function closeTab(idx) {
       });
     return;
   }
+  if (t.mcpRequestId != null) {
+    // Closing the reviewed tab is an unambiguous "not now".
+    invoke("mcp_review_result", { requestId: t.mcpRequestId, review: null }).catch(() => {});
+  }
   tabs.splice(idx, 1);
   if (tabs.length === 0) {
     activeIdx = -1;
@@ -1099,10 +1164,12 @@ function renderTabBar() {
     reviewBtn.hidden = image || t.editing || t.raw;
     if (!reviewBtn.hidden) {
       reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
-      reviewBtn.textContent = t.reviewMode ? "✓ Finish & Copy" : "💬 Review";
-      reviewBtn.title = t.reviewMode
-        ? "Copy your review to the clipboard and exit review mode"
-        : "Comment on this document and copy your review for Claude Code";
+      reviewBtn.textContent = reviewButtonLabel(t.reviewMode, t.mcpRequestId);
+      reviewBtn.title = !t.reviewMode
+        ? "Comment on this document and copy your review for Claude Code"
+        : t.mcpRequestId != null
+          ? "Send your review to the waiting Claude Code session"
+          : "Copy your review to the clipboard and exit review mode";
     }
   }
 }
@@ -2332,8 +2399,28 @@ function renderReviewBar(t) {
 
   const hint = document.createElement("div");
   hint.className = "review-hint";
-  hint.textContent =
-    "Comment on any block (hover for the +), then Finish & Copy to paste your review into Claude Code.";
+
+  if (t.mcpRequestId != null) {
+    bar.classList.add("mcp");
+    hint.textContent = "💬 " + mcpHintText(basename(t.path), t.mcpInstructions);
+    const decline = document.createElement("button");
+    decline.type = "button";
+    decline.className = "review-decline-btn";
+    decline.textContent = "Decline";
+    decline.title = "Tell Claude you're skipping this review";
+    decline.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      declineMcpReview(t);
+    });
+    const row = document.createElement("div");
+    row.className = "review-mcp-row";
+    row.append(hint, decline);
+    bar.appendChild(row);
+  } else {
+    hint.textContent =
+      "Comment on any block (hover for the +), then Finish & Copy to paste your review into Claude Code.";
+    bar.appendChild(hint);
+  }
 
   const note = document.createElement("textarea");
   note.className = "review-general-note";
@@ -2344,19 +2431,31 @@ function renderReviewBar(t) {
     t.generalNote = note.value;
   });
 
-  bar.append(hint, note);
+  bar.appendChild(note);
   preview.prepend(bar);
 }
 
-/** Finish a review: copy it (when there's anything to send), clear the
- *  annotations, exit review mode, and confirm with a toast. */
-/** Finish a review: commit any open comment box, copy the review (when there's
- *  anything to send), clear the annotations, exit review mode, and confirm with
- *  a toast. On copy failure the review is kept so the user can retry. */
+/** Decline Claude's pending review request and exit review mode. The reply is
+ *  best-effort — a dead proxy just means nobody is listening anymore. */
+function declineMcpReview(t) {
+  const requestId = t.mcpRequestId;
+  t.reviews = [];
+  t.orphanedReviews = [];
+  t.generalNote = "";
+  t.reviewMode = false;
+  t.mcpRequestId = null;
+  t.mcpInstructions = "";
+  renderTabBar();
+  renderReviewMarkers(t);
+  invoke("mcp_review_result", { requestId, review: null }).catch(() => {});
+}
+
+/** Finish a review: commit any open comment box, then deliver it — to the
+ *  waiting MCP request when Claude asked for the review, else to the
+ *  clipboard — clear the annotations, exit review mode, and confirm with a
+ *  toast. On delivery failure the review is kept (clipboard path) or falls
+ *  back to the clipboard (MCP path) so the user's work is never lost. */
 async function finishReview(t) {
-  // Commit an in-progress comment box first, via its own Save button, so an
-  // unsaved comment isn't silently discarded by the re-render below. The Save
-  // handler correctly handles both new and edited comments.
   const pendingSave = preview.querySelector(".review-input .review-save-btn");
   if (pendingSave) pendingSave.click();
 
@@ -2364,14 +2463,32 @@ async function finishReview(t) {
     (t.reviews && t.reviews.length > 0) ||
     (t.orphanedReviews && t.orphanedReviews.length > 0) ||
     (t.generalNote || "").trim() !== "";
-  if (hasContent) {
-    const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
-    const text = formatReview(
-      t.reviews || [],
-      t.generalNote || "",
-      rel,
-      t.orphanedReviews || [],
-    );
+  const rel = relativeToRoot(t.path, treeRoot) || basename(t.path);
+  const text = hasContent
+    ? formatReview(t.reviews || [], t.generalNote || "", rel, t.orphanedReviews || [])
+    : "";
+
+  if (t.mcpRequestId != null) {
+    const requestId = t.mcpRequestId;
+    const review = hasContent
+      ? text
+      : `Review of ${rel}\n\nThe user finished the review without comments.\n`;
+    try {
+      await invoke("mcp_review_result", { requestId, review });
+      showTransientMessage("Review sent to Claude Code");
+    } catch (e) {
+      console.error("mcp_review_result failed", e);
+      // Claude's session is gone — preserve the user's work on the clipboard.
+      const copied = hasContent ? await copyText(text) : true;
+      if (!copied) {
+        showTransientError("Couldn't deliver or copy the review");
+        return; // keep the review intact so the user can retry
+      }
+      showTransientError("Claude is gone — review copied to clipboard instead");
+    }
+    t.mcpRequestId = null;
+    t.mcpInstructions = "";
+  } else if (hasContent) {
     const copied = await copyText(text);
     if (!copied) {
       showTransientError("Couldn't copy the review to the clipboard");
