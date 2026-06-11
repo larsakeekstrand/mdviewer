@@ -1,6 +1,6 @@
 //! Claude Code `PostToolUse` hook: matching, settings merge, and the
 //! `--claude-hook` runtime that opens plan files in MDViewer. Pure helpers are
-//! unit-tested; `run_hook`/`open_in_mdviewer` are IO and verified manually.
+//! unit-tested; `run_hook`/`launch_mdviewer` are IO and verified manually.
 
 use serde::Serialize;
 use serde_json::{json, Value};

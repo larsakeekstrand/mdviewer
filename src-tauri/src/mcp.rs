@@ -302,6 +302,199 @@ pub fn merge_mcp_config(
     Ok((config, outcome))
 }
 
+use std::io::{BufRead, BufReader, Write};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+
+use interprocess::local_socket::prelude::*;
+use interprocess::local_socket::Stream;
+
+const KEEPALIVE_SECS: u64 = 10;
+const STARTING_RETRIES: u32 = 30; // × 500 ms = wait up to 15 s for the webview
+const LAUNCH_RETRIES: u32 = 40; // × 250 ms = wait up to 10 s for a cold GUI launch
+
+/// Entry point for `mdviewer --mcp`: a stdio MCP server that relays tool
+/// calls to the running GUI over the local socket, launching the GUI when it
+/// isn't running. Exits when stdin closes (the MCP client ended the session).
+pub fn run_proxy() {
+    let stdout: Arc<Mutex<std::io::Stdout>> = Arc::new(Mutex::new(std::io::stdout()));
+    let mut conn: Option<Stream> = None;
+    let mut next_gui_id: u64 = 0;
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        match handle_message(&line) {
+            Dispatch::Ignore => {}
+            Dispatch::Reply(v) => write_json_line(&stdout, &v),
+            Dispatch::Call {
+                rpc_id,
+                tool,
+                args,
+                progress_token,
+            } => {
+                let response = match forward_call(
+                    &mut conn,
+                    &stdout,
+                    &mut next_gui_id,
+                    &tool,
+                    args,
+                    &progress_token,
+                ) {
+                    Ok(reply) => match (reply.result, reply.error) {
+                        (Some(text), _) => tool_text_result(rpc_id, &text, false),
+                        (None, Some(e)) => tool_text_result(rpc_id, &e, true),
+                        (None, None) => tool_text_result(rpc_id, "empty reply", true),
+                    },
+                    Err(e) => rpc_error(rpc_id, -32000, &e),
+                };
+                write_json_line(&stdout, &response);
+            }
+        }
+    }
+}
+
+fn write_json_line(stdout: &Arc<Mutex<std::io::Stdout>>, v: &Value) {
+    let mut out = stdout.lock().unwrap();
+    let _ = writeln!(out, "{v}");
+    let _ = out.flush();
+}
+
+/// Make relative paths from the client absolute against OUR cwd (Claude Code
+/// spawns MCP servers with cwd = project root). The GUI's cwd is unrelated.
+fn absolutize_path_arg(args: &mut Value) {
+    if let Some(p) = args.get("path").and_then(Value::as_str) {
+        let pb = std::path::PathBuf::from(p);
+        if pb.is_relative() {
+            if let Ok(cwd) = std::env::current_dir() {
+                args["path"] = json!(cwd.join(pb).to_string_lossy());
+            }
+        }
+    }
+}
+
+fn forward_call(
+    conn: &mut Option<Stream>,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+    next_gui_id: &mut u64,
+    tool: &str,
+    mut args: Value,
+    progress_token: &Option<Value>,
+) -> Result<GuiReply, String> {
+    absolutize_path_arg(&mut args);
+    for _ in 0..STARTING_RETRIES {
+        ensure_connection(conn)?;
+        *next_gui_id += 1;
+        let req = GuiRequest {
+            id: *next_gui_id,
+            tool: tool.to_string(),
+            args: args.clone(),
+        };
+        let stream = conn.as_mut().expect("ensure_connection populated conn");
+        let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        line.push('\n');
+        if stream.write_all(line.as_bytes()).is_err() {
+            // The GUI restarted since the last call — reconnect once.
+            *conn = None;
+            ensure_connection(conn)?;
+            let stream = conn.as_mut().expect("ensure_connection populated conn");
+            stream
+                .write_all(line.as_bytes())
+                .map_err(|e| format!("cannot reach mdviewer: {e}"))?;
+        }
+        let reply = {
+            let _ticker = ProgressTicker::start(stdout.clone(), progress_token.clone());
+            read_reply(conn)?
+        };
+        if reply.error.as_deref() == Some(STARTING_ERR) {
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+        return Ok(reply);
+    }
+    Err("mdviewer did not finish starting".to_string())
+}
+
+/// One reply per request is the protocol invariant, so a throwaway BufReader
+/// can't buffer-steal bytes that belong to a later reply.
+fn read_reply(conn: &mut Option<Stream>) -> Result<GuiReply, String> {
+    let stream = conn.as_mut().expect("caller ensured connection");
+    let mut reader = BufReader::new(&*stream);
+    let mut line = String::new();
+    match reader.read_line(&mut line) {
+        Ok(0) => {
+            *conn = None;
+            Err("mdviewer closed before the request finished".to_string())
+        }
+        Err(e) => {
+            *conn = None;
+            Err(format!("mdviewer connection failed: {e}"))
+        }
+        Ok(_) => serde_json::from_str(line.trim())
+            .map_err(|e| format!("malformed reply from mdviewer: {e}")),
+    }
+}
+
+fn ensure_connection(conn: &mut Option<Stream>) -> Result<(), String> {
+    if conn.is_some() {
+        return Ok(());
+    }
+    let name = socket_name().map_err(|e| format!("cannot build socket name: {e}"))?;
+    if let Ok(s) = Stream::connect(name.borrow()) {
+        *conn = Some(s);
+        return Ok(());
+    }
+    crate::claude_hook::launch_mdviewer(None);
+    for _ in 0..LAUNCH_RETRIES {
+        std::thread::sleep(Duration::from_millis(250));
+        if let Ok(s) = Stream::connect(name.borrow()) {
+            *conn = Some(s);
+            return Ok(());
+        }
+    }
+    Err("cannot reach MDViewer (launch failed or timed out)".to_string())
+}
+
+/// Emits notifications/progress every KEEPALIVE_SECS while alive, so the MCP
+/// client's tool timeout doesn't fire during a long review. Drop stops it.
+struct ProgressTicker {
+    stop: Option<mpsc::Sender<()>>,
+}
+
+impl ProgressTicker {
+    fn start(stdout: Arc<Mutex<std::io::Stdout>>, token: Option<Value>) -> Self {
+        let Some(token) = token else {
+            return Self { stop: None };
+        };
+        let (tx, rx) = mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            let mut n: u64 = 0;
+            while let Err(mpsc::RecvTimeoutError::Timeout) =
+                rx.recv_timeout(Duration::from_secs(KEEPALIVE_SECS))
+            {
+                n += 1;
+                let note = progress_notification(&token, n);
+                let mut out = stdout.lock().unwrap();
+                let _ = writeln!(out, "{note}");
+                let _ = out.flush();
+            }
+        });
+        Self { stop: Some(tx) }
+    }
+}
+
+impl Drop for ProgressTicker {
+    fn drop(&mut self) {
+        // Dropping the sender disconnects recv_timeout and ends the thread.
+        self.stop.take();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -50,6 +50,11 @@ pub fn run_claude_hook() {
     claude_hook::run_hook();
 }
 
+/// Run the `--mcp` stdio MCP proxy and return (never launches the GUI).
+pub fn run_mcp_proxy() {
+    mcp::run_proxy();
+}
+
 pub fn run(startup: Startup) {
     let state = AppState {
         current_root: Mutex::new(startup.tree_root.clone()),
