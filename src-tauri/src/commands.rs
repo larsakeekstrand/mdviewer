@@ -757,6 +757,63 @@ pub fn install_claude_hook(
     Ok(outcome)
 }
 
+/// Merge the MDViewer MCP server into the open project's `.mcp.json` so
+/// Claude Code sessions in that project can drive the viewer. Idempotent,
+/// mirrors install_claude_hook.
+#[tauri::command]
+pub fn install_mcp_server(
+    state: State<'_, AppState>,
+) -> Result<crate::claude_hook::HookOutcome, String> {
+    let root = current_root(&state)?;
+    let exe =
+        std::env::current_exe().map_err(|e| format!("cannot resolve app binary path: {e}"))?;
+    let config_path = root.join(".mcp.json");
+
+    let existing: serde_json::Value = match std::fs::read_to_string(&config_path) {
+        Ok(s) if !s.trim().is_empty() => serde_json::from_str(&s).map_err(|e| {
+            format!(
+                "{} is not valid JSON; not modified ({e})",
+                config_path.display()
+            )
+        })?,
+        _ => serde_json::json!({}),
+    };
+
+    let (merged, outcome) = crate::mcp::merge_mcp_config(existing, &exe.to_string_lossy())?;
+    let bytes =
+        serde_json::to_vec_pretty(&merged).map_err(|e| format!("cannot serialize config: {e}"))?;
+    write_atomically(&config_path, &bytes)
+        .map_err(|e| format!("cannot write {}: {e}", config_path.display()))?;
+    Ok(outcome)
+}
+
+/// Generic reply for a pending MCP request (open_document, get_viewer_state,
+/// and rejections like "a review is already in progress"). Only resolves ids
+/// the pending map knows — the webview can't fabricate responses.
+#[tauri::command]
+pub fn mcp_respond(
+    pending: State<'_, crate::mcp_server::McpPending>,
+    request_id: u64,
+    text: String,
+    is_error: bool,
+) -> Result<(), String> {
+    let reply = if is_error { Err(text) } else { Ok(text) };
+    pending.resolve(request_id, reply)
+}
+
+/// Finish or decline an MCP-requested review. `review: None` means declined —
+/// a successful tool result, not an error, so Claude proceeds gracefully.
+/// Errors when the proxy is gone, which the frontend turns into the
+/// clipboard fallback.
+#[tauri::command]
+pub fn mcp_review_result(
+    pending: State<'_, crate::mcp_server::McpPending>,
+    request_id: u64,
+    review: Option<String>,
+) -> Result<(), String> {
+    pending.resolve(request_id, Ok(crate::mcp::review_reply_text(review)))
+}
+
 #[tauri::command]
 pub fn search_in_folder(
     root: String,

@@ -4,6 +4,8 @@ mod export;
 mod fs_ops;
 mod git;
 mod markdown;
+pub mod mcp;
+mod mcp_server;
 mod menu;
 #[cfg(target_os = "macos")]
 mod open_files;
@@ -48,6 +50,12 @@ pub fn run_claude_hook() {
     claude_hook::run_hook();
 }
 
+/// Run the `--mcp` stdio MCP proxy and return (never starts the Tauri runtime
+/// in this process; the proxy may spawn the GUI as a separate process).
+pub fn run_mcp_proxy() {
+    mcp::run_proxy();
+}
+
 pub fn run(startup: Startup) {
     let state = AppState {
         current_root: Mutex::new(startup.tree_root.clone()),
@@ -63,6 +71,7 @@ pub fn run(startup: Startup) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .manage(mcp_server::McpPending::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_initial_state,
             commands::list_dir,
@@ -94,6 +103,9 @@ pub fn run(startup: Startup) {
             commands::save_session,
             commands::install_cli,
             commands::install_claude_hook,
+            commands::install_mcp_server,
+            commands::mcp_respond,
+            commands::mcp_review_result,
             commands::platform,
             commands::search_in_folder,
         ])
@@ -108,6 +120,7 @@ pub fn run(startup: Startup) {
                 recent::push(&handle, root);
             }
             menu::install(&handle)?;
+            mcp_server::start(handle.clone());
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
             }

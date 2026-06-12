@@ -60,6 +60,10 @@ fn main() -> ExitCode {
         mdviewer_lib::run_claude_hook();
         return ExitCode::SUCCESS;
     }
+    if std::env::args().nth(1).as_deref() == Some("--mcp") {
+        mdviewer_lib::run_mcp_proxy();
+        return ExitCode::SUCCESS;
+    }
     let startup = match resolve_args() {
         Ok(s) => s,
         Err(e) => {

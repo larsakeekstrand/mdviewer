@@ -8,7 +8,7 @@ right-click context menu, a default-app file association for markdown files,
 in-app source editing with live preview, file management from the tree, and a
 Review Mode that annotates rendered blocks and copies a structured review to the
 clipboard for pasting into an AI coding assistant, and a one-click installer for
-a Claude Code hook that auto-opens the plan/spec files Claude writes.
+a Claude Code hook that auto-opens the plan/spec files Claude writes, and an MCP server that lets Claude Code open documents in the viewer and request in-app reviews.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
 
@@ -47,6 +47,11 @@ src-tauri/
     claude_hook.rs— Claude Code hook: pure is_plan_file / extract_file_path /
                     merge_hook / hook_command (unit-tested) + run_hook runtime
                     for `--claude-hook` (stdin JSON → open plan in MDViewer)
+    mcp.rs        — MCP server: pure JSON-RPC dispatch/tool defs/validation/
+                    .mcp.json merge (unit-tested) + run_proxy runtime for
+                    `--mcp` (stdio ↔ local socket relay, launches GUI)
+    mcp_server.rs — GUI-side socket listener; McpPending ack-confirmed map
+                    routes tool calls webview-ward and replies socket-ward
     markdown.rs   — comrak + syntect; sourcepos for scroll anchoring;
                     mermaid fences → <pre class="mermaid"> (codefence renderer)
     tree.rs       — std::fs::read_dir depth-1, unfiltered (shows all files)
@@ -69,6 +74,8 @@ ui/
                     (folders to expand to reveal a file); unit-tested
   review.js       — pure helpers: quoteBlock, formatReview, reanchorReviews
                     for Review Mode (unit-tested); DOM wiring lives in app.js
+  mcp.js          — pure helpers: reviewButtonLabel, mcpHintText, reviewBusy,
+                    viewerState for the MCP review loop (unit-tested)
   styles.css      — grid layout, CSS variables for light/dark, pre.mermaid
   github-markdown.css, morphdom-umd.min.js, mermaid.min.js  — vendored
   codemirror/     — vendored CodeMirror 5: codemirror.min.js + .css,
@@ -176,7 +183,8 @@ icon.svg          — source for icon regeneration
   image tabs.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw / toggle-edit / save),
-  `open-file`, `open-folder`, `menu-check-updates`, `menu-install-claude-hook`.
+  `open-file`, `open-folder`, `menu-check-updates`, `menu-install-claude-hook`,
+  `menu-install-mcp-server`.
 - **Update check** runs after `init()` on every launch and then on a
   `setInterval` of `UPDATE_CHECK_INTERVAL_MS` (1 h) for the lifetime of the
   process (silent on failure / current; the silent path also respects the
@@ -319,6 +327,32 @@ icon.svg          — source for icon regeneration
   and non-matches exit 0 silently so the hook never disrupts Claude. No new IPC
   beyond the one command; no recursion risk (opening a file is a viewer action,
   not a Write).
+- **MCP server**: **MDViewer ▸ Install MCP Server…** merges
+  `{"mcpServers":{"mdviewer":{"command":<exe>,"args":["--mcp"]}}}` into
+  `<root>/.mcp.json` (`mcp::merge_mcp_config`, idempotent like `merge_hook`).
+  Claude Code spawns `mdviewer --mcp` (checked in `main.rs` next to
+  `--claude-hook`): a hand-rolled stdio JSON-RPC proxy (`mcp.rs`, no SDK) that
+  relays `tools/call` over a local socket (`interprocess` crate: per-user named
+  pipe on Windows, `$TMPDIR/mdviewer-mcp.sock` on macOS; `MDVIEWER_MCP_SOCKET`
+  overrides for tests) to the GUI's listener thread (`mcp_server.rs`),
+  launching the GUI via `claude_hook::launch_mdviewer(None)` if the connect
+  fails. Tools: `open_document(path, line?)` → `openTabAtLine`/`openSticky`;
+  `get_viewer_state`; blocking `request_review(path, instructions?)` → tab
+  opens in Review Mode (raw view forced off) with an MCP banner (instructions
+  + Decline), toolbar reads **✓ Finish & Send**, and `finishReview` routes the
+  `formatReview` markdown to `mcp_review_result` instead of the clipboard
+  (proxy dead → clipboard fallback toast; decline/tab-close →
+  `{"declined": true}`, a success so Claude proceeds). The proxy emits
+  `notifications/progress` every 10 s to hold client timeouts open and exits
+  when stdin or stdout closes. Validation is GUI-side (`mcp_server::validate`):
+  extension allowlist (markdown+images; markdown only for reviews) +
+  existence; the proxy absolutizes relative paths against its cwd (= Claude's
+  project root). One review at a time (`reviewBusy` + a post-await re-check —
+  the review tab is resolved by path, not focus). Stale socket on startup:
+  probe, back off if a live instance answers, else reclaim. The blocking
+  request_review call returns through `McpPending::resolve`, which waits for
+  the connection thread's socket-write ack — so "Review sent" is only shown
+  when the proxy actually received it.
 
 ## Platform support
 

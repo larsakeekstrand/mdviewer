@@ -1,6 +1,6 @@
 //! Claude Code `PostToolUse` hook: matching, settings merge, and the
 //! `--claude-hook` runtime that opens plan files in MDViewer. Pure helpers are
-//! unit-tested; `run_hook`/`open_in_mdviewer` are IO and verified manually.
+//! unit-tested; `run_hook`/`launch_mdviewer` are IO and verified manually.
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -144,8 +144,16 @@ pub fn run_hook() {
     open_in_mdviewer(&path);
 }
 
-#[cfg(target_os = "macos")]
 fn open_in_mdviewer(path: &str) {
+    launch_mdviewer(Some(path));
+}
+
+/// Launch (or message) the MDViewer GUI, optionally handing it a file to open.
+/// macOS: `open -a <bundle>` reaches the running instance (warm open adds a
+/// tab); the dev binary (no .app ancestor) is spawned directly. Windows:
+/// re-spawn the exe. Child stdio is detached so callers never block.
+#[cfg(target_os = "macos")]
+pub fn launch_mdviewer(path: Option<&str>) {
     use std::process::{Command, Stdio};
     let exe = match std::env::current_exe() {
         Ok(e) => e,
@@ -157,19 +165,21 @@ fn open_in_mdviewer(path: &str) {
         .nth(3)
         .filter(|p| p.extension().map(|e| e == "app").unwrap_or(false));
     let mut cmd = match bundle {
-        // Installed build: hand the file to the app bundle so the running
-        // instance opens it (warm-open adds a tab).
         Some(app) => {
             let mut c = Command::new("open");
-            c.arg("-a").arg(app).arg(path);
+            c.arg("-a").arg(app);
+            if let Some(p) = path {
+                c.arg(p);
+            }
             c
         }
-        // Dev build (target/debug/mdviewer has no .app): launch this binary
-        // directly. `open -b com.mdviewer.app` would route to a stale installed
-        // bundle, which is confusing during development.
+        // Dev build: launch this binary directly. `open -b com.mdviewer.app`
+        // would route to a stale installed bundle, confusing during development.
         None => {
             let mut c = Command::new(&exe);
-            c.arg(path);
+            if let Some(p) = path {
+                c.arg(p);
+            }
             c
         }
     };
@@ -181,11 +191,14 @@ fn open_in_mdviewer(path: &str) {
 }
 
 #[cfg(target_os = "windows")]
-fn open_in_mdviewer(path: &str) {
+pub fn launch_mdviewer(path: Option<&str>) {
     use std::process::{Command, Stdio};
     if let Ok(exe) = std::env::current_exe() {
-        let _ = Command::new(exe)
-            .arg(path)
+        let mut c = Command::new(exe);
+        if let Some(p) = path {
+            c.arg(p);
+        }
+        let _ = c
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -194,7 +207,7 @@ fn open_in_mdviewer(path: &str) {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn open_in_mdviewer(_path: &str) {}
+pub fn launch_mdviewer(_path: Option<&str>) {}
 
 /// Build the command string stored in `settings.local.json` for the hook,
 /// quoting the executable path so it survives the shell Claude Code runs hooks

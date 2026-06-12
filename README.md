@@ -34,6 +34,15 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - CLI: `mdviewer [file-or-directory]`
 - **Install Command Line Tool** — one menu click symlinks `mdviewer` into `/usr/local/bin` so you can launch it from any terminal
 - **Claude Code integration** — **MDViewer ▸ Install Claude Code Hook…** adds a `PostToolUse` hook to the open project's `.claude/settings.local.json` so that plan/spec/design markdown files Claude Code writes there open automatically in MDViewer (paired with **Review Mode**, this closes the read-here / act-in-terminal loop)
+- **MCP server for Claude Code** — install with **MDViewer ▸ Install MCP
+  Server…**; Claude can then open documents in MDViewer (`open_document`),
+  check what you're reading (`get_viewer_state`), and request a review
+  (`request_review`): the document opens in Review Mode with a banner, and
+  **✓ Finish & Send** delivers your comments straight back to the waiting
+  Claude session — no clipboard step. **Decline** (or closing the tab) tells
+  Claude you're skipping it. Reviews can take as long as you need; if a
+  review runs into a client-side tool timeout, raise `MCP_TOOL_TIMEOUT` in
+  the Claude Code environment.
 - **One-click auto-update** — MDViewer checks for new releases on launch and then once an hour while it's running; when a newer release is published, a dismissible banner downloads, installs, and restarts the signed update in-app, and a **What's new** button on the banner shows that release's changelog in an in-app window before you decide
 - **Beta update channel** — opt in via **MDViewer ▸ Settings…** to receive pre-release builds as soon as they publish, and roll onto stable automatically when a final release follows
 
@@ -146,6 +155,7 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
 - **MDViewer ▸ Check for Updates…** — manually checks GitHub for a newer release (the same check also runs silently on startup). **View Source on GitHub** opens the repository.
 - **MDViewer ▸ Install Command Line Tool…** — symlinks `mdviewer` into `/usr/local/bin` so you can launch it from a terminal (prompts for your password if the directory needs admin rights).
 - **MDViewer ▸ Install Claude Code Hook…** — adds a `PostToolUse` hook to the open project's `.claude/settings.local.json` so plan/spec/design markdown files Claude Code writes there open automatically in MDViewer. Re-running updates the path in place (no duplicate). Requires a folder to be open; the personal `settings.local.json` is not committed.
+- **MDViewer ▸ Install MCP Server…** — merges the MDViewer MCP server into the open project's `.mcp.json` so Claude Code can open documents and request reviews in the viewer. Re-running updates the path in place. Requires a folder to be open.
 - **File ▸ Open File…** (⌘O) — opens any markdown file. The tree stays where it is; the file opens as a sticky tab.
 - **File ▸ Open Folder…** (⇧⌘O) — re-roots the tree at any folder.
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
