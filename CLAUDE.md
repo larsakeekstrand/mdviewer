@@ -8,7 +8,7 @@ right-click context menu, a default-app file association for markdown files,
 in-app source editing with live preview, file management from the tree, and a
 Review Mode that annotates rendered blocks and copies a structured review to the
 clipboard for pasting into an AI coding assistant, and a one-click installer for
-a Claude Code hook that auto-opens the plan/spec files Claude writes.
+a Claude Code hook that auto-opens the plan/spec files Claude writes, and an MCP server that lets Claude Code open documents in the viewer and request in-app reviews.
 
 Repo: https://github.com/larsakeekstrand/mdviewer
 

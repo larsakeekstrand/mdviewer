@@ -4,7 +4,7 @@
 //! listener/connection runtime is IO, covered by the manual smoke test.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
@@ -115,7 +115,13 @@ fn handle_connection(app: AppHandle, stream: Stream) {
     let mut reader = BufReader::new(&stream);
     loop {
         let mut line = String::new();
-        match reader.read_line(&mut line) {
+        // take(2*MAX) bounds buffering at ~2 MiB; the length check below
+        // enforces the protocol limit without off-by-one gymnastics.
+        match reader
+            .by_ref()
+            .take((MAX_REQUEST_LINE * 2) as u64)
+            .read_line(&mut line)
+        {
             Ok(0) | Err(_) => return,
             Ok(_) => {}
         }
