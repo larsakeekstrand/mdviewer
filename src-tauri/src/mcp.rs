@@ -272,6 +272,17 @@ pub fn socket_fs_path() -> Option<std::path::PathBuf> {
     }
 }
 
+/// True if `config` already declares our `mdviewer` MCP server. Tolerates
+/// missing/wrong-typed fields by returning false.
+#[allow(dead_code)]
+pub fn mcp_installed(config: &Value) -> bool {
+    config
+        .get("mcpServers")
+        .and_then(|m| m.get("mdviewer"))
+        .map(|v| !v.is_null())
+        .unwrap_or(false)
+}
+
 /// Merge our MCP server into a `.mcp.json` document. The command is the raw
 /// executable path — args are a JSON array, so no shell quoting is needed
 /// (unlike claude_hook::hook_command). Refuses (without modifying) on
@@ -770,5 +781,27 @@ mod tests {
     fn merge_refuses_wrong_types() {
         assert!(merge_mcp_config(json!([]), "/x").is_err());
         assert!(merge_mcp_config(json!({"mcpServers": "oops"}), "/x").is_err());
+    }
+
+    #[test]
+    fn mcp_installed_detects_our_server() {
+        let cfg =
+            json!({"mcpServers": {"mdviewer": {"command": "/x/mdviewer", "args": ["--mcp"]}}});
+        assert!(mcp_installed(&cfg));
+    }
+
+    #[test]
+    fn mcp_installed_false_for_absent_or_other() {
+        assert!(!mcp_installed(&json!({})));
+        assert!(!mcp_installed(&json!({"mcpServers": {}})));
+        assert!(!mcp_installed(
+            &json!({"mcpServers": {"other": {"command": "npx"}}})
+        ));
+    }
+
+    #[test]
+    fn mcp_installed_false_for_wrong_types() {
+        assert!(!mcp_installed(&json!({"mcpServers": "oops"})));
+        assert!(!mcp_installed(&json!([])));
     }
 }
