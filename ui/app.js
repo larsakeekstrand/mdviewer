@@ -3517,9 +3517,11 @@ function showUpdateAvailable(update) {
       localStorage.setItem(DISMISS_KEY, update.version);
     } catch (_) {}
     updateBanner.hidden = true;
+    maybeShowIntegrationNudge();
   };
 
   updateBanner.hidden = false;
+  maybeShowIntegrationNudge();
 }
 
 async function runUpdate(update) {
@@ -3552,6 +3554,7 @@ async function runUpdate(update) {
     updateBannerWhatsNew.onclick = () => openNotesModal(update);
     updateBannerDismiss.onclick = () => {
       updateBanner.hidden = true;
+      maybeShowIntegrationNudge();
     };
     return;
   }
