@@ -559,7 +559,10 @@ async function maybeShowIntegrationNudge() {
       return;
     }
   }
-  integrationNudge.hidden = !shouldNudge(isGitRepo, hook, mcp, dismissed);
+  // The update banner shares the same grid cell and outranks the nudge; only
+  // show the nudge when no update banner is visible.
+  const updateVisible = !updateBanner.hidden;
+  integrationNudge.hidden = updateVisible || !shouldNudge(isGitRepo, hook, mcp, dismissed);
 }
 
 function scheduleGitRefresh() {
