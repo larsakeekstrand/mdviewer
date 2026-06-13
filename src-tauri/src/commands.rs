@@ -727,6 +727,7 @@ pub fn install_cli() -> Result<InstallOutcome, String> {
 /// rather than duplicating. The target dir is the current sidebar root.
 #[tauri::command]
 pub fn install_claude_hook(
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::claude_hook::HookOutcome, String> {
     let root = current_root(&state)?;
@@ -754,6 +755,7 @@ pub fn install_claude_hook(
         .map_err(|e| format!("cannot serialize settings: {e}"))?;
     write_atomically(&settings_path, &bytes)
         .map_err(|e| format!("cannot write {}: {e}", settings_path.display()))?;
+    let _ = app.emit("integration-changed", ());
     Ok(outcome)
 }
 
@@ -762,6 +764,7 @@ pub fn install_claude_hook(
 /// mirrors install_claude_hook.
 #[tauri::command]
 pub fn install_mcp_server(
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::claude_hook::HookOutcome, String> {
     let root = current_root(&state)?;
@@ -784,6 +787,7 @@ pub fn install_mcp_server(
         serde_json::to_vec_pretty(&merged).map_err(|e| format!("cannot serialize config: {e}"))?;
     write_atomically(&config_path, &bytes)
         .map_err(|e| format!("cannot write {}: {e}", config_path.display()))?;
+    let _ = app.emit("integration-changed", ());
     Ok(outcome)
 }
 
