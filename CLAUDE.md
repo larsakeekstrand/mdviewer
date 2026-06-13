@@ -353,6 +353,16 @@ icon.svg          — source for icon regeneration
   request_review call returns through `McpPending::resolve`, which waits for
   the connection thread's socket-write ack — so "Review sent" is only shown
   when the proxy actually received it.
+- **Hook vs. MCP `open_document` (why both exist, deliberately not merged)**:
+  the hook is *passive and deterministic* — the Claude Code harness fires it on
+  every matching `Write`, so plans appear without Claude's involvement or any
+  per-session approval. `open_document` is *active and model-driven* — it opens
+  only what Claude elects to call, which is best-effort for "show the user
+  this." They overlap only on auto-open; the MCP server's unique value is
+  `request_review` + `get_viewer_state` (impossible via the hook). Keep both:
+  the hook is the zero-effort path, MCP is the active-collaboration path. If
+  the hook's filename heuristic ever feels too noisy, that's the case for
+  deprecating it in favor of `open_document` — a UX call, not redundancy.
 
 ## Platform support
 
