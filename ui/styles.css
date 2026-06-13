@@ -892,6 +892,7 @@ body {
    Hide the app chrome and let the preview flow across pages. */
 @media print {
   #update-banner,
+  #integration-nudge,
   #sidebar,
   #splitter,
   #tab-bar,

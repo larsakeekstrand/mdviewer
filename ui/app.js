@@ -37,6 +37,7 @@ import {
   reviewBusy,
   viewerState,
 } from "./mcp.js";
+import { shouldNudge } from "./integration.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -293,6 +294,20 @@ async function init() {
     await installMcpServer();
   });
 
+  integrationNudgeSetup.addEventListener("click", () => {
+    invoke("show_integration_window").catch((e) => console.error(e));
+  });
+  integrationNudgeDismiss.addEventListener("click", () => {
+    try {
+      localStorage.setItem(INTEGRATION_NUDGE_KEY, "1");
+    } catch (_) {}
+    integrationNudge.hidden = true;
+  });
+
+  await listen("integration-changed", () => {
+    maybeShowIntegrationNudge();
+  });
+
   await listen("mcp-open-document", async (ev) => {
     const { requestId, path, line } = ev.payload;
     try {
@@ -524,6 +539,30 @@ async function refreshGitStatus() {
     gitEntries = Object.create(null);
   }
   applyGitDecorations();
+  maybeShowIntegrationNudge();
+}
+
+/** Show/hide the first-run integration nudge. Cheap and idempotent: a global
+ *  localStorage dismissal or a non-git folder short-circuits before any IPC. */
+async function maybeShowIntegrationNudge() {
+  const dismissed = !!localStorage.getItem(INTEGRATION_NUDGE_KEY);
+  const isGitRepo = !!gitRepoRoot;
+  let hook = false;
+  let mcp = false;
+  if (isGitRepo && !dismissed) {
+    try {
+      const s = await invoke("integration_status");
+      hook = s.hook;
+      mcp = s.mcp;
+    } catch (e) {
+      console.debug("integration_status failed", e);
+      return;
+    }
+  }
+  // The update banner shares the same grid cell and outranks the nudge; only
+  // show the nudge when no update banner is visible.
+  const updateVisible = !updateBanner.hidden;
+  integrationNudge.hidden = updateVisible || !shouldNudge(isGitRepo, hook, mcp, dismissed);
 }
 
 function scheduleGitRefresh() {
@@ -3240,6 +3279,10 @@ document.addEventListener("keydown", (ev) => {
 
 const REPO = "larsakeekstrand/mdviewer";
 const DISMISS_KEY = "mdviewer.update.dismissed_version";
+const INTEGRATION_NUDGE_KEY = "mdviewer.integration.nudge_dismissed";
+const integrationNudge = document.getElementById("integration-nudge");
+const integrationNudgeSetup = document.getElementById("integration-nudge-setup");
+const integrationNudgeDismiss = document.getElementById("integration-nudge-dismiss");
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 /** Wrap the metadata returned by the `check_update` command into the same
  *  surface the banner already consumes. `downloadAndInstall` reuses the updater
@@ -3474,9 +3517,11 @@ function showUpdateAvailable(update) {
       localStorage.setItem(DISMISS_KEY, update.version);
     } catch (_) {}
     updateBanner.hidden = true;
+    maybeShowIntegrationNudge();
   };
 
   updateBanner.hidden = false;
+  maybeShowIntegrationNudge();
 }
 
 async function runUpdate(update) {
@@ -3509,6 +3554,7 @@ async function runUpdate(update) {
     updateBannerWhatsNew.onclick = () => openNotesModal(update);
     updateBannerDismiss.onclick = () => {
       updateBanner.hidden = true;
+      maybeShowIntegrationNudge();
     };
     return;
   }

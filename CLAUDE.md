@@ -76,6 +76,9 @@ ui/
                     for Review Mode (unit-tested); DOM wiring lives in app.js
   mcp.js          — pure helpers: reviewButtonLabel, mcpHintText, reviewBusy,
                     viewerState for the MCP review loop (unit-tested)
+  integration.js  — pure helpers: statusButtonLabel, statusLabel, shouldNudge
+                    for the Claude Code Integration window + nudge (unit-tested)
+  claude-integration.html/.js — the integration window (mirrors preferences.*)
   styles.css      — grid layout, CSS variables for light/dark, pre.mermaid
   github-markdown.css, morphdom-umd.min.js, mermaid.min.js  — vendored
   codemirror/     — vendored CodeMirror 5: codemirror.min.js + .css,
@@ -363,6 +366,23 @@ icon.svg          — source for icon regeneration
   the hook is the zero-effort path, MCP is the active-collaboration path. If
   the hook's filename heuristic ever feels too noisy, that's the case for
   deprecating it in favor of `open_document` — a UX call, not redundancy.
+- **Claude Code Integration panel**: **MDViewer ▸ Claude Code Integration…**
+  (`menu::open_integration_window`, mirrors `open_settings`) opens the
+  `claude-integration` webview window (`ui/claude-integration.*`, listed in
+  `capabilities/default.json`). It calls `integration_status` (read-only:
+  `claude_hook::hook_installed` on `.claude/settings.local.json` +
+  `mcp::mcp_installed` on `.mcp.json`, both pure/unit-tested; returns
+  `{hook, mcp, root}`) to render per-row Install/Update buttons wired to the
+  existing `install_claude_hook` / `install_mcp_server` commands. Those
+  commands now emit `integration-changed` on success (from any entry point —
+  window or the two standalone menu items), which the main window listens for
+  to re-evaluate the **first-run nudge**: a banner (reusing `.update-banner`,
+  and yielding to the update banner when both would show) gated by
+  `shouldNudge(isGitRepo, hook, mcp, dismissed)` — `gitRepoRoot` set, neither
+  installed, and the global `mdviewer.integration.nudge_dismissed` localStorage
+  flag unset. Evaluated at the tail of `refreshGitStatus` (so `gitRepoRoot` is
+  populated and it self-heals on terminal installs); **Dismiss** sets the flag
+  permanently; **Set up** invokes `show_integration_window`.
 
 ## Platform support
 
