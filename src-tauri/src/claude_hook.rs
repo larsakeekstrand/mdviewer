@@ -209,6 +209,34 @@ pub fn launch_mdviewer(path: Option<&str>) {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn launch_mdviewer(_path: Option<&str>) {}
 
+/// True if `settings` already contains our `--claude-hook` PostToolUse hook.
+/// Read-only mirror of what `merge_hook` keys on; tolerates missing/wrong-typed
+/// fields by returning false.
+#[allow(dead_code)]
+pub fn hook_installed(settings: &Value) -> bool {
+    settings
+        .get("hooks")
+        .and_then(|h| h.get("PostToolUse"))
+        .and_then(|p| p.as_array())
+        .map(|arr| {
+            arr.iter().any(|entry| {
+                entry
+                    .get("hooks")
+                    .and_then(|h| h.as_array())
+                    .map(|inner| {
+                        inner.iter().any(|hook| {
+                            hook.get("command")
+                                .and_then(|c| c.as_str())
+                                .map(|c| c.contains("--claude-hook"))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// Build the command string stored in `settings.local.json` for the hook,
 /// quoting the executable path so it survives the shell Claude Code runs hooks
 /// through. POSIX single-quoting on Unix; double-quoting on Windows (where `"`
@@ -350,5 +378,33 @@ mod tests {
             hook_command("/a/o'brien/mdviewer"),
             "'/a/o'\\''brien/mdviewer' --claude-hook"
         );
+    }
+
+    #[test]
+    fn hook_installed_detects_our_entry() {
+        let settings = json!({
+            "hooks": {"PostToolUse": [
+                {"matcher": "Write", "hooks": [{"type": "command", "command": "'/x/mdviewer' --claude-hook"}]}
+            ]}
+        });
+        assert!(hook_installed(&settings));
+    }
+
+    #[test]
+    fn hook_installed_false_for_absent_or_unrelated() {
+        assert!(!hook_installed(&json!({})));
+        assert!(!hook_installed(&json!({"hooks": {"PostToolUse": []}})));
+        let other = json!({
+            "hooks": {"PostToolUse": [
+                {"matcher": "Edit", "hooks": [{"type": "command", "command": "echo hi"}]}
+            ]}
+        });
+        assert!(!hook_installed(&other));
+    }
+
+    #[test]
+    fn hook_installed_false_for_wrong_types() {
+        assert!(!hook_installed(&json!({"hooks": {"PostToolUse": "oops"}})));
+        assert!(!hook_installed(&json!([])));
     }
 }
