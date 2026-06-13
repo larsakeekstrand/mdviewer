@@ -212,7 +212,6 @@ pub fn launch_mdviewer(_path: Option<&str>) {}
 /// True if `settings` already contains our `--claude-hook` PostToolUse hook.
 /// Read-only mirror of what `merge_hook` keys on; tolerates missing/wrong-typed
 /// fields by returning false.
-#[allow(dead_code)]
 pub fn hook_installed(settings: &Value) -> bool {
     settings
         .get("hooks")

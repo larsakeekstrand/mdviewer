@@ -274,7 +274,6 @@ pub fn socket_fs_path() -> Option<std::path::PathBuf> {
 
 /// True if `config` already declares our `mdviewer` MCP server. Tolerates
 /// missing/wrong-typed fields by returning false.
-#[allow(dead_code)]
 pub fn mcp_installed(config: &Value) -> bool {
     config
         .get("mcpServers")

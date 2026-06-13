@@ -787,6 +787,48 @@ pub fn install_mcp_server(
     Ok(outcome)
 }
 
+/// Read-only install state for the current project root, for the Claude Code
+/// Integration window and the first-run nudge. `root` is None when no folder is
+/// open. Missing/empty/unparseable config files read as not-installed.
+#[derive(Serialize)]
+pub struct IntegrationStatus {
+    pub hook: bool,
+    pub mcp: bool,
+    pub root: Option<String>,
+}
+
+#[tauri::command]
+pub fn integration_status(state: State<'_, AppState>) -> IntegrationStatus {
+    let root = state.current_root.lock().ok().and_then(|g| g.clone());
+    let Some(root) = root else {
+        return IntegrationStatus {
+            hook: false,
+            mcp: false,
+            root: None,
+        };
+    };
+    let hook = read_json_file(&root.join(".claude").join("settings.local.json"))
+        .map(|v| crate::claude_hook::hook_installed(&v))
+        .unwrap_or(false);
+    let mcp = read_json_file(&root.join(".mcp.json"))
+        .map(|v| crate::mcp::mcp_installed(&v))
+        .unwrap_or(false);
+    IntegrationStatus {
+        hook,
+        mcp,
+        root: Some(root.to_string_lossy().into_owned()),
+    }
+}
+
+/// Read + parse a JSON file, returning None for missing/empty/unparseable.
+fn read_json_file(path: &Path) -> Option<serde_json::Value> {
+    let s = std::fs::read_to_string(path).ok()?;
+    if s.trim().is_empty() {
+        return None;
+    }
+    serde_json::from_str(&s).ok()
+}
+
 /// Generic reply for a pending MCP request (open_document, get_viewer_state,
 /// and rejections like "a review is already in progress"). Only resolves ids
 /// the pending map knows — the webview can't fabricate responses.
