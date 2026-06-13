@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for mdviewer",
-  "windows": ["main", "preferences"],
+  "windows": ["main", "preferences", "claude-integration"],
   "permissions": [
     "core:default",
     "core:window:default",

@@ -37,6 +37,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "install-mcp-server" => {
                 let _ = app.emit("menu-install-mcp-server", ());
             }
+            "claude-integration" => open_integration_window(app),
             "github-source" => {
                 let _ = crate::commands::open_url(SOURCE_URL.to_string());
             }
@@ -110,6 +111,8 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         MenuItemBuilder::with_id("install-claude-hook", "Install Claude Code Hook…").build(app)?;
     let install_mcp_server =
         MenuItemBuilder::with_id("install-mcp-server", "Install MCP Server…").build(app)?;
+    let claude_integration =
+        MenuItemBuilder::with_id("claude-integration", "Claude Code Integration…").build(app)?;
     let github_source =
         MenuItemBuilder::with_id("github-source", "View Source on GitHub").build(app)?;
 
@@ -121,6 +124,7 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let app_menu_builder = app_menu_builder.item(&install_cli);
     let app_menu_builder = app_menu_builder.item(&install_claude_hook);
     let app_menu_builder = app_menu_builder.item(&install_mcp_server);
+    let app_menu_builder = app_menu_builder.item(&claude_integration);
     let app_menu = app_menu_builder
         .separator()
         .item(&settings)
@@ -234,6 +238,22 @@ fn open_settings(app: &AppHandle) {
     .title("Settings")
     .inner_size(440.0, 230.0)
     .resizable(false)
+    .build();
+}
+
+pub fn open_integration_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("claude-integration") {
+        let _ = win.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(
+        app,
+        "claude-integration",
+        WebviewUrl::App("claude-integration.html".into()),
+    )
+    .title("Claude Code Integration")
+    .inner_size(480.0, 360.0)
+    .resizable(true)
     .build();
 }
 

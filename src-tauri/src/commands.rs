@@ -1268,3 +1268,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// Open (or focus) the Claude Code Integration window. Invoked by the nudge's
+/// "Set up" button; the menu opens the same window directly.
+#[tauri::command]
+pub fn show_integration_window(app: AppHandle) {
+    crate::menu::open_integration_window(&app);
+}

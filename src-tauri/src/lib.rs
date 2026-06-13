@@ -104,6 +104,7 @@ pub fn run(startup: Startup) {
             commands::install_cli,
             commands::install_claude_hook,
             commands::install_mcp_server,
+            commands::show_integration_window,
             commands::integration_status,
             commands::mcp_respond,
             commands::mcp_review_result,
