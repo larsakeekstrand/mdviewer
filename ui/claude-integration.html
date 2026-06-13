@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Code Integration</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      body { margin: 0; padding: 20px; font-size: 13px; line-height: 1.5; }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      .project { opacity: 0.7; margin: 0 0 16px; word-break: break-all; }
+      .no-folder { opacity: 0.7; margin: 0 0 16px; }
+      .feature { margin-bottom: 16px; }
+      .feature-head {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      }
+      .feature-name { font-weight: 600; }
+      .feature-desc { opacity: 0.8; margin: 2px 0 0; }
+      .status { opacity: 0.7; margin-right: 8px; font-size: 12px; }
+      button {
+        font-size: 12px; padding: 3px 12px; border-radius: 6px;
+        border: 1px solid currentColor; background: transparent; color: inherit;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.4; cursor: default; }
+    </style>
+  </head>
+  <body>
+    <h1>Claude Code Integration</h1>
+    <div class="project" id="project" hidden></div>
+    <div class="no-folder" id="no-folder" hidden>
+      Open a folder to set up integration for a project.
+    </div>
+
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-name">Hook</span>
+        <span>
+          <span class="status" id="hook-status"></span>
+          <button id="hook-btn" type="button">Install</button>
+        </span>
+      </div>
+      <p class="feature-desc">
+        Plans, specs, and designs Claude Code writes here open automatically.
+      </p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-name">MCP server</span>
+        <span>
+          <span class="status" id="mcp-status"></span>
+          <button id="mcp-btn" type="button">Install</button>
+        </span>
+      </div>
+      <p class="feature-desc">
+        Lets Claude open documents in MDViewer and request reviews you send back inline.
+      </p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-name">Review Mode</span>
+        <span class="status">Always available</span>
+      </div>
+      <p class="feature-desc">
+        Comment on any block, then copy your review or send it straight to a waiting Claude session.
+      </p>
+    </div>
+
+    <script type="module" src="claude-integration.js"></script>
+  </body>
+</html>
