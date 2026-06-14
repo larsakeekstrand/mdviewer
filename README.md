@@ -36,13 +36,16 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Claude Code integration** — **MDViewer ▸ Install Claude Code Hook…** adds a `PostToolUse` hook to the open project's `.claude/settings.local.json` so that plan/spec/design markdown files Claude Code writes there open automatically in MDViewer (paired with **Review Mode**, this closes the read-here / act-in-terminal loop)
 - **MCP server for Claude Code** — install with **MDViewer ▸ Install MCP
   Server…**; Claude can then open documents in MDViewer (`open_document`),
-  check what you're reading (`get_viewer_state`), and request a review
-  (`request_review`): the document opens in Review Mode with a banner, and
-  **✓ Finish & Send** delivers your comments straight back to the waiting
-  Claude session — no clipboard step. **Decline** (or closing the tab) tells
-  Claude you're skipping it. Reviews can take as long as you need; if a
-  review runs into a client-side tool timeout, raise `MCP_TOOL_TIMEOUT` in
-  the Claude Code environment.
+  check what you're reading (`get_viewer_state`), request a review
+  (`request_review`), and generate a PDF (`generate_pdf`). For a review the
+  document opens in Review Mode with a banner, and **✓ Finish & Send** delivers
+  your comments straight back to the waiting Claude session — no clipboard step.
+  **Decline** (or closing the tab) tells Claude you're skipping it. Reviews can
+  take as long as you need; if a review runs into a client-side tool timeout,
+  raise `MCP_TOOL_TIMEOUT` in the Claude Code environment. `generate_pdf`
+  renders a markdown file to a PDF (faithful to the viewer, with smart page
+  breaks) and writes it inside the open folder — both the source and the
+  output must be within that folder.
 - **Claude Code Integration panel** — **MDViewer ▸ Claude Code Integration…**
   opens a window showing, for the current project, whether the hook and MCP
   server are installed, with one-click **Install**/**Update** buttons and a

@@ -102,7 +102,7 @@ fn proxy_round_trips_and_reports_eof_mid_request() {
         json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
     );
     let list = recv(&mut stdout);
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 3);
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 4);
 
     send(
         &mut stdin,

@@ -6,7 +6,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-pub const KNOWN_TOOLS: [&str; 3] = ["open_document", "request_review", "get_viewer_state"];
+pub const KNOWN_TOOLS: [&str; 4] = [
+    "open_document",
+    "request_review",
+    "get_viewer_state",
+    "generate_pdf",
+];
 
 /// What to do with one stdin line.
 #[derive(Debug, PartialEq)]
@@ -116,6 +121,18 @@ pub fn tool_defs() -> Value {
             "name": "get_viewer_state",
             "description": "Report which document the user is currently viewing in MDViewer and whether a review is in progress.",
             "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "generate_pdf",
+            "description": "Render a markdown document to a PDF file using MDViewer — faithful to the on-screen render, with smart page breaks. Writes silently into the open workspace and returns the output path. Both the source and the output must be inside the folder the user has open.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to the markdown document to render. Relative paths resolve against this MCP server's working directory (the project root)." },
+                    "output": { "type": "string", "description": "Optional destination .pdf path. Defaults to the source path with a .pdf extension (e.g. docs/spec.md -> docs/spec.pdf)." }
+                },
+                "required": ["path"]
+            }
         }
     ])
 }
@@ -194,6 +211,28 @@ pub fn markdown_path(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// `generate_pdf` output must be a `.pdf` file — guards against an `output`
+/// that would overwrite a source or land somewhere unexpected.
+pub fn pdf_path(path: &str) -> bool {
+    ext_of(path).map(|e| e == "pdf").unwrap_or(false)
+}
+
+/// Resolve `generate_pdf`'s output path: the caller's `output` when given,
+/// else the source path with its extension replaced by `.pdf` (no extension →
+/// appended). Mirrors the frontend's exportFilename, but for the full path so
+/// the PDF lands next to its source. Pure; the GUI side validates the result
+/// (`.pdf` + inside the workspace).
+pub fn pdf_output_path(source: &str, output: Option<&str>) -> String {
+    if let Some(o) = output {
+        return o.to_string();
+    }
+    let path = std::path::Path::new(source);
+    match path.extension() {
+        Some(_) => path.with_extension("pdf").to_string_lossy().into_owned(),
+        None => format!("{source}.pdf"),
+    }
+}
+
 /// The tool result text for a finished review: the review markdown, or the
 /// spec'd decline marker (a successful result, not an error, so Claude
 /// proceeds gracefully).
@@ -208,6 +247,7 @@ pub fn event_name(tool: &str) -> Option<&'static str> {
         "open_document" => Some("mcp-open-document"),
         "request_review" => Some("mcp-request-review"),
         "get_viewer_state" => Some("mcp-get-state"),
+        "generate_pdf" => Some("mcp-generate-pdf"),
         _ => None,
     }
 }
@@ -219,7 +259,7 @@ pub fn event_name(tool: &str) -> Option<&'static str> {
 /// id 1.
 pub fn event_payload(gui_id: u64, req: &GuiRequest) -> Value {
     let mut p = json!({ "requestId": gui_id });
-    for key in ["path", "line", "instructions"] {
+    for key in ["path", "line", "instructions", "output"] {
         if let Some(v) = req.args.get(key) {
             p[key] = v.clone();
         }
@@ -561,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_all_three_tools() {
+    fn tools_list_returns_all_known_tools() {
         let line = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
         match handle_message(line) {
             Dispatch::Reply(v) => {
@@ -569,14 +609,51 @@ mod tests {
                 let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
                 assert_eq!(
                     names,
-                    vec!["open_document", "request_review", "get_viewer_state"]
+                    vec![
+                        "open_document",
+                        "request_review",
+                        "get_viewer_state",
+                        "generate_pdf"
+                    ]
                 );
+                // tool_defs and KNOWN_TOOLS must not drift apart.
+                assert_eq!(names, KNOWN_TOOLS.to_vec());
                 for t in tools {
                     assert!(t["description"].as_str().unwrap().len() > 10);
                     assert_eq!(t["inputSchema"]["type"], "object");
                 }
             }
             other => panic!("expected Reply, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pdf_path_only_accepts_pdf() {
+        assert!(pdf_path("out/spec.pdf"));
+        assert!(pdf_path("SPEC.PDF"));
+        assert!(!pdf_path("spec.md"));
+        assert!(!pdf_path("spec"));
+    }
+
+    #[test]
+    fn pdf_output_path_defaults_to_source_with_pdf_ext() {
+        assert_eq!(pdf_output_path("docs/spec.md", None), "docs/spec.pdf");
+        assert_eq!(pdf_output_path("README", None), "README.pdf");
+        assert_eq!(
+            pdf_output_path("docs/spec.md", Some("out/v2.pdf")),
+            "out/v2.pdf"
+        );
+    }
+
+    #[test]
+    fn generate_pdf_is_forwarded_with_output_arg() {
+        let line = r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"generate_pdf","arguments":{"path":"docs/spec.md","output":"out/spec.pdf"}}}"#;
+        match handle_message(line) {
+            Dispatch::Call { tool, args, .. } => {
+                assert_eq!(tool, "generate_pdf");
+                assert_eq!(args["output"], "out/spec.pdf");
+            }
+            other => panic!("expected Call, got {other:?}"),
         }
     }
 

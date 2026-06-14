@@ -345,13 +345,22 @@ icon.svg          — source for icon regeneration
   + Decline), toolbar reads **✓ Finish & Send**, and `finishReview` routes the
   `formatReview` markdown to `mcp_review_result` instead of the clipboard
   (proxy dead → clipboard fallback toast; decline/tab-close →
-  `{"declined": true}`, a success so Claude proceeds). The proxy emits
+  `{"declined": true}`, a success so Claude proceeds); and blocking
+  `generate_pdf(path, output?)` → opens the doc, runs the frontend
+  `exportDocument('pdf', output)` (same faithful render + smart page breaks as
+  the menu export), returns the written path. The proxy emits
   `notifications/progress` every 10 s to hold client timeouts open and exits
   when stdin or stdout closes. Validation is GUI-side (`mcp_server::validate`):
-  extension allowlist (markdown+images; markdown only for reviews) +
-  existence; the proxy absolutizes relative paths against its cwd (= Claude's
+  extension allowlist (markdown+images; markdown only for reviews;
+  markdown-in/`.pdf`-out for `generate_pdf`) + existence. `generate_pdf` also
+  confines **both** source and output to the open workspace (`fs_ops::within_root`,
+  needs a folder open) since it writes a file, and the resolved output
+  (`mcp::pdf_output_path`, default = source with `.pdf`) is computed GUI-side
+  and sent in the event so the frontend never recomputes it. The proxy
+  absolutizes relative paths against its cwd (= Claude's
   project root). One review at a time (`reviewBusy` + a post-await re-check —
-  the review tab is resolved by path, not focus). Stale socket on startup:
+  the review tab is resolved by path, not focus); `generate_pdf` is likewise
+  gated on `exportInProgress`/`reviewBusy`. Stale socket on startup:
   probe, back off if a live instance answers, else reclaim. The blocking
   request_review call returns through `McpPending::resolve`, which waits for
   the connection thread's socket-write ack — so "Review sent" is only shown
