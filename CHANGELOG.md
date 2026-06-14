@@ -3,6 +3,22 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.19.0] - 2026-06-14
+
+Better PDFs, and PDF generation from Claude Code.
+
+- **PDF export now matches what you see.** Backgrounds and colors (code blocks,
+  table striping, blockquotes, Mermaid diagram fills) print as they appear on
+  screen instead of dropping out, and Mermaid diagram labels render correctly.
+- **Smarter page breaks.** Headings stay attached to the content that follows
+  them, code blocks / tables / images / diagrams / math are never split across a
+  page, paragraphs don't strand a single line, and a table too wide for the page
+  is scaled down to fit whole rather than clipping off the right edge.
+- **Generate PDFs from Claude Code.** The MCP server gained a `generate_pdf`
+  tool, so Claude can render a Markdown file in your project to a PDF (with all
+  the fidelity above). The PDF is written inside the open folder.
+- HTML export now embeds Mermaid diagrams in a print-safe form too.
+
 ## [1.18.0] - 2026-06-10
 
 Reviewing AI-generated documents — and always knowing which file you're on.
