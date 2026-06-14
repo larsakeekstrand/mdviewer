@@ -370,6 +370,39 @@ async function init() {
     }).catch(() => {});
   });
 
+  await listen("mcp-generate-pdf", async (ev) => {
+    // `output` is the GUI-validated destination (inside the workspace, .pdf).
+    const { requestId, path, output } = ev.payload;
+    if (exportInProgress || reviewBusy(tabs)) {
+      await invoke("mcp_respond", {
+        requestId,
+        text: "an export or review is already in progress",
+        isError: true,
+      }).catch(() => {});
+      return;
+    }
+    try {
+      await openSticky(path);
+    } catch (e) {
+      await invoke("mcp_respond", { requestId, text: String(e), isError: true }).catch(() => {});
+      return;
+    }
+    // Export operates on the active tab; resolve by path and re-activate in
+    // case focus changed during the await.
+    const idx = findTab(path);
+    if (idx === -1) {
+      await invoke("mcp_respond", { requestId, text: "could not open the document", isError: true }).catch(() => {});
+      return;
+    }
+    if (idx !== activeIdx) await setActiveTab(idx);
+    const ok = await exportDocument("pdf", output);
+    await invoke("mcp_respond", {
+      requestId,
+      text: ok ? `Wrote PDF to ${output}` : "PDF export failed",
+      isError: !ok,
+    }).catch(() => {});
+  });
+
   window
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", async () => {
@@ -1889,6 +1922,7 @@ async function exportDocument(format, path) {
   const prevScroll = previewScroll.scrollTop;
   let fittedTables = [];
   let headingWraps = [];
+  let succeeded = false;
   try {
     currentTheme = "light";
     document.documentElement.dataset.theme = "light";
@@ -1896,6 +1930,11 @@ async function exportDocument(format, path) {
     t.reviewMode = false;
     initMermaid();
     await renderActive({ scrollLock: false, forceMermaid: true });
+
+    // Re-render Mermaid with the export-safe config (no <foreignObject> labels,
+    // which WebKit can't rasterize for the PDF print pipeline and which break
+    // when an exported .html is later printed). Applies to BOTH formats.
+    await swapMermaidForPrint();
 
     // Files outside the opened workspace must not be embedded (HTML) or
     // rendered (PDF). Use the tree root as the boundary, falling back to the
@@ -1909,9 +1948,6 @@ async function exportDocument(format, path) {
       // applies during capture. Strip out-of-workspace images from the live
       // preview first; the finally block's re-render restores them.
       await neutralizeOutsideWorkspaceImages(preview, boundary);
-      // Re-render Mermaid with the print-safe config (no <foreignObject>
-      // labels, which WebKit can't rasterize in the print pipeline).
-      await swapMermaidForPrint();
       // Shrink any table too wide for the page so it fits whole instead of
       // clipping, and keep headings attached to their following block. Both are
       // undone in the finally block.
@@ -1919,6 +1955,7 @@ async function exportDocument(format, path) {
       headingWraps = keepHeadingsWithNext();
       await invoke("export_pdf", { path });
     }
+    succeeded = true;
   } catch (e) {
     console.error("export failed", e);
     showTransientError("Export failed: " + e);
@@ -1940,6 +1977,7 @@ async function exportDocument(format, path) {
     }
     previewScroll.scrollTop = prevScroll;
   }
+  return succeeded;
 }
 
 /** Serialize the (already light-rendered) preview into one standalone HTML file

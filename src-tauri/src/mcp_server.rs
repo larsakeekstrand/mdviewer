@@ -196,12 +196,26 @@ fn prepare_request(
     if !app.state::<crate::AppState>().opens.lock().unwrap().ready {
         return Err(mcp::STARTING_ERR.to_string());
     }
-    validate(req)?;
+    let root = app
+        .state::<crate::AppState>()
+        .current_root
+        .lock()
+        .unwrap()
+        .clone();
+    validate(req, root.as_deref())?;
     let event = mcp::event_name(&req.tool).ok_or_else(|| format!("unknown tool '{}'", req.tool))?;
 
     let pending = app.state::<McpPending>();
     let (gui_id, rx) = pending.register();
-    if app.emit(event, mcp::event_payload(gui_id, req)).is_err() {
+    let mut payload = mcp::event_payload(gui_id, req);
+    if req.tool == "generate_pdf" {
+        // Send the resolved output path the GUI side validated, so the frontend
+        // never recomputes the default and can't drift from the boundary check.
+        let source = req.args.get("path").and_then(Value::as_str).unwrap_or("");
+        let out = req.args.get("output").and_then(Value::as_str);
+        payload["output"] = serde_json::json!(mcp::pdf_output_path(source, out));
+    }
+    if app.emit(event, payload).is_err() {
         pending.forget(gui_id);
         return Err("cannot reach the MDViewer window".to_string());
     }
@@ -213,7 +227,7 @@ fn prepare_request(
     Ok(rx)
 }
 
-fn validate(req: &GuiRequest) -> Result<(), String> {
+fn validate(req: &GuiRequest, root: Option<&std::path::Path>) -> Result<(), String> {
     let path = || -> Result<&str, String> {
         req.args
             .get("path")
@@ -238,6 +252,34 @@ fn validate(req: &GuiRequest) -> Result<(), String> {
             }
             if !std::path::Path::new(p).is_file() {
                 return Err(format!("file not found: {p}"));
+            }
+            Ok(())
+        }
+        "generate_pdf" => {
+            let p = path()?;
+            if !mcp::markdown_path(p) {
+                return Err(format!("'{p}' is not a markdown file"));
+            }
+            if !std::path::Path::new(p).is_file() {
+                return Err(format!("file not found: {p}"));
+            }
+            let out = mcp::pdf_output_path(p, req.args.get("output").and_then(Value::as_str));
+            if !mcp::pdf_path(&out) {
+                return Err(format!("output must be a .pdf file: {out}"));
+            }
+            // generate_pdf writes a file, so confine both source and output to
+            // the open folder. No folder open → nothing to confine against, so
+            // refuse rather than write somewhere arbitrary.
+            let Some(root) = root else {
+                return Err(
+                    "no folder is open in MDViewer; generate_pdf needs a workspace".to_string(),
+                );
+            };
+            if !crate::fs_ops::within_root(std::path::Path::new(p), root) {
+                return Err(format!("source is outside the open workspace: {p}"));
+            }
+            if !crate::fs_ops::within_root(std::path::Path::new(&out), root) {
+                return Err(format!("output is outside the open workspace: {out}"));
             }
             Ok(())
         }
