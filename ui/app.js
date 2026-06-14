@@ -1887,6 +1887,8 @@ async function exportDocument(format, path) {
   const prevRaw = t.raw;
   const prevReviewMode = t.reviewMode;
   const prevScroll = previewScroll.scrollTop;
+  let fittedTables = [];
+  let headingWraps = [];
   try {
     currentTheme = "light";
     document.documentElement.dataset.theme = "light";
@@ -1903,10 +1905,18 @@ async function exportDocument(format, path) {
       await exportHtml(t, path, boundary);
     } else if (format === "pdf") {
       // The native print uses WebKit's print pipeline, so the @media print
-      // stylesheet (chrome hidden, preview reflowed) applies during capture.
-      // Strip out-of-workspace images from the live preview first; the finally
-      // block's re-render restores them.
+      // stylesheet (chrome hidden, preview reflowed, backgrounds forced on)
+      // applies during capture. Strip out-of-workspace images from the live
+      // preview first; the finally block's re-render restores them.
       await neutralizeOutsideWorkspaceImages(preview, boundary);
+      // Re-render Mermaid with the print-safe config (no <foreignObject>
+      // labels, which WebKit can't rasterize in the print pipeline).
+      await swapMermaidForPrint();
+      // Shrink any table too wide for the page so it fits whole instead of
+      // clipping, and keep headings attached to their following block. Both are
+      // undone in the finally block.
+      fittedTables = fitWideTablesForPrint();
+      headingWraps = keepHeadingsWithNext();
       await invoke("export_pdf", { path });
     }
   } catch (e) {
@@ -1916,6 +1926,8 @@ async function exportDocument(format, path) {
     // Clear the lock first so a throw while restoring the view can't leave
     // export permanently disabled for the session.
     exportInProgress = false;
+    unwrapForPrint(headingWraps);
+    unfitWideTables(fittedTables);
     currentTheme = prevTheme;
     document.documentElement.dataset.theme = prevDataTheme;
     t.raw = prevRaw;
@@ -2081,6 +2093,133 @@ async function renderMermaidForExport(src) {
     // Restore the on-screen config so subsequent live-reload renders keep
     // the user's current theme.
     initMermaid();
+  }
+}
+
+// Printable width available to the markdown body when shrinking wide tables to
+// fit the PDF page. WKWebView's print pipeline ignores both the CSS `@page`
+// margin and programmatic NSPrintInfo margins, falling back to its built-in
+// ~1-inch (25.4mm) default — so size to that worst case: A4 (210mm) − 2×25.4mm
+// = 159.2mm ≈ 602px at 96dpi, minus the .markdown-body horizontal padding
+// (2×48px, styles.css), minus an 8px safety buffer. Larger paper (Letter) or
+// smaller margins only leave MORE room, so a table that fits this never clips;
+// it may just sit a little narrow.
+const PRINT_CONTENT_WIDTH_PX = Math.round(((210 - 2 * 25.4) * 96) / 25.4) - 2 * 48 - 8;
+
+/** Shrink each table wider than the printable page so it fits whole instead of
+ *  clipping at the right margin — scaling the table as a unit (font and all),
+ *  not the rest of the document. Uses `transform: scale()`, NOT `zoom`: WebKit's
+ *  print pipeline ignores `zoom` but honors transforms. The table is sized to
+ *  its full natural (max-content) width so it scales down un-wrapped, and is
+ *  wrapped in a fixed-height `overflow:hidden` div so the layout reserves the
+ *  scaled height and clips the now-empty original box. Returns the wrappers so
+ *  the caller can unwrap and restore afterward. */
+function fitWideTablesForPrint() {
+  const fitted = [];
+  for (const table of preview.querySelectorAll("table")) {
+    // Lay the table out at its full natural width (independent of the current
+    // window, which is wider than the page) and measure it.
+    table.style.width = "max-content";
+    table.style.maxWidth = "none";
+    const rect = table.getBoundingClientRect();
+    if (rect.width <= PRINT_CONTENT_WIDTH_PX + 1) {
+      table.style.width = "";
+      table.style.maxWidth = "";
+      continue;
+    }
+    const scale = PRINT_CONTENT_WIDTH_PX / rect.width;
+    const wrap = document.createElement("div");
+    wrap.style.position = "relative";
+    wrap.style.width = `${PRINT_CONTENT_WIDTH_PX}px`;
+    wrap.style.height = `${Math.ceil(rect.height * scale)}px`;
+    wrap.style.overflow = "hidden";
+    table.parentNode.insertBefore(wrap, table);
+    wrap.appendChild(table);
+    // Take the natural-width table out of flow so its box can't influence page
+    // pagination; the wrapper's explicit width is the hard clip boundary.
+    table.style.position = "absolute";
+    table.style.top = "0";
+    table.style.left = "0";
+    table.style.transform = `scale(${scale})`;
+    table.style.transformOrigin = "top left";
+    fitted.push({ wrap, table });
+  }
+  return fitted;
+}
+
+/** Keep each heading glued to the block that follows it. WKWebView's print
+ *  pipeline ignores `break-after: avoid` (keep-with-next), so instead wrap each
+ *  top-level heading together with its next non-heading block in a
+ *  `break-inside: avoid` div — break-inside IS honored, so the pair can't split
+ *  across a page and the heading is pushed onto the next page with its content
+ *  rather than stranded at the foot of one. A heading immediately followed by
+ *  another heading is wrapped alone (the lower heading pairs with its own
+ *  content). Returns the wrappers for the caller to unwind. */
+function keepHeadingsWithNext() {
+  const wrapped = [];
+  const isHeading = (el) => el && /^H[1-6]$/.test(el.tagName);
+  for (const h of [...preview.children]) {
+    if (!isHeading(h)) continue;
+    const next = h.nextElementSibling;
+    const wrap = document.createElement("div");
+    wrap.style.breakInside = "avoid";
+    preview.insertBefore(wrap, h);
+    wrap.appendChild(h);
+    if (next && !isHeading(next)) wrap.appendChild(next);
+    wrapped.push(wrap);
+  }
+  return wrapped;
+}
+
+/** Undo a set of export-time wrapper divs: move their children back into place
+ *  and remove the wrappers. */
+function unwrapForPrint(wrappers) {
+  for (const wrap of wrappers) {
+    const parent = wrap.parentNode;
+    if (!parent) continue;
+    while (wrap.firstChild) parent.insertBefore(wrap.firstChild, wrap);
+    wrap.remove();
+  }
+}
+
+/** Undo fitWideTablesForPrint: strip the inline sizing/transform and move each
+ *  table back out of its wrapper. (The finally block's full re-render would
+ *  reconcile this away too, but unwinding explicitly keeps the DOM clean.) */
+function unfitWideTables(fitted) {
+  for (const { wrap, table } of fitted) {
+    table.style.transform = "";
+    table.style.transformOrigin = "";
+    table.style.position = "";
+    table.style.top = "";
+    table.style.left = "";
+    table.style.width = "";
+    table.style.maxWidth = "";
+    if (wrap.parentNode) {
+      wrap.parentNode.insertBefore(table, wrap);
+      wrap.remove();
+    }
+  }
+}
+
+/** Replace every successfully-rendered on-screen Mermaid diagram in the live
+ *  preview with an export-config render (light theme, htmlLabels:false → plain
+ *  <text> labels). The on-screen config uses <foreignObject> labels, which
+ *  WebKit's print pipeline can't rasterize — so without this swap, diagram
+ *  labels print blank. Reuses setSvg so the inserted SVG stays inert. The
+ *  export's finally block re-renders the live diagrams, restoring the user's
+ *  theme. Failed/errored blocks are left untouched. */
+async function swapMermaidForPrint() {
+  for (const el of preview.querySelectorAll("pre.mermaid")) {
+    if (el.dataset.mvState !== "ok") continue;
+    const src = el.dataset.mermaidSrc;
+    if (!src) continue;
+    try {
+      const svg = await renderMermaidForExport(src);
+      setSvg(el, svg);
+    } catch {
+      // Keep the on-screen diagram if the export render fails — better a
+      // theme-mismatched diagram than a blank one.
+    }
   }
 }
 
