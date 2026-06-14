@@ -5,8 +5,21 @@ matching the tag into the GitHub release page and the in-app "What's new" modal.
 
 ## [1.19.0] - 2026-06-14
 
-Better PDFs, and PDF generation from Claude Code.
+Claude Code integration, and much better PDFs.
 
+- **MCP server for Claude Code.** Install with **MDViewer ▸ Install MCP
+  Server…**. Claude Code can then open documents in the viewer, see what you're
+  currently reading, and ask you for an in-app review — you comment on blocks
+  and click **✓ Finish & Send** to deliver the review straight back to the
+  waiting Claude session, no clipboard step. **Decline** (or closing the tab)
+  tells Claude you're skipping it.
+- **Generate PDFs from Claude Code.** The MCP server can also render a Markdown
+  file in your project to a PDF (with all the fidelity below), written inside
+  the open folder.
+- **Claude Code Integration panel.** **MDViewer ▸ Claude Code Integration…**
+  shows, for the current project, whether the auto-open hook and the MCP server
+  are installed, each with a one-click Install/Update button. A first-run banner
+  points you to it when neither is set up yet.
 - **PDF export now matches what you see.** Backgrounds and colors (code blocks,
   table striping, blockquotes, Mermaid diagram fills) print as they appear on
   screen instead of dropping out, and Mermaid diagram labels render correctly.
@@ -14,9 +27,6 @@ Better PDFs, and PDF generation from Claude Code.
   them, code blocks / tables / images / diagrams / math are never split across a
   page, paragraphs don't strand a single line, and a table too wide for the page
   is scaled down to fit whole rather than clipping off the right edge.
-- **Generate PDFs from Claude Code.** The MCP server gained a `generate_pdf`
-  tool, so Claude can render a Markdown file in your project to a PDF (with all
-  the fidelity above). The PDF is written inside the open folder.
 - HTML export now embeds Mermaid diagrams in a print-safe form too.
 
 ## [1.18.0] - 2026-06-10
