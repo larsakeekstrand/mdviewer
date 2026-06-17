@@ -21,9 +21,8 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "export-html" => {
                 let _ = app.emit("export", "html");
             }
-            "export-pdf" => {
-                let _ = app.emit("export", "pdf");
-            }
+            #[cfg(target_os = "macos")]
+            "export-pdf" => open_pdf_export_window(app),
             "check-updates" => {
                 let _ = app.emit("menu-check-updates", ());
             }
@@ -242,6 +241,20 @@ fn open_settings(app: &AppHandle) {
     .inner_size(440.0, 230.0)
     .resizable(false)
     .build();
+}
+
+#[cfg(target_os = "macos")]
+pub fn open_pdf_export_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("pdf-export") {
+        let _ = win.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "pdf-export", WebviewUrl::App("pdf-export.html".into()))
+        .title("Export to PDF")
+        .inner_size(900.0, 680.0)
+        .min_inner_size(720.0, 480.0)
+        .resizable(true)
+        .build();
 }
 
 pub fn open_integration_window(app: &AppHandle) {
