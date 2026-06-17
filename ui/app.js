@@ -43,6 +43,7 @@ import {
   marginMm,
   paperMm,
   defaultSettings,
+  mergeSettings,
 } from "./pdf-presets.js";
 
 // mdviewer frontend
@@ -401,7 +402,7 @@ async function init() {
       return;
     }
     if (idx !== activeIdx) await setActiveTab(idx);
-    const ok = await exportDocument("pdf", output);
+    const ok = await exportDocument("pdf", output, await savedPdfSettings());
     await invoke("mcp_respond", {
       requestId,
       text: ok ? `Wrote PDF to ${output}` : "PDF export failed",
@@ -1955,6 +1956,15 @@ body { margin: 0; background: #ffffff; }
 `;
 
 /** Menu entry point: pick a destination, then export. */
+async function savedPdfSettings() {
+  try {
+    return mergeSettings(defaultSettings(), await invoke("get_pdf_settings"));
+  } catch (e) {
+    console.error("get_pdf_settings failed", e);
+    return defaultSettings();
+  }
+}
+
 async function onExport(format) {
   const t = activeTab();
   if (!t) {
@@ -1975,7 +1985,8 @@ async function onExport(format) {
     filters,
   });
   if (!path) return;
-  await exportDocument(format, path);
+  const settings = await savedPdfSettings();
+  await exportDocument(format, path, settings);
 }
 
 /** Snapshot the live view state so a light export re-render can be undone. */
