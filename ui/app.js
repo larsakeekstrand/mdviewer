@@ -422,22 +422,24 @@ async function init() {
       await emit("pdf-export-done", { ok: false, error: "an export is already in progress" });
       return;
     }
-    // exportDocument snapshots the same global view state servePreview uses;
-    // an export must not overlap an in-flight live-preview render or the main
-    // window can be stranded in the forced light theme. Previews are
-    // sub-second, so wait briefly rather than dropping the user's click.
-    for (let i = 0; i < 50 && previewRendering; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    if (previewRendering) {
-      await emit("pdf-export-done", { ok: false, error: "a preview render is still in progress" });
-      return;
-    }
+    // Compute dest before the previewRendering guard so no await sits between
+    // the guard's exit and exportDocument setting exportInProgress = true.
     let dest = path;
     try {
       if (mode === "exact") {
         const dir = await window.__TAURI__.path.tempDir();
         dest = await window.__TAURI__.path.join(dir, `mdviewer-pdf-preview-${Date.now()}.pdf`);
+      }
+      // exportDocument snapshots the same global view state servePreview uses;
+      // an export must not overlap an in-flight live-preview render or the main
+      // window can be stranded in the forced light theme. Previews are
+      // sub-second, so wait briefly rather than dropping the user's click.
+      for (let i = 0; i < 50 && previewRendering; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (previewRendering) {
+        await emit("pdf-export-done", { ok: false, error: "a preview render is still in progress" });
+        return;
       }
       const ok = await exportDocument("pdf", dest, settings);
       if (ok && mode === "save") {
