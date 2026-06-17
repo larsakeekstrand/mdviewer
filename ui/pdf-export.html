@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Export to PDF</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="pdf-export.css" />
+  </head>
+  <body class="pdf-export-window">
+    <div class="pdf-export-layout">
+      <aside class="pdf-controls">
+        <h2>Export to PDF</h2>
+
+        <label>Preset
+          <select id="preset"></select>
+        </label>
+
+        <label>Base font size <span id="size-val"></span>
+          <input id="base-size" type="range" min="9" max="16" step="0.5" />
+        </label>
+
+        <label>Paper size
+          <select id="paper">
+            <option value="a4">A4</option>
+            <option value="letter">Letter</option>
+            <option value="legal">Legal</option>
+          </select>
+        </label>
+
+        <label>Margins
+          <select id="margins">
+            <option value="narrow">Narrow</option>
+            <option value="normal">Normal</option>
+            <option value="wide">Wide</option>
+          </select>
+        </label>
+
+        <label>Page numbers
+          <select id="page-numbers">
+            <option value="none">None</option>
+            <option value="bottom-center">Bottom center</option>
+            <option value="bottom-right">Bottom right</option>
+          </select>
+        </label>
+
+        <div class="pdf-actions">
+          <button id="reset" type="button">Reset to preset</button>
+          <button id="export" type="button" class="primary">Export…</button>
+        </div>
+        <p id="status" class="pdf-status" role="status"></p>
+      </aside>
+
+      <main class="pdf-preview-pane">
+        <div class="pdf-preview-tabs">
+          <button id="tab-live" type="button" class="active">Live preview</button>
+          <button id="tab-exact" type="button">Exact PDF</button>
+        </div>
+        <iframe id="live-preview" title="Live preview"></iframe>
+        <iframe id="exact-preview" title="Exact PDF preview" hidden></iframe>
+      </main>
+    </div>
+    <script type="module" src="pdf-export.js"></script>
+  </body>
+</html>

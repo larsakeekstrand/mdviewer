@@ -1,0 +1,14 @@
+/* Reset the main-app body grid (styles.css makes `body` a grid); this window
+   uses its own .pdf-export-layout grid and needs the full window width. */
+.pdf-export-window { display: block; margin: 0; height: 100vh; overflow: hidden; }
+.pdf-export-layout { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.pdf-preview-pane { min-width: 0; }
+.pdf-controls { padding: 16px; border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+.pdf-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.pdf-actions { margin-top: auto; display: flex; gap: 8px; }
+.pdf-actions .primary { font-weight: 600; }
+.pdf-status { font-size: 12px; min-height: 1.2em; color: var(--fg); }
+.pdf-preview-pane { display: flex; flex-direction: column; background: #777; }
+.pdf-preview-tabs { display: flex; gap: 4px; padding: 6px; }
+.pdf-preview-tabs button.active { font-weight: 600; }
+.pdf-preview-pane iframe { flex: 1; width: 100%; border: 0; background: #fff; }

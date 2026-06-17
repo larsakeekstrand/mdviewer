@@ -38,12 +38,19 @@ import {
   viewerState,
 } from "./mcp.js";
 import { shouldNudge } from "./integration.js";
+import {
+  settingsToCss,
+  marginMm,
+  paperMm,
+  defaultSettings,
+  mergeSettings,
+} from "./pdf-presets.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+const { listen, emit } = window.__TAURI__.event;
 const dialogApi = window.__TAURI__.dialog;
 
 let IS_MAC = false;
@@ -395,12 +402,55 @@ async function init() {
       return;
     }
     if (idx !== activeIdx) await setActiveTab(idx);
-    const ok = await exportDocument("pdf", output);
+    const ok = await exportDocument("pdf", output, await savedPdfSettings());
     await invoke("mcp_respond", {
       requestId,
       text: ok ? `Wrote PDF to ${output}` : "PDF export failed",
       isError: !ok,
     }).catch(() => {});
+  });
+
+  await listen("pdf-export-request-preview", (ev) => {
+    const t = activeTab();
+    if (t) emit("pdf-export-active-name", { name: exportFilename(t.path, "pdf") }).catch(() => {});
+    pendingPreviewSettings = ev.payload.settings;
+    servePreview();
+  });
+
+  await listen("pdf-export-run", async (ev) => {
+    const { settings, mode, path } = ev.payload;
+    if (exportInProgress) {
+      await emit("pdf-export-done", { ok: false, error: "an export is already in progress" });
+      return;
+    }
+    // Compute dest before the previewRendering guard so no await sits between
+    // the guard's exit and exportDocument setting exportInProgress = true.
+    let dest = path;
+    try {
+      if (mode === "exact") {
+        const dir = await window.__TAURI__.path.tempDir();
+        dest = await window.__TAURI__.path.join(dir, "mdviewer-pdf-preview.pdf");
+      }
+      // exportDocument snapshots the same global view state servePreview uses;
+      // an export must not overlap an in-flight live-preview render or the main
+      // window can be stranded in the forced light theme. Previews are
+      // sub-second, so wait briefly rather than dropping the user's click.
+      for (let i = 0; i < 50 && previewRendering; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (previewRendering) {
+        await emit("pdf-export-done", { ok: false, error: "a preview render is still in progress" });
+        return;
+      }
+      const ok = await exportDocument("pdf", dest, settings);
+      if (ok && mode === "save") {
+        await invoke("save_pdf_settings", { settings }).catch(() => {});
+      }
+      const url = ok && mode === "exact" ? convertFileSrc(dest) + "?v=" + Date.now() : undefined;
+      await emit("pdf-export-done", { ok, url, error: ok ? undefined : "PDF export failed" });
+    } catch (e) {
+      await emit("pdf-export-done", { ok: false, error: String(e) });
+    }
   });
 
   window
@@ -1876,6 +1926,28 @@ function showTransientMessage(msg) {
 /* ---- Document export ---- */
 
 let exportInProgress = false;
+let previewRendering = false;
+let pendingPreviewSettings = null;
+
+async function servePreview() {
+  if (previewRendering) return;
+  previewRendering = true;
+  try {
+    while (pendingPreviewSettings && !exportInProgress) {
+      const s = pendingPreviewSettings;
+      pendingPreviewSettings = null;
+      try {
+        const html = await renderExportPreviewHtml(s);
+        await emit("pdf-export-preview-html", { html });
+      } catch (e) {
+        console.error("preview build failed", e);
+        await emit("pdf-export-preview-html", { html: "", error: String(e) });
+      }
+    }
+  } finally {
+    previewRendering = false;
+  }
+}
 
 const EXPORT_PAGE_CSS = `
 html { color-scheme: light; }
@@ -1884,6 +1956,15 @@ body { margin: 0; background: #ffffff; }
 `;
 
 /** Menu entry point: pick a destination, then export. */
+async function savedPdfSettings() {
+  try {
+    return mergeSettings(defaultSettings(), await invoke("get_pdf_settings"));
+  } catch (e) {
+    console.error("get_pdf_settings failed", e);
+    return defaultSettings();
+  }
+}
+
 async function onExport(format) {
   const t = activeTab();
   if (!t) {
@@ -1904,44 +1985,82 @@ async function onExport(format) {
     filters,
   });
   if (!path) return;
-  await exportDocument(format, path);
+  const settings = await savedPdfSettings();
+  await exportDocument(format, path, settings);
+}
+
+/** Snapshot the live view state so a light export re-render can be undone. */
+function snapshotViewState(t) {
+  return {
+    theme: currentTheme,
+    dataTheme: document.documentElement.dataset.theme,
+    raw: t.raw,
+    reviewMode: t.reviewMode,
+    scroll: previewScroll.scrollTop,
+  };
+}
+
+/** Force a faithful light, raw-off, review-off render through the real
+ *  renderActive pipeline (so math/Mermaid/code come out light and correct). */
+async function beginLightRender(t) {
+  currentTheme = "light";
+  document.documentElement.dataset.theme = "light";
+  t.raw = false;
+  t.reviewMode = false;
+  initMermaid();
+  await renderActive({ scrollLock: false, forceMermaid: true });
+}
+
+/** Restore the view captured by snapshotViewState and re-render the live tab. */
+async function restoreViewState(t, snap) {
+  currentTheme = snap.theme;
+  document.documentElement.dataset.theme = snap.dataTheme;
+  t.raw = snap.raw;
+  t.reviewMode = snap.reviewMode;
+  initMermaid();
+  if (t.editing) {
+    await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
+  } else {
+    await renderActive({ scrollLock: false, forceMermaid: true });
+  }
+  previewScroll.scrollTop = snap.scroll;
 }
 
 /** Snapshot view state, force a light rendered view, run the format-specific
  *  export, then restore. The light re-render reuses the real renderActive
  *  pipeline so math/Mermaid/code come out light and faithful. */
-async function exportDocument(format, path) {
-  if (exportInProgress) return;
+async function exportDocument(format, path, settings) {
+  if (exportInProgress) return false;
   const t = activeTab();
-  if (!t) return;
+  if (!t) return false;
+  settings = settings || defaultSettings();
   exportInProgress = true;
-  const prevTheme = currentTheme;
-  const prevDataTheme = document.documentElement.dataset.theme;
-  const prevRaw = t.raw;
-  const prevReviewMode = t.reviewMode;
-  const prevScroll = previewScroll.scrollTop;
+  const snap = snapshotViewState(t);
   let fittedTables = [];
   let headingWraps = [];
+  let styleEl = null;
   let succeeded = false;
   try {
-    currentTheme = "light";
-    document.documentElement.dataset.theme = "light";
-    t.raw = false;
-    t.reviewMode = false;
-    initMermaid();
-    await renderActive({ scrollLock: false, forceMermaid: true });
+    await beginLightRender(t);
 
     // Re-render Mermaid with the export-safe config (no <foreignObject> labels,
     // which WebKit can't rasterize for the PDF print pipeline and which break
     // when an exported .html is later printed). Applies to BOTH formats.
     await swapMermaidForPrint();
 
+    // Apply the preset's typography/accent/left-right margins to the live
+    // #preview during capture; removed in the finally block.
+    styleEl = document.createElement("style");
+    styleEl.id = "pdf-export-style";
+    styleEl.textContent = settingsToCss(settings);
+    document.head.appendChild(styleEl);
+
     // Files outside the opened workspace must not be embedded (HTML) or
     // rendered (PDF). Use the tree root as the boundary, falling back to the
     // document's own directory when no folder is open.
     const boundary = treeRoot || parentDir(t.path);
     if (format === "html") {
-      await exportHtml(t, path, boundary);
+      await exportHtml(t, path, boundary, settings);
     } else if (format === "pdf") {
       // The native print uses WebKit's print pipeline, so the @media print
       // stylesheet (chrome hidden, preview reflowed, backgrounds forced on)
@@ -1953,7 +2072,12 @@ async function exportDocument(format, path) {
       // undone in the finally block.
       fittedTables = fitWideTablesForPrint();
       headingWraps = keepHeadingsWithNext();
-      await invoke("export_pdf", { path });
+      await invoke("export_pdf", {
+        path,
+        paper: settings.paper,
+        margins: marginMm(settings.margins),
+        pageNumbers: settings.pageNumbers,
+      });
     }
     succeeded = true;
   } catch (e) {
@@ -1963,26 +2087,67 @@ async function exportDocument(format, path) {
     // Clear the lock first so a throw while restoring the view can't leave
     // export permanently disabled for the session.
     exportInProgress = false;
+    if (styleEl) styleEl.remove();
     unwrapForPrint(headingWraps);
     unfitWideTables(fittedTables);
-    currentTheme = prevTheme;
-    document.documentElement.dataset.theme = prevDataTheme;
-    t.raw = prevRaw;
-    t.reviewMode = prevReviewMode;
-    initMermaid();
-    if (t.editing) {
-      await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
-    } else {
-      await renderActive({ scrollLock: false, forceMermaid: true });
-    }
-    previewScroll.scrollTop = prevScroll;
+    await restoreViewState(t, snap);
   }
   return succeeded;
 }
 
-/** Serialize the (already light-rendered) preview into one standalone HTML file
- *  and write it via the save_export command. */
-async function exportHtml(t, path, boundary) {
+/** Build the standalone export HTML for the active tab, wrapped in a simulated
+ *  page sheet, for the PDF export window's live preview. Reuses the real light
+ *  render pipeline (faithful Mermaid/KaTeX/images) and restores the live view
+ *  in a finally — same snapshot/restore contract as exportDocument, but returns
+ *  a string and writes nothing. */
+async function renderExportPreviewHtml(settings) {
+  const t = activeTab();
+  if (!t) throw new Error("no active document");
+  const snap = snapshotViewState(t);
+  let fitted = [];
+  try {
+    await beginLightRender(t);
+    await swapMermaidForPrint();
+    const boundary = treeRoot || parentDir(t.path);
+    await neutralizeOutsideWorkspaceImages(preview, boundary);
+    fitted = fitWideTablesForPrint();
+    const body = await buildExportHtml(t, boundary, settings);
+    return wrapInPageSheet(body, settings);
+  } finally {
+    unfitWideTables(fitted);
+    await restoreViewState(t, snap);
+  }
+}
+
+/** Inject a stylesheet that paints buildExportHtml's article.markdown-body as a
+ *  white page at the chosen paper aspect ratio, with the top/bottom margins as
+ *  padding (left/right already come from settingsToCss). One tall sheet: page
+ *  breaks are not drawn (the documented live-preview trade-off). */
+function wrapInPageSheet(docHtml, settings) {
+  const paper = paperMm(settings.paper);
+  const m = marginMm(settings.margins);
+  // The sheet fits the preview width (reflowing when the pane is narrower than
+  // the paper) so the whole page is always visible — the Exact PDF tab is the
+  // pixel-faithful, paginated view. min-height keeps the empty-page proportions.
+  const sheetCss = `
+  body { background: #777; margin: 0; padding: 16px; }
+  article.markdown-body {
+    background: #fff;
+    width: 100%;
+    max-width: ${paper.w}mm;
+    min-height: ${paper.h}mm;
+    margin: 0 auto;
+    padding-top: ${m.top}mm;
+    padding-bottom: ${m.bottom}mm;
+    box-shadow: 0 2px 16px rgba(0,0,0,.4);
+  }`;
+  return docHtml.replace("</head>", `<style>${sheetCss}</style></head>`);
+}
+
+/** Build the standalone HTML document string for `t` (clone of the
+ *  already-light-rendered preview, inlined images, vendored CSS + the preset's
+ *  settingsToCss). Shared by the HTML export and the live-preview reuse. */
+async function buildExportHtml(t, boundary, settings) {
   const clone = preview.cloneNode(true);
   // Drop UI chrome injected after render (copy buttons, mermaid export buttons).
   clone
@@ -2007,12 +2172,19 @@ async function exportHtml(t, path, boundary) {
     css += "\n" + katexCss;
   }
   css += "\n" + EXPORT_PAGE_CSS;
+  css += "\n" + settingsToCss(settings);
 
-  const html = buildHtmlDocument({
+  return buildHtmlDocument({
     title: baseName(t.path),
     css,
     bodyHtml,
   });
+}
+
+/** Serialize the (already light-rendered) preview into one standalone HTML file
+ *  and write it via the save_export command. */
+async function exportHtml(t, path, boundary, settings) {
+  const html = await buildExportHtml(t, boundary, settings);
   await invoke("save_export", { path, data: html, base64Encoded: false });
 }
 
