@@ -949,13 +949,27 @@ body {
     break-after: avoid;
   }
 
-  /* Never split an atomic block across a page boundary. */
+  /* Never split an atomic block across a page boundary. Tables are excluded —
+     they are allowed to paginate (see below) so long tables don't clip. */
   .markdown-body pre,
-  .markdown-body table,
   .markdown-body img,
   .markdown-body blockquote,
   .markdown-body pre.mermaid,
   .markdown-body .katex-display {
+    break-inside: avoid;
+  }
+
+  /* Long tables: lay out as a real table (github-markdown sets display:block,
+     which disables header-group repetition), repeat the header on every page,
+     and keep individual rows intact. display:table here only affects the print
+     capture, so the on-screen horizontal-scroll behavior is preserved. */
+  .markdown-body table {
+    display: table;
+  }
+  .markdown-body thead {
+    display: table-header-group;
+  }
+  .markdown-body tr {
     break-inside: avoid;
   }
 
