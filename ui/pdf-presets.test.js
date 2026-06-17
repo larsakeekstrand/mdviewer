@@ -10,6 +10,8 @@ import {
   marginMm,
   paperMm,
   settingsToCss,
+  tableStyleCss,
+  tableFitCss,
 } from "./pdf-presets.js";
 
 test("presetIds are the three documented presets", () => {
@@ -89,4 +91,50 @@ test("settingsToCss is scoped to .markdown-body and reflects base size", () => {
 test("settingsToCss justifies only the report preset", () => {
   assert.match(settingsToCss(presetDefaults("report")), /text-align:\s*justify/);
   assert.doesNotMatch(settingsToCss(presetDefaults("clean")), /text-align:\s*justify/);
+});
+
+test("presetDefaults includes the new table + orientation keys", () => {
+  const s = presetDefaults("clean");
+  for (const k of ["tableStyle", "tableFit", "orientation"]) {
+    assert.ok(k in s, `missing ${k}`);
+  }
+});
+
+test("defaults are editorial / wrap / portrait", () => {
+  const s = defaultSettings();
+  assert.equal(s.tableStyle, "editorial");
+  assert.equal(s.tableFit, "wrap");
+  assert.equal(s.orientation, "portrait");
+});
+
+test("editorial style: bounding rules, no zebra, no full grid", () => {
+  const css = settingsToCss(presetDefaults("clean")); // clean => editorial
+  assert.match(css, /\.markdown-body table\s*\{[^}]*border-top:\s*2px solid/);
+  assert.match(css, /tr:nth-child\(2n\)\s*\{\s*background-color:\s*transparent/);
+});
+
+test("grid style keeps the accent header tint", () => {
+  const css = settingsToCss(mergeSettings(defaultSettings(), { tableStyle: "grid" }));
+  assert.match(css, /table th\s*\{\s*background:\s*color-mix\(in srgb, var\(--pdf-accent\)/);
+});
+
+test("minimal style underlines the header but draws no table top rule", () => {
+  const css = settingsToCss(mergeSettings(defaultSettings(), { tableStyle: "minimal" }));
+  assert.match(css, /table th\s*\{[^}]*border-bottom:\s*2px solid/);
+  assert.doesNotMatch(css, /\.markdown-body table\s*\{[^}]*border-top:\s*2px solid/);
+});
+
+test("minimal keeps github zebra (no nth-child suppression) but editorial removes it", () => {
+  const minimal = settingsToCss(mergeSettings(defaultSettings(), { tableStyle: "minimal" }));
+  const editorial = settingsToCss(mergeSettings(defaultSettings(), { tableStyle: "editorial" }));
+  assert.doesNotMatch(minimal, /nth-child\(2n\)[^}]*transparent/);
+  assert.match(editorial, /nth-child\(2n\)\s*\{\s*background-color:\s*transparent/);
+});
+
+test("tableFitCss emits wrap layout only in wrap mode", () => {
+  const wrap = tableFitCss(mergeSettings(defaultSettings(), { tableFit: "wrap" }));
+  assert.match(wrap, /display:\s*table/);
+  assert.match(wrap, /table-layout:\s*fixed/);
+  assert.match(wrap, /overflow-wrap:\s*anywhere/);
+  assert.equal(tableFitCss(mergeSettings(defaultSettings(), { tableFit: "fit" })), "");
 });

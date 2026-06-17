@@ -20,6 +20,9 @@ export const PRESETS = {
     paper: "a4",
     justify: false,
     pageNumbers: "bottom-center",
+    tableStyle: "editorial",
+    tableFit: "wrap",
+    orientation: "portrait",
   },
   report: {
     label: "Report",
@@ -33,6 +36,9 @@ export const PRESETS = {
     paper: "a4",
     justify: true,
     pageNumbers: "bottom-center",
+    tableStyle: "editorial",
+    tableFit: "wrap",
+    orientation: "portrait",
   },
   compact: {
     label: "Compact",
@@ -46,6 +52,9 @@ export const PRESETS = {
     paper: "a4",
     justify: false,
     pageNumbers: "bottom-right",
+    tableStyle: "editorial",
+    tableFit: "wrap",
+    orientation: "portrait",
   },
 };
 
@@ -70,6 +79,9 @@ function settingsFromPreset(id) {
     paper: p.paper,
     margins: p.margins,
     pageNumbers: p.pageNumbers,
+    tableStyle: p.tableStyle,
+    tableFit: p.tableFit,
+    orientation: p.orientation,
   };
 }
 
@@ -142,8 +154,42 @@ export function settingsToCss(settings) {
 .markdown-body h2 { font-size: ${(1.6 * p.headingScale).toFixed(3)}em; }
 .markdown-body h3 { font-size: ${(1.3 * p.headingScale).toFixed(3)}em; }
 .markdown-body a { color: var(--pdf-accent); text-decoration: underline; }
-.markdown-body table th { background: color-mix(in srgb, var(--pdf-accent) 12%, transparent); }
+${tableStyleCss(settings)}
 .markdown-body pre, .markdown-body code { font-family: ${FONT_MONO}; }
 .markdown-body pre { font-size: 0.85em; }
 `;
+}
+
+/** Paint-only table CSS by style. Appended after github-markdown.css (equal
+ *  specificity, later wins), so it overrides the base grid. Shared by PDF and
+ *  HTML export via settingsToCss. */
+export function tableStyleCss(settings) {
+  // editorial suppresses github-markdown's zebra striping; grid and minimal
+  // intentionally keep it (minimal = header underline + subtle zebra).
+  switch (settings.tableStyle) {
+    case "grid":
+      return `.markdown-body table th { background: color-mix(in srgb, var(--pdf-accent) 12%, transparent); }`;
+    case "minimal":
+      return `.markdown-body table th, .markdown-body table td { border: 0; }
+.markdown-body table th { border-bottom: 2px solid var(--borderColor-default, #d0d7de); font-weight: 700; }
+.markdown-body table tr { background-color: transparent; border-top: 0; }`;
+    case "editorial":
+    default:
+      return `.markdown-body table { border-top: 2px solid var(--fgColor-default, #1f2328); border-bottom: 2px solid var(--fgColor-default, #1f2328); }
+.markdown-body table th, .markdown-body table td { border: 0; }
+.markdown-body table th { border-bottom: 1px solid var(--fgColor-default, #1f2328); font-weight: 700; }
+.markdown-body table td { border-bottom: 1px solid var(--borderColor-muted, #d8dee4); }
+.markdown-body table tr { background-color: transparent; border-top: 0; }
+.markdown-body table tr:nth-child(2n) { background-color: transparent; }`;
+  }
+}
+
+/** Page-geometry table CSS for Wrap mode: hold the table to the page width and
+ *  wrap cell text (table grows taller) instead of scaling it down. Empty in Fit
+ *  mode (the JS scaler handles that). PDF-only — injected by app.js, never by
+ *  settingsToCss, so HTML export is unaffected. */
+export function tableFitCss(settings) {
+  if (settings.tableFit !== "wrap") return "";
+  return `.markdown-body table { display: table; width: 100%; table-layout: fixed; }
+.markdown-body table th, .markdown-body table td { overflow-wrap: anywhere; white-space: normal; }`;
 }
