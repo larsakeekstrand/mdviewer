@@ -187,6 +187,16 @@ pub fn set_update_channel(app: AppHandle, channel: recent::UpdateChannel) {
     let _ = app.emit("channel-changed", ());
 }
 
+#[tauri::command]
+pub fn get_pdf_settings(app: AppHandle) -> recent::PdfSettings {
+    recent::load_pdf_settings(&app)
+}
+
+#[tauri::command]
+pub fn save_pdf_settings(app: AppHandle, settings: recent::PdfSettings) {
+    recent::save_pdf_settings(&app, &settings);
+}
+
 /// Checks for an update on the user's selected channel. Mirrors the updater
 /// plugin's own `check`, but overrides the endpoint per the stored channel and
 /// returns the resource id so the frontend can hand it to the plugin's

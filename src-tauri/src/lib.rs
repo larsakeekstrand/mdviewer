@@ -87,6 +87,8 @@ pub fn run(startup: Startup) {
             commands::restart,
             commands::get_preferences,
             commands::set_update_channel,
+            commands::get_pdf_settings,
+            commands::save_pdf_settings,
             commands::check_update,
             commands::open_url,
             commands::open_path,

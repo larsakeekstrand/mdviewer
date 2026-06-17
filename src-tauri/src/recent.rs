@@ -16,6 +16,28 @@ pub enum UpdateChannel {
     Beta,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfSettings {
+    pub preset: String,
+    pub base_size: f64,
+    pub paper: String,
+    pub margins: String,
+    pub page_numbers: String,
+}
+
+impl Default for PdfSettings {
+    fn default() -> Self {
+        Self {
+            preset: "clean".into(),
+            base_size: 11.0,
+            paper: "a4".into(),
+            margins: "normal".into(),
+            page_numbers: "bottom-center".into(),
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Store {
     folders: Vec<PathBuf>,
@@ -27,6 +49,8 @@ struct Store {
     active_tab: Option<usize>,
     #[serde(default)]
     channel: UpdateChannel,
+    #[serde(default)]
+    pdf_export: PdfSettings,
 }
 
 impl Store {
@@ -126,6 +150,16 @@ pub fn load_channel(app: &AppHandle) -> UpdateChannel {
 pub fn save_channel(app: &AppHandle, channel: UpdateChannel) {
     let mut store = load_store(app);
     store.channel = channel;
+    write_store(app, &store);
+}
+
+pub fn load_pdf_settings(app: &AppHandle) -> PdfSettings {
+    load_store(app).pdf_export
+}
+
+pub fn save_pdf_settings(app: &AppHandle, settings: &PdfSettings) {
+    let mut store = load_store(app);
+    store.pdf_export = settings.clone();
     write_store(app, &store);
 }
 
@@ -318,5 +352,40 @@ mod tests {
         assert!(json.contains("\"channel\":\"beta\""), "got: {json}");
         let back: Store = serde_json::from_str(&json).unwrap();
         assert_eq!(back.channel, UpdateChannel::Beta);
+    }
+
+    #[test]
+    fn pdf_settings_default_is_clean() {
+        let s = PdfSettings::default();
+        assert_eq!(s.preset, "clean");
+        assert_eq!(s.paper, "a4");
+        assert_eq!(s.margins, "normal");
+        assert_eq!(s.page_numbers, "bottom-center");
+        assert_eq!(s.base_size, 11.0);
+    }
+
+    #[test]
+    fn pdf_settings_round_trip_camel_case() {
+        let s = PdfSettings {
+            preset: "report".into(),
+            base_size: 12.5,
+            paper: "letter".into(),
+            margins: "wide".into(),
+            page_numbers: "bottom-right".into(),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"baseSize\":12.5"), "got: {json}");
+        assert!(
+            json.contains("\"pageNumbers\":\"bottom-right\""),
+            "got: {json}"
+        );
+        let back: PdfSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.preset, "report");
+    }
+
+    #[test]
+    fn store_defaults_pdf_settings_when_absent() {
+        let back: Store = serde_json::from_str(r#"{"folders":["/a"]}"#).unwrap();
+        assert_eq!(back.pdf_export.preset, "clean");
     }
 }
