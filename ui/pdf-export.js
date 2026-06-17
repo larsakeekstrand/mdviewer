@@ -2,12 +2,35 @@ import {
   PRESETS, presetIds, presetDefaults, defaultSettings,
   mergeSettings, clampBaseSize,
 } from "./pdf-presets.js";
+import { THEME_KEY, resolveTheme } from "./theme.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emit, listen } = window.__TAURI__.event;
 const { save } = window.__TAURI__.dialog;
 
 const el = (id) => document.getElementById(id);
+
+// Match the window chrome to the app's theme (the PDF preview itself stays a
+// light document — it's what the exported PDF looks like). localStorage is
+// shared across same-origin windows, so a theme toggle in the main window
+// fires a `storage` event here.
+function applyWindowTheme() {
+  const os = window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+  document.documentElement.dataset.theme = resolveTheme(
+    localStorage.getItem(THEME_KEY),
+    os,
+  );
+}
+applyWindowTheme();
+window.addEventListener("storage", (e) => {
+  if (e.key === THEME_KEY) applyWindowTheme();
+});
+window
+  .matchMedia("(prefers-color-scheme: dark)")
+  .addEventListener("change", applyWindowTheme);
+
 let settings = defaultSettings();
 let previewTimer = null;
 let pending = null; // "save" | "exact"

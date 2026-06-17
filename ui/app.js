@@ -2126,11 +2126,15 @@ async function renderExportPreviewHtml(settings) {
 function wrapInPageSheet(docHtml, settings) {
   const paper = paperMm(settings.paper);
   const m = marginMm(settings.margins);
+  // The sheet fits the preview width (reflowing when the pane is narrower than
+  // the paper) so the whole page is always visible — the Exact PDF tab is the
+  // pixel-faithful, paginated view. min-height keeps the empty-page proportions.
   const sheetCss = `
-  body { background: #777; margin: 0; padding: 24px; }
+  body { background: #777; margin: 0; padding: 16px; }
   article.markdown-body {
     background: #fff;
-    width: ${paper.w}mm;
+    width: 100%;
+    max-width: ${paper.w}mm;
     min-height: ${paper.h}mm;
     margin: 0 auto;
     padding-top: ${m.top}mm;

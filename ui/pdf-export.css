@@ -1,5 +1,8 @@
-.pdf-export-window { margin: 0; height: 100vh; overflow: hidden; }
+/* Reset the main-app body grid (styles.css makes `body` a grid); this window
+   uses its own .pdf-export-layout grid and needs the full window width. */
+.pdf-export-window { display: block; margin: 0; height: 100vh; overflow: hidden; }
 .pdf-export-layout { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.pdf-preview-pane { min-width: 0; }
 .pdf-controls { padding: 16px; border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; gap: 14px; overflow: auto; }
 .pdf-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .pdf-actions { margin-top: auto; display: flex; gap: 8px; }
