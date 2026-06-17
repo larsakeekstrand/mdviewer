@@ -1,9 +1,10 @@
-const { invoke } = window.__TAURI__.core;
-const { emit } = window.__TAURI__.event;
 import {
   PRESETS, presetIds, presetDefaults, defaultSettings,
   mergeSettings, clampBaseSize,
 } from "./pdf-presets.js";
+
+const { invoke } = window.__TAURI__.core;
+const { emit } = window.__TAURI__.event;
 
 const el = (id) => document.getElementById(id);
 let settings = defaultSettings();
@@ -46,7 +47,6 @@ el("preset").addEventListener("change", (e) => {
   schedulePreview();
 });
 el("base-size").addEventListener("input", (e) => {
-  el("size-val").textContent = `${e.target.value}pt`;
   update({ baseSize: clampBaseSize(parseFloat(e.target.value)) });
 });
 el("paper").addEventListener("change", (e) => update({ paper: e.target.value }));
