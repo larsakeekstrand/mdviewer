@@ -133,6 +133,18 @@ icon.svg          — source for icon regeneration
   The `@media print` block in `styles.css` hides the app chrome and reflows the
   preview; because the native print renders through the print pipeline, those
   rules apply during capture and never flash on screen.
+  **Table rendering** splits across two concerns: *style* (Editorial / Grid /
+  Minimal) is pure paint — `tableStyleCss(settings)` in `ui/pdf-presets.js`
+  emits it and `settingsToCss` includes it, so both PDF and HTML export pick it
+  up. *Wide-table fit* (wrap / scale), *orientation*, and the always-on
+  *repeating-header pagination* (`thead { display: table-header-group }` in the
+  `@media print` block of `styles.css`) are page-geometry concerns that live
+  only on the PDF path — `tableFitCss(settings)` is injected by `app.js` during
+  the PDF re-render, orientation is passed as `landscape:` to `export_pdf`, and
+  pagination fires only under print media — so HTML export is entirely unaffected
+  by those three. The three new fields on `recent::PdfSettings` are
+  `table_style`, `table_fit`, and `orientation` (defaulting to `"editorial"`,
+  `"wrap"`, and `"portrait"`).
 - **`postRender()`**: single seam that runs after every morphdom patch —
   `annotateLinks` → `resolveImages` → `addCopyButtons` → `renderMath` →
   `renderMermaid` → `renderReviewMarkers`. Order matters: math/mermaid change
