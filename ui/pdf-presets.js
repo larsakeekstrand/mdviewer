@@ -49,8 +49,6 @@ export const PRESETS = {
   },
 };
 
-const MONO = FONT_MONO;
-
 const MARGINS = {
   narrow: { top: 12, right: 12, bottom: 12, left: 12 },
   normal: { top: 18, right: 18, bottom: 18, left: 18 },
@@ -145,7 +143,7 @@ export function settingsToCss(settings) {
 .markdown-body h3 { font-size: ${(1.3 * p.headingScale).toFixed(3)}em; }
 .markdown-body a { color: var(--pdf-accent); text-decoration: underline; }
 .markdown-body table th { background: color-mix(in srgb, var(--pdf-accent) 12%, transparent); }
-.markdown-body pre, .markdown-body code { font-family: ${MONO}; }
+.markdown-body pre, .markdown-body code { font-family: ${FONT_MONO}; }
 .markdown-body pre { font-size: 0.85em; }
 `;
 }

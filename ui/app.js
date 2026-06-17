@@ -429,7 +429,7 @@ async function init() {
     try {
       if (mode === "exact") {
         const dir = await window.__TAURI__.path.tempDir();
-        dest = await window.__TAURI__.path.join(dir, `mdviewer-pdf-preview-${Date.now()}.pdf`);
+        dest = await window.__TAURI__.path.join(dir, "mdviewer-pdf-preview.pdf");
       }
       // exportDocument snapshots the same global view state servePreview uses;
       // an export must not overlap an in-flight live-preview render or the main
@@ -446,7 +446,7 @@ async function init() {
       if (ok && mode === "save") {
         await invoke("save_pdf_settings", { settings }).catch(() => {});
       }
-      const url = ok && mode === "exact" ? convertFileSrc(dest) : undefined;
+      const url = ok && mode === "exact" ? convertFileSrc(dest) + "?v=" + Date.now() : undefined;
       await emit("pdf-export-done", { ok, url, error: ok ? undefined : "PDF export failed" });
     } catch (e) {
       await emit("pdf-export-done", { ok: false, error: String(e) });
@@ -2030,9 +2030,9 @@ async function restoreViewState(t, snap) {
  *  export, then restore. The light re-render reuses the real renderActive
  *  pipeline so math/Mermaid/code come out light and faithful. */
 async function exportDocument(format, path, settings) {
-  if (exportInProgress) return;
+  if (exportInProgress) return false;
   const t = activeTab();
-  if (!t) return;
+  if (!t) return false;
   settings = settings || defaultSettings();
   exportInProgress = true;
   const snap = snapshotViewState(t);

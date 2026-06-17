@@ -50,6 +50,19 @@ test("clampBaseSize clamps to 9..16", () => {
   assert.equal(clampBaseSize(12), 12);
 });
 
+test("clampBaseSize exact boundaries", () => {
+  assert.equal(clampBaseSize(9), 9);
+  assert.equal(clampBaseSize(16), 16);
+});
+
+test("clampBaseSize NaN/non-finite falls back to defaultSettings().baseSize", () => {
+  const fallback = defaultSettings().baseSize;
+  assert.equal(clampBaseSize(NaN), fallback);
+  assert.equal(clampBaseSize("abc"), fallback);
+  assert.equal(clampBaseSize(Infinity), fallback);
+  assert.equal(clampBaseSize(-Infinity), fallback);
+});
+
 test("marginMm: wide > normal > narrow uniformly", () => {
   assert.ok(marginMm("wide").top > marginMm("normal").top);
   assert.ok(marginMm("normal").top > marginMm("narrow").top);
