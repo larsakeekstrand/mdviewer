@@ -9,6 +9,8 @@ mod mcp_server;
 mod menu;
 #[cfg(target_os = "macos")]
 mod open_files;
+#[cfg(target_os = "macos")]
+mod pdf_postprocess;
 mod recent;
 mod search;
 mod tasklist;

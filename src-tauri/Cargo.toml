@@ -61,6 +61,26 @@ objc2-app-kit = { version = "0.3", features = [
     "NSWindow",
 ] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "objc2-app-kit"] }
+# Native PDF re-layout / page-number stamping (pdf_postprocess.rs).
+objc2-core-foundation = { version = "0.3", features = [
+    "CFBase",
+    "CFString",
+    "CFURL",
+    "CFAttributedString",
+    "CFCGTypes",
+] }
+objc2-core-graphics = { version = "0.3", features = [
+    "CGPDFDocument",
+    "CGPDFPage",
+    "CGContext",
+    "CGPDFContext",
+    "CGColor",
+] }
+objc2-core-text = { version = "0.3", features = [
+    "CTFont",
+    "CTLine",
+    "CTStringAttributes",
+] }
 
 [profile.release]
 opt-level = "s"
