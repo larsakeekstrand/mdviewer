@@ -49,7 +49,7 @@ import {
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+const { listen, emit } = window.__TAURI__.event;
 const dialogApi = window.__TAURI__.dialog;
 
 let IS_MAC = false;
@@ -407,6 +407,17 @@ async function init() {
       text: ok ? `Wrote PDF to ${output}` : "PDF export failed",
       isError: !ok,
     }).catch(() => {});
+  });
+
+  await listen("pdf-export-request-preview", async (ev) => {
+    const { settings } = ev.payload;
+    try {
+      const html = await renderExportPreviewHtml(settings);
+      await emit("pdf-export-preview-html", { html });
+    } catch (e) {
+      console.error("preview build failed", e);
+      await emit("pdf-export-preview-html", { html: "", error: String(e) });
+    }
   });
 
   window
@@ -1913,6 +1924,43 @@ async function onExport(format) {
   await exportDocument(format, path);
 }
 
+/** Snapshot the live view state so a light export re-render can be undone. */
+function snapshotViewState(t) {
+  return {
+    theme: currentTheme,
+    dataTheme: document.documentElement.dataset.theme,
+    raw: t.raw,
+    reviewMode: t.reviewMode,
+    scroll: previewScroll.scrollTop,
+  };
+}
+
+/** Force a faithful light, raw-off, review-off render through the real
+ *  renderActive pipeline (so math/Mermaid/code come out light and correct). */
+async function beginLightRender(t) {
+  currentTheme = "light";
+  document.documentElement.dataset.theme = "light";
+  t.raw = false;
+  t.reviewMode = false;
+  initMermaid();
+  await renderActive({ scrollLock: false, forceMermaid: true });
+}
+
+/** Restore the view captured by snapshotViewState and re-render the live tab. */
+async function restoreViewState(t, snap) {
+  currentTheme = snap.theme;
+  document.documentElement.dataset.theme = snap.dataTheme;
+  t.raw = snap.raw;
+  t.reviewMode = snap.reviewMode;
+  initMermaid();
+  if (t.editing) {
+    await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
+  } else {
+    await renderActive({ scrollLock: false, forceMermaid: true });
+  }
+  previewScroll.scrollTop = snap.scroll;
+}
+
 /** Snapshot view state, force a light rendered view, run the format-specific
  *  export, then restore. The light re-render reuses the real renderActive
  *  pipeline so math/Mermaid/code come out light and faithful. */
@@ -1922,22 +1970,13 @@ async function exportDocument(format, path, settings) {
   if (!t) return;
   settings = settings || defaultSettings();
   exportInProgress = true;
-  const prevTheme = currentTheme;
-  const prevDataTheme = document.documentElement.dataset.theme;
-  const prevRaw = t.raw;
-  const prevReviewMode = t.reviewMode;
-  const prevScroll = previewScroll.scrollTop;
+  const snap = snapshotViewState(t);
   let fittedTables = [];
   let headingWraps = [];
   let styleEl = null;
   let succeeded = false;
   try {
-    currentTheme = "light";
-    document.documentElement.dataset.theme = "light";
-    t.raw = false;
-    t.reviewMode = false;
-    initMermaid();
-    await renderActive({ scrollLock: false, forceMermaid: true });
+    await beginLightRender(t);
 
     // Re-render Mermaid with the export-safe config (no <foreignObject> labels,
     // which WebKit can't rasterize for the PDF print pipeline and which break
@@ -1986,19 +2025,54 @@ async function exportDocument(format, path, settings) {
     if (styleEl) styleEl.remove();
     unwrapForPrint(headingWraps);
     unfitWideTables(fittedTables);
-    currentTheme = prevTheme;
-    document.documentElement.dataset.theme = prevDataTheme;
-    t.raw = prevRaw;
-    t.reviewMode = prevReviewMode;
-    initMermaid();
-    if (t.editing) {
-      await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
-    } else {
-      await renderActive({ scrollLock: false, forceMermaid: true });
-    }
-    previewScroll.scrollTop = prevScroll;
+    await restoreViewState(t, snap);
   }
   return succeeded;
+}
+
+/** Build the standalone export HTML for the active tab, wrapped in a simulated
+ *  page sheet, for the PDF export window's live preview. Reuses the real light
+ *  render pipeline (faithful Mermaid/KaTeX/images) and restores the live view
+ *  in a finally — same snapshot/restore contract as exportDocument, but returns
+ *  a string and writes nothing. */
+async function renderExportPreviewHtml(settings) {
+  const t = activeTab();
+  if (!t) throw new Error("no active document");
+  const snap = snapshotViewState(t);
+  let fitted = [];
+  try {
+    await beginLightRender(t);
+    await swapMermaidForPrint();
+    const boundary = treeRoot || parentDir(t.path);
+    await neutralizeOutsideWorkspaceImages(preview, boundary);
+    fitted = fitWideTablesForPrint();
+    const body = await buildExportHtml(t, boundary, settings);
+    return wrapInPageSheet(body, settings);
+  } finally {
+    unfitWideTables(fitted);
+    await restoreViewState(t, snap);
+  }
+}
+
+/** Inject a stylesheet that paints buildExportHtml's article.markdown-body as a
+ *  white page at the chosen paper aspect ratio, with the top/bottom margins as
+ *  padding (left/right already come from settingsToCss). One tall sheet: page
+ *  breaks are not drawn (the documented live-preview trade-off). */
+function wrapInPageSheet(docHtml, settings) {
+  const paper = paperMm(settings.paper);
+  const m = marginMm(settings.margins);
+  const sheetCss = `
+  body { background: #777; margin: 0; padding: 24px; }
+  article.markdown-body {
+    background: #fff;
+    width: ${paper.w}mm;
+    min-height: ${paper.h}mm;
+    margin: 0 auto;
+    padding-top: ${m.top}mm;
+    padding-bottom: ${m.bottom}mm;
+    box-shadow: 0 2px 16px rgba(0,0,0,.4);
+  }`;
+  return docHtml.replace("</head>", `<style>${sheetCss}</style></head>`);
 }
 
 /** Build the standalone HTML document string for `t` (clone of the

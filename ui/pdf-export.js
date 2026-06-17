@@ -4,7 +4,7 @@ import {
 } from "./pdf-presets.js";
 
 const { invoke } = window.__TAURI__.core;
-const { emit } = window.__TAURI__.event;
+const { emit, listen } = window.__TAURI__.event;
 
 const el = (id) => document.getElementById(id);
 let settings = defaultSettings();
@@ -59,6 +59,15 @@ el("reset").addEventListener("click", () => {
 });
 
 async function init() {
+  await listen("pdf-export-preview-html", (ev) => {
+    const { html, error } = ev.payload;
+    if (error) {
+      el("status").textContent = "Preview error: " + error;
+      return;
+    }
+    el("live-preview").srcdoc = html;
+    el("status").textContent = "";
+  });
   fillPresetOptions();
   try {
     settings = mergeSettings(defaultSettings(), await invoke("get_pdf_settings"));
