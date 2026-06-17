@@ -41,9 +41,6 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "github-source" => {
                 let _ = crate::commands::open_url(SOURCE_URL.to_string());
             }
-            "edit-copy" => {
-                let _ = app.emit("edit-action", "copy");
-            }
             "edit-find" => {
                 let _ = app.emit("edit-action", "find");
             }
@@ -146,9 +143,6 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     let file_menu_builder = file_menu_builder.item(&export_pdf);
     let file_menu = file_menu_builder.separator().close_window().build()?;
 
-    let edit_copy = MenuItemBuilder::with_id("edit-copy", "Copy")
-        .accelerator("CmdOrCtrl+C")
-        .build(app)?;
     let edit_find = MenuItemBuilder::with_id("edit-find", "Find…")
         .accelerator("CmdOrCtrl+F")
         .build(app)?;
@@ -167,8 +161,17 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     // Title intentionally not "Edit": macOS auto-injects Writing Tools,
     // AutoFill, Start Dictation, and Emoji & Symbols into any submenu
     // titled "Edit" regardless of which items we put in it.
+    // Predefined items carry the native cut:/copy:/paste:/selectAll: selectors
+    // (and Cmd+X/C/V/A accelerators). WKWebView only delivers clipboard actions
+    // to the focused web content — preview selection, the editor's textarea,
+    // CodeMirror — when these standard items are present; a custom Copy item
+    // routed through JS can't drive paste or the editor's own copy/cut.
     let edit_menu = SubmenuBuilder::new(app, "Actions")
-        .item(&edit_copy)
+        .item(&PredefinedMenuItem::cut(app, None)?)
+        .item(&PredefinedMenuItem::copy(app, None)?)
+        .item(&PredefinedMenuItem::paste(app, None)?)
+        .item(&PredefinedMenuItem::select_all(app, None)?)
+        .separator()
         .item(&edit_find)
         .item(&edit_search_files)
         .separator()

@@ -3,6 +3,16 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.19.1] - 2026-06-17
+
+Copy and paste now work everywhere.
+
+- **Fixed copy and paste.** Cut, Copy, Paste, and Select All now work via the
+  keyboard (⌘X/⌘C/⌘V/⌘A) and the menu across the rendered preview, raw view,
+  and the source editor — including pasting into the editor and copying out to
+  other apps. Right-clicking in the editor or any text field shows a compact
+  Cut / Copy / Paste / Select All menu instead of macOS's full text menu.
+
 ## [1.19.0] - 2026-06-14
 
 Claude Code integration, and much better PDFs.

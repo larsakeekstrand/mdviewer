@@ -171,7 +171,7 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
 - **File ▸ Open Folder…** (⇧⌘O) — re-roots the tree at any folder.
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
 - **File ▸ Export as HTML…** / **Export as PDF…** — exports the active tab's rendered document. HTML is fully self-contained; both are always rendered light-themed regardless of your OS appearance.
-- **Actions** — Copy (⌘C), Find… (⌘F), Search Files… (⇧⌘F), Copy Source, Toggle Raw, Toggle Edit, Save (⌘S).
+- **Actions** — Cut (⌘X), Copy (⌘C), Paste (⌘V), Select All (⌘A), Find… (⌘F), Search Files… (⇧⌘F), Copy Source, Toggle Raw, Toggle Edit, Save (⌘S).
 - **MDViewer ▸ Settings…** (⌘,) — opens the Preferences window where you can opt in to beta (pre-release) updates.
 
 ### Beta updates
@@ -186,7 +186,7 @@ stable than final releases.
 
 ### Right-click
 
-Right-clicking anywhere in the preview shows a compact menu with Copy / Copy Source / Show Raw·Rendered. Right-clicking a row in the file tree shows **Copy Relative Path** (relative to the sidebar root) and **Copy Absolute Path**, file management actions (**New File…**, **New Folder…**, **Rename…**, **Duplicate**, **Delete**), and on folder rows a **Search in Folder…** entry that opens a sidebar takeover for content search inside that folder. Right-clicking the sidebar background offers the same file management and search actions for the whole tree root. macOS's default text menu (Look Up, Translate, Writing Tools, Speech, …) is suppressed.
+Right-clicking anywhere in the preview shows a compact menu with Copy / Copy Source / Show Raw·Rendered. Right-clicking in the source editor or any text field (search box, inline rename, review note) shows a compact **Cut / Copy / Paste / Select All** menu. Right-clicking a row in the file tree shows **Copy Relative Path** (relative to the sidebar root) and **Copy Absolute Path**, file management actions (**New File…**, **New Folder…**, **Rename…**, **Duplicate**, **Delete**), and on folder rows a **Search in Folder…** entry that opens a sidebar takeover for content search inside that folder. Right-clicking the sidebar background offers the same file management and search actions for the whole tree root. macOS's default text menu (Look Up, Translate, Writing Tools, Speech, …) is suppressed.
 
 ## Build from source
 

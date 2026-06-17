@@ -2975,9 +2975,6 @@ async function runEditAction(name) {
     return;
   }
   switch (name) {
-    case "copy":
-      await actionCopySelection();
-      break;
     case "copy-source":
       await actionCopySource();
       break;
@@ -3000,6 +2997,91 @@ async function runEditAction(name) {
 }
 
 /* ---- Custom context menu ---- */
+
+const EDITABLE_SELECTOR = ".CodeMirror, textarea, input:not([type=checkbox])";
+
+async function clipboardReadText() {
+  try {
+    return await navigator.clipboard.readText();
+  } catch (e) {
+    console.error("clipboard read failed", e);
+    showTransientError("Paste failed — clipboard not available. Try ⌘V.");
+    return null;
+  }
+}
+
+// Reads/writes the focused editable through CodeMirror's API when inside the
+// editor, else through the field's native selection range. Both copy via the
+// shared copyText (system clipboard) and paste via clipboardReadText, so the
+// system clipboard is the single source of truth — pasting also works from
+// other apps, and copying here pastes into them.
+function editableOps(el) {
+  if (cm && el.closest(".CodeMirror")) {
+    return {
+      hasSelection: () => cm.somethingSelected(),
+      getSelection: () => cm.getSelection(),
+      replaceSelection: (text) => {
+        cm.replaceSelection(text);
+        cm.focus();
+      },
+      selectAll: () => {
+        cm.execCommand("selectAll");
+        cm.focus();
+      },
+    };
+  }
+  return {
+    hasSelection: () => el.selectionStart !== el.selectionEnd,
+    getSelection: () => el.value.slice(el.selectionStart, el.selectionEnd),
+    replaceSelection: (text) => {
+      const start = el.selectionStart;
+      el.setRangeText(text, start, el.selectionEnd, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.focus();
+    },
+    selectAll: () => {
+      el.focus();
+      el.select();
+    },
+  };
+}
+
+function buildEditableContextMenu(el, x, y) {
+  const ops = editableOps(el);
+  const hasSel = ops.hasSelection();
+  const mod = IS_MAC ? "⌘" : "Ctrl+";
+  const items = [
+    {
+      label: "Cut",
+      shortcut: `${mod}X`,
+      disabled: !hasSel,
+      action: async () => {
+        if (ops.hasSelection() && (await copyText(ops.getSelection()))) {
+          ops.replaceSelection("");
+        }
+      },
+    },
+    {
+      label: "Copy",
+      shortcut: `${mod}C`,
+      disabled: !hasSel,
+      action: () => {
+        if (ops.hasSelection()) copyText(ops.getSelection());
+      },
+    },
+    {
+      label: "Paste",
+      shortcut: `${mod}V`,
+      action: async () => {
+        const text = await clipboardReadText();
+        if (text) ops.replaceSelection(text);
+      },
+    },
+    "---",
+    { label: "Select All", shortcut: `${mod}A`, action: () => ops.selectAll() },
+  ];
+  buildContextMenu(items, x, y);
+}
 
 const ctxMenu = document.createElement("div");
 ctxMenu.className = "ctx-menu";
@@ -3079,6 +3161,18 @@ function relativeToRoot(path, root) {
 
 document.addEventListener("contextmenu", (ev) => {
   ev.preventDefault();
+
+  // Inside an editable area (the CodeMirror editor, or a plain input/textarea
+  // like the search box, inline rename, or a review note) show a compact
+  // Cut/Copy/Paste menu instead of macOS's giant native text menu — and
+  // instead of our preview menu, which has no paste.
+  const editable =
+    ev.target instanceof Element ? ev.target.closest(EDITABLE_SELECTOR) : null;
+  if (editable) {
+    buildEditableContextMenu(editable, ev.clientX, ev.clientY);
+    return;
+  }
+
   const items = [];
   const text = selectedText();
   const tab = activeTab();
