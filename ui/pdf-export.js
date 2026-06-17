@@ -5,10 +5,13 @@ import {
 
 const { invoke } = window.__TAURI__.core;
 const { emit, listen } = window.__TAURI__.event;
+const { save } = window.__TAURI__.dialog;
 
 const el = (id) => document.getElementById(id);
 let settings = defaultSettings();
 let previewTimer = null;
+let pending = null; // "save" | "exact"
+let activeName = "export.pdf";
 
 function fillPresetOptions() {
   for (const id of presetIds()) {
@@ -58,6 +61,35 @@ el("reset").addEventListener("click", () => {
   schedulePreview();
 });
 
+function showExactTab() {
+  el("tab-exact").classList.add("active");
+  el("tab-live").classList.remove("active");
+  el("exact-preview").hidden = false;
+  el("live-preview").hidden = true;
+}
+function showLiveTab() {
+  el("tab-live").classList.add("active");
+  el("tab-exact").classList.remove("active");
+  el("live-preview").hidden = false;
+  el("exact-preview").hidden = true;
+}
+el("tab-live").addEventListener("click", showLiveTab);
+el("tab-exact").addEventListener("click", () => {
+  pending = "exact";
+  el("status").textContent = "Rendering exact PDF…";
+  emit("pdf-export-run", { settings, mode: "exact" }).catch(() => {});
+});
+el("export").addEventListener("click", async () => {
+  const path = await save({
+    defaultPath: activeName,
+    filters: [{ name: "PDF document", extensions: ["pdf"] }],
+  });
+  if (!path) return;
+  pending = "save";
+  el("status").textContent = "Exporting…";
+  await emit("pdf-export-run", { settings, mode: "save", path });
+});
+
 async function init() {
   await listen("pdf-export-preview-html", (ev) => {
     const { html, error } = ev.payload;
@@ -67,6 +99,24 @@ async function init() {
     }
     el("live-preview").srcdoc = html;
     el("status").textContent = "";
+  });
+  await listen("pdf-export-active-name", (ev) => {
+    if (ev.payload && ev.payload.name) activeName = ev.payload.name;
+  });
+  await listen("pdf-export-done", (ev) => {
+    const { ok, url, error } = ev.payload;
+    if (!ok) {
+      el("status").textContent = "Export failed: " + (error || "");
+      pending = null;
+      return;
+    }
+    if (pending === "exact" && url) {
+      el("exact-preview").src = url;
+      showExactTab();
+    } else if (pending === "save") {
+      el("status").textContent = "Saved.";
+    }
+    pending = null;
   });
   fillPresetOptions();
   try {

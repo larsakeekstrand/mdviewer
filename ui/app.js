@@ -410,8 +410,44 @@ async function init() {
   });
 
   await listen("pdf-export-request-preview", (ev) => {
+    const t = activeTab();
+    if (t) emit("pdf-export-active-name", { name: exportFilename(t.path, "pdf") }).catch(() => {});
     pendingPreviewSettings = ev.payload.settings;
     servePreview();
+  });
+
+  await listen("pdf-export-run", async (ev) => {
+    const { settings, mode, path } = ev.payload;
+    if (exportInProgress) {
+      await emit("pdf-export-done", { ok: false, error: "an export is already in progress" });
+      return;
+    }
+    // exportDocument snapshots the same global view state servePreview uses;
+    // an export must not overlap an in-flight live-preview render or the main
+    // window can be stranded in the forced light theme. Previews are
+    // sub-second, so wait briefly rather than dropping the user's click.
+    for (let i = 0; i < 50 && previewRendering; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (previewRendering) {
+      await emit("pdf-export-done", { ok: false, error: "a preview render is still in progress" });
+      return;
+    }
+    let dest = path;
+    try {
+      if (mode === "exact") {
+        const dir = await window.__TAURI__.path.tempDir();
+        dest = await window.__TAURI__.path.join(dir, `mdviewer-pdf-preview-${Date.now()}.pdf`);
+      }
+      const ok = await exportDocument("pdf", dest, settings);
+      if (ok && mode === "save") {
+        await invoke("save_pdf_settings", { settings }).catch(() => {});
+      }
+      const url = ok && mode === "exact" ? convertFileSrc(dest) : undefined;
+      await emit("pdf-export-done", { ok, url, error: ok ? undefined : "PDF export failed" });
+    } catch (e) {
+      await emit("pdf-export-done", { ok: false, error: String(e) });
+    }
   });
 
   window
