@@ -6,15 +6,29 @@
 /// Async on purpose: Tauri runs sync commands on the main thread, but this
 /// command must run off the main thread (it waits for the print, which runs ON
 /// the main thread) — a sync command would deadlock.
+#[derive(serde::Deserialize)]
+pub struct Margins {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
 #[tauri::command]
-pub async fn export_pdf(window: tauri::WebviewWindow, path: String) -> Result<(), String> {
+pub async fn export_pdf(
+    window: tauri::WebviewWindow,
+    path: String,
+    paper: String,
+    margins: Margins,
+    page_numbers: String,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        macos::export(window, path).await
+        macos::export(window, path, paper, margins, page_numbers).await
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (window, path);
+        let _ = (window, path, paper, margins, page_numbers);
         Err("PDF export is not yet supported on Windows".to_string())
     }
 }
@@ -27,28 +41,40 @@ mod macos {
 
     use objc2::runtime::ProtocolObject;
     use objc2_app_kit::{NSPrintInfo, NSPrintJobSavingURL, NSPrintSaveJob, NSWindow};
-    use objc2_foundation::{NSCopying, NSPoint, NSRect, NSString, NSURL};
+    use objc2_foundation::{NSCopying, NSPoint, NSRect, NSSize, NSString, NSURL};
     use objc2_web_kit::WKWebView;
+
+    use crate::pdf_postprocess::{self, MarginsPts};
 
     /// Poll interval / overall timeout for the asynchronous print to land a
     /// complete PDF on disk.
     const POLL_INTERVAL: Duration = Duration::from_millis(100);
     const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub async fn export(window: tauri::WebviewWindow, path: String) -> Result<(), String> {
-        // Remove any stale file so the completion poll below can't mistake a
-        // previous run's PDF for this one.
+    pub async fn export(
+        window: tauri::WebviewWindow,
+        path: String,
+        paper: String,
+        margins: super::Margins,
+        page_numbers: String,
+    ) -> Result<(), String> {
+        // Print to a temp content PDF first, then re-lay it onto the requested
+        // paper/margins and stamp page numbers into the real `path`.
+        let content_path = format!("{path}.content.tmp.pdf");
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&content_path);
+
+        let (paper_w, paper_h) = pdf_postprocess::paper_points(&paper);
 
         let (started_tx, started_rx) = mpsc::channel::<Result<(), String>>();
-        let p = path.clone();
+        let p = content_path.clone();
         // with_webview runs the closure on the main thread, which the print
         // machinery requires. The closure only *starts* the (asynchronous)
         // print and returns — it must not block the main thread, because the
         // print itself completes on the main runloop.
         window
             .with_webview(move |pw| {
-                let r = unsafe { start_print(pw.inner(), pw.ns_window(), &p) };
+                let r = unsafe { start_print(pw.inner(), pw.ns_window(), &p, paper_w, paper_h) };
                 let _ = started_tx.send(r);
             })
             .map_err(|e| format!("with_webview failed: {e}"))?;
@@ -60,7 +86,24 @@ mod macos {
 
         // Wait (off the main thread) until the print has written a complete PDF.
         // This also gates the frontend's view-restore until capture is done.
-        wait_for_complete_pdf(Path::new(&path), PRINT_TIMEOUT)
+        wait_for_complete_pdf(Path::new(&content_path), PRINT_TIMEOUT)?;
+
+        let m = MarginsPts {
+            top: pdf_postprocess::mm_to_points(margins.top),
+            right: pdf_postprocess::mm_to_points(margins.right),
+            bottom: pdf_postprocess::mm_to_points(margins.bottom),
+            left: pdf_postprocess::mm_to_points(margins.left),
+        };
+        let res = pdf_postprocess::relayout(
+            Path::new(&content_path),
+            Path::new(&path),
+            paper_w,
+            paper_h,
+            &m,
+            &page_numbers,
+        );
+        let _ = std::fs::remove_file(&content_path);
+        res
     }
 
     /// Build the save-to-file print operation and start it. Returns once the
@@ -74,6 +117,8 @@ mod macos {
         webview_ptr: *mut std::ffi::c_void,
         ns_window_ptr: *mut std::ffi::c_void,
         path: &str,
+        paper_w: f64,
+        paper_h: f64,
     ) -> Result<(), String> {
         if webview_ptr.is_null() {
             return Err("null webview pointer".to_string());
@@ -87,6 +132,9 @@ mod macos {
         // Save-to-file print info: disposition = save, destination URL in the
         // settings dictionary.
         let info = NSPrintInfo::new();
+        // Paginate to the real page height so the post-process pass receives
+        // pages sized for the requested paper.
+        info.setPaperSize(NSSize::new(paper_w, paper_h));
         info.setJobDisposition(NSPrintSaveJob);
         let url = NSURL::fileURLWithPath(&NSString::from_str(path));
         let key = ProtocolObject::<dyn NSCopying>::from_ref(NSPrintJobSavingURL);

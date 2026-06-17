@@ -45,11 +45,8 @@
 //! (`#[cfg(target_os = "macos")]`); a second inner `#![cfg]` here would be a
 //! duplicated-attribute error under `clippy -D warnings`, so it is omitted.
 //!
-//! The pure geometry/text helpers below are the public interface consumed by a
-//! later task that wires `relayout` into `export.rs`; until then they are
-//! `#![allow(dead_code)]` so the spike module compiles clean on its own.
-
-#![allow(dead_code)]
+//! The pure geometry/text helpers below are the public interface consumed by
+//! `export.rs` (`relayout` + the paper/margin conversions).
 
 use std::path::Path;
 

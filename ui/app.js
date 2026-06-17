@@ -38,6 +38,12 @@ import {
   viewerState,
 } from "./mcp.js";
 import { shouldNudge } from "./integration.js";
+import {
+  settingsToCss,
+  marginMm,
+  paperMm,
+  defaultSettings,
+} from "./pdf-presets.js";
 
 // mdviewer frontend
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
@@ -1910,10 +1916,11 @@ async function onExport(format) {
 /** Snapshot view state, force a light rendered view, run the format-specific
  *  export, then restore. The light re-render reuses the real renderActive
  *  pipeline so math/Mermaid/code come out light and faithful. */
-async function exportDocument(format, path) {
+async function exportDocument(format, path, settings) {
   if (exportInProgress) return;
   const t = activeTab();
   if (!t) return;
+  settings = settings || defaultSettings();
   exportInProgress = true;
   const prevTheme = currentTheme;
   const prevDataTheme = document.documentElement.dataset.theme;
@@ -1922,6 +1929,7 @@ async function exportDocument(format, path) {
   const prevScroll = previewScroll.scrollTop;
   let fittedTables = [];
   let headingWraps = [];
+  let styleEl = null;
   let succeeded = false;
   try {
     currentTheme = "light";
@@ -1936,12 +1944,19 @@ async function exportDocument(format, path) {
     // when an exported .html is later printed). Applies to BOTH formats.
     await swapMermaidForPrint();
 
+    // Apply the preset's typography/accent/left-right margins to the live
+    // #preview during capture; removed in the finally block.
+    styleEl = document.createElement("style");
+    styleEl.id = "pdf-export-style";
+    styleEl.textContent = settingsToCss(settings);
+    document.head.appendChild(styleEl);
+
     // Files outside the opened workspace must not be embedded (HTML) or
     // rendered (PDF). Use the tree root as the boundary, falling back to the
     // document's own directory when no folder is open.
     const boundary = treeRoot || parentDir(t.path);
     if (format === "html") {
-      await exportHtml(t, path, boundary);
+      await exportHtml(t, path, boundary, settings);
     } else if (format === "pdf") {
       // The native print uses WebKit's print pipeline, so the @media print
       // stylesheet (chrome hidden, preview reflowed, backgrounds forced on)
@@ -1953,7 +1968,12 @@ async function exportDocument(format, path) {
       // undone in the finally block.
       fittedTables = fitWideTablesForPrint();
       headingWraps = keepHeadingsWithNext();
-      await invoke("export_pdf", { path });
+      await invoke("export_pdf", {
+        path,
+        paper: settings.paper,
+        margins: marginMm(settings.margins),
+        pageNumbers: settings.pageNumbers,
+      });
     }
     succeeded = true;
   } catch (e) {
@@ -1963,6 +1983,7 @@ async function exportDocument(format, path) {
     // Clear the lock first so a throw while restoring the view can't leave
     // export permanently disabled for the session.
     exportInProgress = false;
+    if (styleEl) styleEl.remove();
     unwrapForPrint(headingWraps);
     unfitWideTables(fittedTables);
     currentTheme = prevTheme;
@@ -1980,9 +2001,10 @@ async function exportDocument(format, path) {
   return succeeded;
 }
 
-/** Serialize the (already light-rendered) preview into one standalone HTML file
- *  and write it via the save_export command. */
-async function exportHtml(t, path, boundary) {
+/** Build the standalone HTML document string for `t` (clone of the
+ *  already-light-rendered preview, inlined images, vendored CSS + the preset's
+ *  settingsToCss). Shared by the HTML export and the live-preview reuse. */
+async function buildExportHtml(t, boundary, settings) {
   const clone = preview.cloneNode(true);
   // Drop UI chrome injected after render (copy buttons, mermaid export buttons).
   clone
@@ -2007,12 +2029,19 @@ async function exportHtml(t, path, boundary) {
     css += "\n" + katexCss;
   }
   css += "\n" + EXPORT_PAGE_CSS;
+  css += "\n" + settingsToCss(settings);
 
-  const html = buildHtmlDocument({
+  return buildHtmlDocument({
     title: baseName(t.path),
     css,
     bodyHtml,
   });
+}
+
+/** Serialize the (already light-rendered) preview into one standalone HTML file
+ *  and write it via the save_export command. */
+async function exportHtml(t, path, boundary, settings) {
+  const html = await buildExportHtml(t, boundary, settings);
   await invoke("save_export", { path, data: html, base64Encoded: false });
 }
 
