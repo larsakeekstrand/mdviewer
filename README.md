@@ -21,7 +21,7 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Review Mode** — click **💬 Review** to annotate a rendered document: hover any block for a gutter **+**, attach a comment, and add a document-wide general note. Clicking the toggle again — now **✓ Finish & Copy** — puts a structured markdown summary (the file path, your note, and each quoted block with its comment, in document order) on the clipboard — ready to paste into an AI coding assistant like Claude Code. Comments re-anchor to their blocks across live reloads; ones whose text changed are flagged. Annotations are per-tab and ephemeral (not saved to disk).
 - **In-document find** (⌘F) with case-sensitive and whole-word toggles, match count, and next/previous navigation
 - **Folder content search** (⌘⇧F) — recursively search every file in the open tree (or a single folder via right-click). Case-sensitive, whole-word, and an "include .gitignored files" toggle (off by default — `.gitignore` / `.ignore` / global gitignore are honored like ripgrep). Click a result to open the file and jump the preview to the matching line.
-- **Document export** — export the rendered page to **self-contained HTML** (CSS, fonts, and local images inlined; always light-themed) or **PDF** (native WebKit print pipeline; faithful to the on-screen render, with smart page breaks — headings stay with their content, atomic blocks aren't split, and wide tables scale to fit instead of clipping)
+- **Document export** — export the rendered page to **self-contained HTML** (CSS, fonts, and local images inlined; always light-themed) or **PDF** (macOS only — opens a dedicated **Export to PDF** window with three presets — **Clean**, **Report** (serif body, justified), and **Compact** (denser) — plus adjustable base font size, paper size (A4 / Letter / Legal), margins (Narrow / Normal / Wide), and page numbers (none, bottom-center, or bottom-right). A **live preview** updates as you tune the settings; switch to the **Exact PDF** tab to render the real file — correct page breaks, margins, and footers — before you commit. Settings persist as your global default and are also used by the MCP `generate_pdf` tool. Smart page breaks keep headings with their content, prevent atomic blocks from splitting, and scale wide tables to fit.)
 - Live reload when the open file changes on disk
 - Tabs with VS Code–style sticky/preview behavior (single-click replaces preview, double-click sticks)
 - **Session restore** — the last folder you opened and your open tabs are reopened on the next launch
@@ -43,9 +43,9 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
   **Decline** (or closing the tab) tells Claude you're skipping it. Reviews can
   take as long as you need; if a review runs into a client-side tool timeout,
   raise `MCP_TOOL_TIMEOUT` in the Claude Code environment. `generate_pdf`
-  renders a markdown file to a PDF (faithful to the viewer, with smart page
-  breaks) and writes it inside the open folder — both the source and the
-  output must be within that folder.
+  renders a markdown file to a PDF (using your saved PDF export settings —
+  preset, font size, paper, margins, and page numbers) and writes it inside
+  the open folder — both the source and the output must be within that folder.
 - **Claude Code Integration panel** — **MDViewer ▸ Claude Code Integration…**
   opens a window showing, for the current project, whether the hook and MCP
   server are installed, with one-click **Install**/**Update** buttons and a
@@ -170,7 +170,8 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
 - **File ▸ Open File…** (⌘O) — opens any markdown file. The tree stays where it is; the file opens as a sticky tab.
 - **File ▸ Open Folder…** (⇧⌘O) — re-roots the tree at any folder.
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
-- **File ▸ Export as HTML…** / **Export as PDF…** — exports the active tab's rendered document. HTML is fully self-contained; both are always rendered light-themed regardless of your OS appearance.
+- **File ▸ Export as HTML…** — exports the active tab's rendered document as a fully self-contained HTML file (CSS, fonts, and local images inlined; always light-themed).
+- **File ▸ Export as PDF…** *(macOS only)* — opens the **Export to PDF** window where you can choose a preset (Clean / Report / Compact), adjust the base font size, paper size (A4 / Letter / Legal), margins (Narrow / Normal / Wide), and page numbers (None / Bottom center / Bottom right). The **live preview** on the left updates as you change settings; switch to **Exact PDF** to render the actual file — with real page breaks, margins, and footers — before saving. Your settings are saved as the global default and are also applied when the MCP `generate_pdf` tool generates a PDF.
 - **Actions** — Cut (⌘X), Copy (⌘C), Paste (⌘V), Select All (⌘A), Find… (⌘F), Search Files… (⇧⌘F), Copy Source, Toggle Raw, Toggle Edit, Save (⌘S).
 - **MDViewer ▸ Settings…** (⌘,) — opens the Preferences window where you can opt in to beta (pre-release) updates.
 

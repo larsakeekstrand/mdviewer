@@ -3,6 +3,26 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.20.0] - 2026-06-17
+
+Customizable PDF export with presets, live preview, and page numbers.
+
+### Added
+- **Customizable PDF export.** **File ▸ Export as PDF…** now opens a dedicated
+  Export to PDF window with three presets — **Clean** (default), **Report**
+  (serif body, justified), and **Compact** (denser) — plus adjustable base font
+  size, paper size (A4 / Letter / Legal), margins (Narrow / Normal / Wide), and
+  page numbers (None / Bottom center / Bottom right).
+- **Live preview and Exact PDF preview.** The window shows a live preview that
+  updates as you tune the settings; switch to the **Exact PDF** tab to render
+  the real file — correct page breaks, margins, and footers — before you save.
+- **Page numbers and custom margins** rendered via a native Core Graphics
+  post-processing pass after WebKit's print pipeline.
+
+### Changed
+- HTML export and the MCP `generate_pdf` tool now use your saved PDF look
+  (preset, font size, paper, margins, and page numbers).
+
 ## [1.19.1] - 2026-06-17
 
 Copy and paste now work everywhere.
