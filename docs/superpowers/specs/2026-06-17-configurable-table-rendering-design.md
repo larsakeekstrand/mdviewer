@@ -19,75 +19,87 @@ but tables were left untouched.
 
 ## Goal
 
-Give the user two controls over how tables render in exports:
+Give the user control over how tables render in exports:
 
 1. **Table style** — choose the visual treatment (Editorial / Grid / Minimal).
 2. **Wide tables** — choose how a too-wide table reconciles with page width
    (Scale to fit / Wrap text).
+3. **Long tables** — repeat the header row and paginate cleanly across pages,
+   instead of running off the page edge with no header (always on).
+4. **Orientation** — export in Portrait or Landscape, so very wide tables can
+   use the long edge of the page.
 
 ## Scope decisions (resolved during brainstorming)
 
 - **Table style applies to PDF *and* HTML export**, not the on-screen viewer.
   The on-screen viewer and split editor keep today's github grid.
-- **Wide-table behavior is PDF-only.** Auto-fitting a table to a fixed page
-  width has no meaning in an HTML document viewed at arbitrary width, and the
-  scaling code already runs only on the PDF path.
+- **All page-geometry behavior is PDF-only** (wide-table fit, long-table
+  pagination, orientation). Reconciling content with a fixed paginated page has
+  no meaning in an HTML document viewed at arbitrary width, and the relevant
+  code already runs only on the PDF path.
 - **Defaults change intentionally:** Editorial style + Wrap text become the new
   defaults. Existing users' wide tables will start wrapping instead of
   shrinking; "Grid" + "Scale to fit" are the escape hatches back to today's
   behavior.
 
-## Why these two are separate layers
+## Why style is separate from the PDF-page concerns
 
-Style and fit are orthogonal:
+There are two kinds of concern here, and they live in different code paths:
 
-- **Style** is a paint concern (borders, zebra, header treatment). It rides in
-  the shared `settingsToCss`, which already feeds both the PDF print and the
-  HTML export builder, so it reaches both formats with no extra wiring.
-- **Fit** is a layout concern (how a too-wide table reconciles with a fixed
-  page width). It is inherently PDF-only and lives on the PDF export path,
+- **Paint** — table *style* (borders, zebra, header treatment). It rides in the
+  shared `settingsToCss`, which already feeds both the PDF print and the HTML
+  export builder, so it reaches both formats with no extra wiring.
+- **Page geometry** — fit (wide-table reconciliation), long-table pagination,
+  and orientation. These are all about reconciling content with a fixed,
+  paginated page, which only exists for PDF. They live on the PDF export path,
   *outside* `settingsToCss`, so HTML export is unaffected.
 
-Keeping them in separate code paths is what lets "style spans both formats" and
-"fit is PDF-only" both be true without conditional branching inside the shared
-CSS.
+Keeping paint separate from page geometry is what lets "style spans both
+formats" and "everything page-related is PDF-only" both be true without
+conditional branching inside the shared CSS.
 
-## The two controls
+## The controls
 
-Both are added to the PDF export window (`pdf-export.html`), below the existing
-Margins / Page-numbers selects, each updating the live preview on change.
+The user-facing selects are added to the PDF export window (`pdf-export.html`),
+below the existing Margins / Page-numbers selects, each updating the live
+preview on change. Long-table pagination has no control — it is always-on
+behavior.
 
 | Control      | Values                        | Default     | Applies to          |
 | ------------ | ----------------------------- | ----------- | ------------------- |
 | Table style  | Editorial · Grid · Minimal    | Editorial   | PDF and HTML export |
 | Wide tables  | Scale to fit · Wrap text      | Wrap text   | PDF only            |
+| Orientation  | Portrait · Landscape          | Portrait    | PDF only            |
+| (Long tables)| always on (no control)        | —           | PDF only            |
 
 ## Design
 
 ### 1. Settings & persistence
 
-Add two fields to the exported/persisted settings object:
+Add three fields to the exported/persisted settings object:
 
 - `tableStyle`: `"editorial" | "grid" | "minimal"`
 - `tableFit`: `"fit" | "wrap"`
+- `orientation`: `"portrait" | "landscape"`
 
 **Frontend (`pdf-presets.js`):**
 
-- Add `tableStyle` and `tableFit` to each preset record. All three presets
-  (clean, report, compact) default to `editorial` + `wrap`. (Presets may differ
-  later; uniform defaults are the YAGNI choice now.)
-- Add both keys to the persisted settings subset returned by
+- Add `tableStyle`, `tableFit`, and `orientation` to each preset record. All
+  three presets (clean, report, compact) default to `editorial` + `wrap` +
+  `portrait`. (Presets may differ later; uniform defaults are the YAGNI choice
+  now.)
+- Add all three keys to the persisted settings subset returned by
   `settingsFromPreset` / `presetDefaults`, so they round-trip through
   `get_pdf_settings` / `save_pdf_settings` and are restored by "Reset to
   preset".
 
 **Backend (`recent.rs::PdfSettings`):**
 
-- Add `table_style: String` and `table_fit: String`.
-- Each gets `#[serde(default = "…")]` returning `"editorial"` / `"wrap"` so
-  settings JSON persisted by older versions (which lack the fields)
-  deserializes cleanly.
-- Update the `Default` impl to set both.
+- Add `table_style: String`, `table_fit: String`, and `orientation: String`.
+- Each gets `#[serde(default = "…")]` returning `"editorial"` / `"wrap"` /
+  `"portrait"` so settings JSON persisted by older versions (which lack the
+  fields) deserializes cleanly.
+- Update the `Default` impl to set all three.
 
 ### 2. Table style → `settingsToCss`
 
@@ -130,6 +142,62 @@ The wrap stylesheet is applied as its own injected style (or appended to the
 existing `#pdf-export-style` element on the PDF path only), never inside
 `buildExportHtml`, so the HTML export output never carries it.
 
+### 4. Long-table pagination (always on, PDF only)
+
+Today two rules sabotage tables that are taller than one page:
+
+- github-markdown.css sets `.markdown-body table { display: block }`, which
+  disables the browser's automatic header-row repetition (that needs
+  `display: table` + `thead { display: table-header-group }`).
+- our `@media print` block sets `.markdown-body table { break-inside: avoid }`,
+  telling a too-tall table never to split — which it cannot honor, so it
+  overruns or clips at the page edge with no repeated header.
+
+Fix, applied on the PDF path only (so the on-screen viewer's horizontal-scroll
+table behavior is preserved):
+
+- Lay tables out as `display: table` (not `block`) during print so pagination
+  and header groups work. In **Wrap** mode this already happens; the change is
+  to also apply it in the default flow for tables that aren't being scaled.
+- `thead { display: table-header-group }` so the header repeats on every page a
+  table spans.
+- Drop `break-inside: avoid` on the table itself for tables taller than a page,
+  letting them paginate. (Tables shorter than a page still sit on one page
+  naturally.)
+- `tr { break-inside: avoid }` so an individual row never tears across a page
+  boundary (idea C).
+
+Interaction with the fit knob: **Scale to fit** renders the table as a single
+scaled unit (`transform: scale`), which is atomic and cannot paginate — header
+repetition does not apply there, and that is fine (a scaled table fits on one
+page by construction). Header repetition and clean breaks are therefore a
+**Wrap-mode** benefit, which is the new default. No new control; it is part of
+how Wrap renders.
+
+### 5. Orientation (Portrait / Landscape, PDF only)
+
+A `<select>` for page orientation. Portrait is the default and today's only
+behavior.
+
+- **Native (`export.rs` / `pdf_postprocess.rs`):** `export_pdf` gains an
+  `orientation` (or `landscape: bool`) argument. `paper_points` returns the
+  portrait `(w, h)`; when landscape, swap to `(h, w)` before
+  `info.setPaperSize(...)` and before the post-process page geometry. This is
+  the load-bearing change — paper size is applied natively, not via CSS.
+- **Live preview (`wrapInPageSheet`):** swap the `paperMm` width/height when
+  landscape so the simulated page sheet matches.
+- **Scale-to-fit threshold (`PRINT_CONTENT_WIDTH_PX`, `app.js`):** this constant
+  is currently hardcoded to A4 portrait content width (and already ignores the
+  configurable margins — a pre-existing limitation). Landscape makes it more
+  wrong. The plan should derive the threshold from the actual paper width minus
+  margins and account for orientation, rather than leave the constant. This
+  matters only for **Scale to fit**; Wrap mode does not read it.
+- Margins are unchanged (the same top/right/bottom/left values apply to the
+  rotated page).
+
+HTML export ignores orientation (an HTML document has no fixed page geometry),
+consistent with the fit knob.
+
 ### Data flow (unchanged plumbing)
 
 - The PDF export window (`pdf-export.js`) reads settings via `get_pdf_settings`,
@@ -148,26 +216,42 @@ existing `#pdf-export-style` element on the PDF path only), never inside
   header tint and zebra, minimal has only the header underline); assert the wrap
   CSS helper (if extracted as a pure function) emits the override only for
   `tableFit === "wrap"`.
-- **`recent.rs`**: round-trip test proving JSON without `tableStyle` / `tableFit`
-  loads with defaults `editorial` / `wrap`, and a full round-trip preserving
-  explicit non-default values (camelCase serialization).
+- **`recent.rs`**: round-trip test proving JSON without `tableStyle` /
+  `tableFit` / `orientation` loads with defaults `editorial` / `wrap` /
+  `portrait`, and a full round-trip preserving explicit non-default values
+  (camelCase serialization).
+- **`pdf_postprocess.rs`**: assert the portrait→landscape dimension swap
+  (e.g. A4 landscape is `(841.89, 595.28)`), and that the default/unknown paper
+  still falls back correctly in both orientations.
 
 ## Out of scope
 
 - Per-table overrides (a global per-export choice only).
 - Changing the on-screen viewer's table style.
-- Wide-table behavior for HTML export.
+- Wide-table behavior and orientation for HTML export (style only spans both).
 - Additional table knobs (border color, padding, zebra toggle, etc.) — a single
   named style + a single fit mode only.
+- A control for long-table pagination — it is always-on behavior, not a toggle.
 
 ## Files touched
 
 - `ui/pdf-presets.js` — settings keys, preset records, `settingsToCss` table
   branches, (optional) wrap-CSS helper.
-- `ui/pdf-export.html` — two new `<select>` controls.
-- `ui/pdf-export.js` — reflect + change-listener wiring for both selects.
-- `ui/app.js` — gate `fitWideTablesForPrint()` on `tableFit`; inject wrap CSS on
-  the PDF path and PDF live preview when `tableFit === "wrap"`.
+- `ui/pdf-export.html` — three new `<select>` controls (table style, wide
+  tables, orientation).
+- `ui/pdf-export.js` — reflect + change-listener wiring for the three selects.
+- `ui/app.js` — gate `fitWideTablesForPrint()` on `tableFit`; inject wrap +
+  long-table pagination CSS (`display:table`, `thead` header group, row
+  `break-inside:avoid`, drop table `break-inside:avoid`) on the PDF path and PDF
+  live preview; pass `orientation` to `export_pdf`; make
+  `PRINT_CONTENT_WIDTH_PX` paper/margin/orientation-aware; swap `wrapInPageSheet`
+  dimensions for landscape.
+- `ui/styles.css` — adjust the `@media print` table rules (header group, row
+  break-inside) so they cooperate with the JS-applied layout.
+- `src-tauri/src/export.rs` — `export_pdf` `orientation` argument; landscape
+  dimension swap before `setPaperSize` and post-process.
+- `src-tauri/src/pdf_postprocess.rs` — orientation-aware paper dimensions +
+  test.
 - `src-tauri/src/recent.rs` — `PdfSettings` fields, serde defaults, `Default`
   impl, round-trip test.
 - Test files for `pdf-presets.js`.
