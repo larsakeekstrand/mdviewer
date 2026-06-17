@@ -6,7 +6,10 @@
 /// Async on purpose: Tauri runs sync commands on the main thread, but this
 /// command must run off the main thread (it waits for the print, which runs ON
 /// the main thread) — a sync command would deadlock.
+// The fields are read only by the macOS export path; on Windows the command is
+// a stub, so allow them to go unread there.
 #[derive(serde::Deserialize)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct Margins {
     pub top: f64,
     pub right: f64,
