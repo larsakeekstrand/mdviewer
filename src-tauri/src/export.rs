@@ -24,14 +24,15 @@ pub async fn export_pdf(
     paper: String,
     margins: Margins,
     page_numbers: String,
+    landscape: bool,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        macos::export(window, path, paper, margins, page_numbers).await
+        macos::export(window, path, paper, margins, page_numbers, landscape).await
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (window, path, paper, margins, page_numbers);
+        let _ = (window, path, paper, margins, page_numbers, landscape);
         Err("PDF export is not yet supported on Windows".to_string())
     }
 }
@@ -60,6 +61,7 @@ mod macos {
         paper: String,
         margins: super::Margins,
         page_numbers: String,
+        landscape: bool,
     ) -> Result<(), String> {
         // Print to a temp content PDF first, then re-lay it onto the requested
         // paper/margins and stamp page numbers into the real `path`.
@@ -67,7 +69,7 @@ mod macos {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&content_path);
 
-        let (paper_w, paper_h) = pdf_postprocess::paper_points(&paper);
+        let (paper_w, paper_h) = pdf_postprocess::oriented(&paper, landscape);
 
         let (started_tx, started_rx) = mpsc::channel::<Result<(), String>>();
         let p = content_path.clone();
