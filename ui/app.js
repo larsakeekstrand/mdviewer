@@ -409,15 +409,9 @@ async function init() {
     }).catch(() => {});
   });
 
-  await listen("pdf-export-request-preview", async (ev) => {
-    const { settings } = ev.payload;
-    try {
-      const html = await renderExportPreviewHtml(settings);
-      await emit("pdf-export-preview-html", { html });
-    } catch (e) {
-      console.error("preview build failed", e);
-      await emit("pdf-export-preview-html", { html: "", error: String(e) });
-    }
+  await listen("pdf-export-request-preview", (ev) => {
+    pendingPreviewSettings = ev.payload.settings;
+    servePreview();
   });
 
   window
@@ -1893,6 +1887,28 @@ function showTransientMessage(msg) {
 /* ---- Document export ---- */
 
 let exportInProgress = false;
+let previewRendering = false;
+let pendingPreviewSettings = null;
+
+async function servePreview() {
+  if (previewRendering) return;
+  previewRendering = true;
+  try {
+    while (pendingPreviewSettings && !exportInProgress) {
+      const s = pendingPreviewSettings;
+      pendingPreviewSettings = null;
+      try {
+        const html = await renderExportPreviewHtml(s);
+        await emit("pdf-export-preview-html", { html });
+      } catch (e) {
+        console.error("preview build failed", e);
+        await emit("pdf-export-preview-html", { html: "", error: String(e) });
+      }
+    }
+  } finally {
+    previewRendering = false;
+  }
+}
 
 const EXPORT_PAGE_CSS = `
 html { color-scheme: light; }
