@@ -131,6 +131,13 @@ test("minimal keeps github zebra (no nth-child suppression) but editorial remove
   assert.match(editorial, /nth-child\(2n\)\s*\{\s*background-color:\s*transparent/);
 });
 
+test("wrap geometry never leaks into settingsToCss (HTML export isolation)", () => {
+  // settingsToCss is shared by PDF + HTML export; the wrap layout (table-layout:
+  // fixed) is PDF-only and must be injected separately, never here.
+  const css = settingsToCss(mergeSettings(defaultSettings(), { tableFit: "wrap" }));
+  assert.doesNotMatch(css, /table-layout:\s*fixed/);
+});
+
 test("tableFitCss emits wrap layout only in wrap mode", () => {
   const wrap = tableFitCss(mergeSettings(defaultSettings(), { tableFit: "wrap" }));
   assert.match(wrap, /display:\s*table/);

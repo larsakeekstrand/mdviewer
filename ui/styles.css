@@ -980,9 +980,10 @@ body {
     widows: 3;
   }
 
-  /* Wide tables that would clip off the page are shrunk to fit via `zoom`, set
-     per-table in JS during export (fitWideTablesForPrint) — scaling the table
-     as a unit rather than wrapping its cells. Nothing needed here. */
+  /* Wide tables that would clip off the page are shrunk to fit via
+     `transform: scale()`, set per-table in JS during export
+     (fitWideTablesForPrint) — scaling the table as a unit rather than
+     wrapping its cells. Nothing needed here. */
 
   @page {
     margin: 16mm;
