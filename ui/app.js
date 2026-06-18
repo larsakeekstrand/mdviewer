@@ -44,6 +44,7 @@ import {
   paperMm,
   defaultSettings,
   mergeSettings,
+  tableFitCss,
 } from "./pdf-presets.js";
 
 // mdviewer frontend
@@ -2070,13 +2071,21 @@ async function exportDocument(format, path, settings) {
       // Shrink any table too wide for the page so it fits whole instead of
       // clipping, and keep headings attached to their following block. Both are
       // undone in the finally block.
-      fittedTables = fitWideTablesForPrint();
+      // Fit mode scales wide tables down as a unit; Wrap mode skips the scaler
+      // and injects wrap CSS (PDF-only — appended to the export style element,
+      // never into the shared settingsToCss / HTML output).
+      if (settings.tableFit === "fit") {
+        fittedTables = fitWideTablesForPrint(printContentWidthPx(settings));
+      } else {
+        styleEl.textContent += "\n" + tableFitCss(settings);
+      }
       headingWraps = keepHeadingsWithNext();
       await invoke("export_pdf", {
         path,
         paper: settings.paper,
         margins: marginMm(settings.margins),
         pageNumbers: settings.pageNumbers,
+        landscape: settings.orientation === "landscape",
       });
     }
     succeeded = true;
@@ -2110,7 +2119,9 @@ async function renderExportPreviewHtml(settings) {
     await swapMermaidForPrint();
     const boundary = treeRoot || parentDir(t.path);
     await neutralizeOutsideWorkspaceImages(preview, boundary);
-    fitted = fitWideTablesForPrint();
+    if (settings.tableFit === "fit") {
+      fitted = fitWideTablesForPrint(printContentWidthPx(settings));
+    }
     const body = await buildExportHtml(t, boundary, settings);
     return wrapInPageSheet(body, settings);
   } finally {
@@ -2126,6 +2137,12 @@ async function renderExportPreviewHtml(settings) {
 function wrapInPageSheet(docHtml, settings) {
   const paper = paperMm(settings.paper);
   const m = marginMm(settings.margins);
+  const landscape = settings.orientation === "landscape";
+  const sheetW = landscape ? paper.h : paper.w;
+  const sheetH = landscape ? paper.w : paper.h;
+  // Wrap mode needs its layout CSS in the preview too (settingsToCss carries
+  // only the paint style, not the PDF-only fit behavior).
+  const wrapCss = settings.tableFit === "wrap" ? "\n" + tableFitCss(settings) : "";
   // The sheet fits the preview width (reflowing when the pane is narrower than
   // the paper) so the whole page is always visible — the Exact PDF tab is the
   // pixel-faithful, paginated view. min-height keeps the empty-page proportions.
@@ -2134,13 +2151,13 @@ function wrapInPageSheet(docHtml, settings) {
   article.markdown-body {
     background: #fff;
     width: 100%;
-    max-width: ${paper.w}mm;
-    min-height: ${paper.h}mm;
+    max-width: ${sheetW}mm;
+    min-height: ${sheetH}mm;
     margin: 0 auto;
     padding-top: ${m.top}mm;
     padding-bottom: ${m.bottom}mm;
     box-shadow: 0 2px 16px rgba(0,0,0,.4);
-  }`;
+  }${wrapCss}`;
   return docHtml.replace("</head>", `<style>${sheetCss}</style></head>`);
 }
 
@@ -2314,7 +2331,17 @@ async function renderMermaidForExport(src) {
 // (2×48px, styles.css), minus an 8px safety buffer. Larger paper (Letter) or
 // smaller margins only leave MORE room, so a table that fits this never clips;
 // it may just sit a little narrow.
-const PRINT_CONTENT_WIDTH_PX = Math.round(((210 - 2 * 25.4) * 96) / 25.4) - 2 * 48 - 8;
+/** Printable width (px) available to the markdown body when shrinking wide
+ *  tables to fit. Generalizes the old A4-portrait constant: uses the chosen
+ *  paper's width in the active orientation (landscape uses the long edge),
+ *  minus WKWebView's ~1in default margins, the .markdown-body padding, and an
+ *  8px safety buffer. Only consulted in Scale-to-fit mode. */
+function printContentWidthPx(settings) {
+  const paper = paperMm(settings.paper);
+  const landscape = settings.orientation === "landscape";
+  const pageWmm = landscape ? paper.h : paper.w;
+  return Math.round(((pageWmm - 2 * 25.4) * 96) / 25.4) - 2 * 48 - 8;
+}
 
 /** Shrink each table wider than the printable page so it fits whole instead of
  *  clipping at the right margin — scaling the table as a unit (font and all),
@@ -2324,7 +2351,7 @@ const PRINT_CONTENT_WIDTH_PX = Math.round(((210 - 2 * 25.4) * 96) / 25.4) - 2 * 
  *  wrapped in a fixed-height `overflow:hidden` div so the layout reserves the
  *  scaled height and clips the now-empty original box. Returns the wrappers so
  *  the caller can unwrap and restore afterward. */
-function fitWideTablesForPrint() {
+function fitWideTablesForPrint(contentWidthPx) {
   const fitted = [];
   for (const table of preview.querySelectorAll("table")) {
     // Lay the table out at its full natural width (independent of the current
@@ -2332,15 +2359,15 @@ function fitWideTablesForPrint() {
     table.style.width = "max-content";
     table.style.maxWidth = "none";
     const rect = table.getBoundingClientRect();
-    if (rect.width <= PRINT_CONTENT_WIDTH_PX + 1) {
+    if (rect.width <= contentWidthPx + 1) {
       table.style.width = "";
       table.style.maxWidth = "";
       continue;
     }
-    const scale = PRINT_CONTENT_WIDTH_PX / rect.width;
+    const scale = contentWidthPx / rect.width;
     const wrap = document.createElement("div");
     wrap.style.position = "relative";
-    wrap.style.width = `${PRINT_CONTENT_WIDTH_PX}px`;
+    wrap.style.width = `${contentWidthPx}px`;
     wrap.style.height = `${Math.ceil(rect.height * scale)}px`;
     wrap.style.overflow = "hidden";
     table.parentNode.insertBefore(wrap, table);

@@ -90,6 +90,17 @@ pub fn paper_points(paper: &str) -> (f64, f64) {
     }
 }
 
+/// Portrait paper dimensions from `paper_points`, swapped to landscape when
+/// requested. Width/height are in PostScript points.
+pub fn oriented(paper: &str, landscape: bool) -> (f64, f64) {
+    let (w, h) = paper_points(paper);
+    if landscape {
+        (h, w)
+    } else {
+        (w, h)
+    }
+}
+
 /// The drawable box inside the page after subtracting margins. Origin is the
 /// PDF coordinate system (bottom-left).
 pub fn content_rect(paper_w: f64, paper_h: f64, m: &MarginsPts) -> RectPts {
@@ -293,6 +304,16 @@ mod tests {
         assert_eq!(paper_points("legal"), (612.0, 1008.0));
         assert_eq!(paper_points("a4"), (595.28, 841.89));
         assert_eq!(paper_points("garbage"), (595.28, 841.89));
+    }
+
+    #[test]
+    fn oriented_swaps_dimensions_for_landscape() {
+        assert_eq!(oriented("a4", false), (595.28, 841.89));
+        assert_eq!(oriented("a4", true), (841.89, 595.28));
+        assert_eq!(oriented("letter", false), (612.0, 792.0));
+        assert_eq!(oriented("letter", true), (792.0, 612.0));
+        // Unknown paper still falls back to A4, swapped when landscape.
+        assert_eq!(oriented("garbage", true), (841.89, 595.28));
     }
 
     #[test]

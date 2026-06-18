@@ -24,6 +24,22 @@ pub struct PdfSettings {
     pub paper: String,
     pub margins: String,
     pub page_numbers: String,
+    #[serde(default = "default_table_style")]
+    pub table_style: String,
+    #[serde(default = "default_table_fit")]
+    pub table_fit: String,
+    #[serde(default = "default_orientation")]
+    pub orientation: String,
+}
+
+fn default_table_style() -> String {
+    "editorial".into()
+}
+fn default_table_fit() -> String {
+    "wrap".into()
+}
+fn default_orientation() -> String {
+    "portrait".into()
 }
 
 impl Default for PdfSettings {
@@ -34,6 +50,9 @@ impl Default for PdfSettings {
             paper: "a4".into(),
             margins: "normal".into(),
             page_numbers: "bottom-center".into(),
+            table_style: default_table_style(),
+            table_fit: default_table_fit(),
+            orientation: default_orientation(),
         }
     }
 }
@@ -372,6 +391,9 @@ mod tests {
             paper: "letter".into(),
             margins: "wide".into(),
             page_numbers: "bottom-right".into(),
+            table_style: "minimal".into(),
+            table_fit: "fit".into(),
+            orientation: "landscape".into(),
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"baseSize\":12.5"), "got: {json}");
@@ -381,11 +403,32 @@ mod tests {
         );
         let back: PdfSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.preset, "report");
+        assert!(json.contains("\"tableStyle\":\"minimal\""), "got: {json}");
+        assert_eq!(back.orientation, "landscape");
+        assert_eq!(back.table_fit, "fit");
     }
 
     #[test]
     fn store_defaults_pdf_settings_when_absent() {
         let back: Store = serde_json::from_str(r#"{"folders":["/a"]}"#).unwrap();
         assert_eq!(back.pdf_export.preset, "clean");
+    }
+
+    #[test]
+    fn pdf_settings_default_has_new_table_fields() {
+        let s = PdfSettings::default();
+        assert_eq!(s.table_style, "editorial");
+        assert_eq!(s.table_fit, "wrap");
+        assert_eq!(s.orientation, "portrait");
+    }
+
+    #[test]
+    fn pdf_settings_old_json_gets_new_field_defaults() {
+        // Settings persisted by a version without the new fields must still load.
+        let json = r#"{"preset":"clean","baseSize":11.0,"paper":"a4","margins":"normal","pageNumbers":"bottom-center"}"#;
+        let s: PdfSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.table_style, "editorial");
+        assert_eq!(s.table_fit, "wrap");
+        assert_eq!(s.orientation, "portrait");
     }
 }

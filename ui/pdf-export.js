@@ -52,6 +52,9 @@ function reflect() {
   el("paper").value = settings.paper;
   el("margins").value = settings.margins;
   el("page-numbers").value = settings.pageNumbers;
+  el("table-style").value = settings.tableStyle;
+  el("table-fit").value = settings.tableFit;
+  el("orientation").value = settings.orientation;
 }
 
 function update(overrides) {
@@ -78,6 +81,9 @@ el("base-size").addEventListener("input", (e) => {
 el("paper").addEventListener("change", (e) => update({ paper: e.target.value }));
 el("margins").addEventListener("change", (e) => update({ margins: e.target.value }));
 el("page-numbers").addEventListener("change", (e) => update({ pageNumbers: e.target.value }));
+el("table-style").addEventListener("change", (e) => update({ tableStyle: e.target.value }));
+el("table-fit").addEventListener("change", (e) => update({ tableFit: e.target.value }));
+el("orientation").addEventListener("change", (e) => update({ orientation: e.target.value }));
 el("reset").addEventListener("click", () => {
   settings = presetDefaults(settings.preset);
   reflect();
