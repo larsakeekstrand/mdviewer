@@ -256,7 +256,7 @@ pub fn open_integration_window(app: &AppHandle) {
         WebviewUrl::App("claude-integration.html".into()),
     )
     .title("Claude Code Integration")
-    .inner_size(480.0, 360.0)
+    .inner_size(480.0, 540.0)
     .resizable(true)
     .build();
 }
