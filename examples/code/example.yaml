@@ -1,0 +1,23 @@
+# A small YAML example: application configuration.
+
+app:
+  name: mdviewer
+  version: "1.0.0"
+  debug: false
+
+server:
+  host: "127.0.0.1"
+  port: 3000
+  timeout_ms: 5000
+
+features:
+  - markdown
+  - mermaid
+  - katex
+  - syntax-highlighting
+
+logging:
+  level: info
+  # Rotate logs daily and keep 7 days of history.
+  rotate: daily
+  retain_days: 7

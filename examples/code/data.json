@@ -1,0 +1,19 @@
+{
+  "project": "mdviewer",
+  "version": "1.0.0",
+  "active": true,
+  "score": 42,
+  "ratio": 3.14,
+  "tags": ["markdown", "tauri", "rust"],
+  "author": {
+    "name": "Lars-Åke Ekstrand",
+    "email": "larsake.ekstrand@gmail.com",
+    "verified": true
+  },
+  "dependencies": {
+    "comrak": "0.36",
+    "tauri": "2.11",
+    "notify": "8.0"
+  },
+  "legacy": null
+}

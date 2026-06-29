@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example Page</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 600px;
+            margin: 2rem auto;
+            color: #1a1a1a;
+        }
+        h1 { color: #0969da; }
+    </style>
+</head>
+<body>
+    <h1>Hello, World!</h1>
+    <p id="output">Loading…</p>
+
+    <script>
+        const greet = (name) => `Hello, ${name}!`;
+        document.getElementById("output").textContent = greet("MDViewer");
+    </script>
+</body>
+</html>
