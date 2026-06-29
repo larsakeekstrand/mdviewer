@@ -20,6 +20,11 @@
       }
       .feature-name { font-weight: 600; }
       .feature-desc { opacity: 0.8; margin: 2px 0 0; }
+      .touches {
+        display: block; margin-top: 3px; opacity: 0.55;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+      }
+      .intro { margin: 0 0 16px; opacity: 0.85; }
       .status { opacity: 0.7; margin-right: 8px; font-size: 12px; }
       button {
         font-size: 12px; padding: 3px 12px; border-radius: 6px;
@@ -36,6 +41,12 @@
       Open a folder to set up integration for a project.
     </div>
 
+    <p class="intro">
+      Connect MDViewer to Claude Code so the docs Claude writes open here
+      automatically, and Claude can ask you to review them. Optional — set up
+      per project.
+    </p>
+
     <div class="feature">
       <div class="feature-head">
         <span class="feature-name">Hook</span>
@@ -45,7 +56,10 @@
         </span>
       </div>
       <p class="feature-desc">
-        Plans, specs, and designs Claude Code writes here open automatically.
+        When Claude Code writes a plan, spec, or design doc in this project,
+        MDViewer opens it automatically — so you read it here while Claude keeps
+        working.
+        <span class="touches">Edits .claude/settings.local.json</span>
       </p>
     </div>
 
@@ -58,7 +72,9 @@
         </span>
       </div>
       <p class="feature-desc">
-        Lets Claude open documents in MDViewer and request reviews you send back inline.
+        Lets Claude open documents in MDViewer and request reviews you send back
+        inline, without leaving your terminal.
+        <span class="touches">Adds an entry to .mcp.json</span>
       </p>
     </div>
 
@@ -68,7 +84,9 @@
         <span class="status">Always available</span>
       </div>
       <p class="feature-desc">
-        Comment on any block, then copy your review or send it straight to a waiting Claude session.
+        Comment on any rendered block, then copy your review or send it straight to
+        a waiting Claude session.
+        <span class="touches">No setup needed</span>
       </p>
     </div>
 
