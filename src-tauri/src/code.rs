@@ -1,10 +1,9 @@
-#![allow(dead_code)]
 use std::path::Path;
 use std::sync::LazyLock;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
 use syntect::html::{styled_line_to_highlighted_html, IncludeBackground};
-use syntect::parsing::SyntaxSet;
+use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_nonewlines);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
@@ -32,12 +31,9 @@ pub fn unsupported_html() -> String {
     "<div class=\"code-unsupported\">Can't preview this file type</div>".to_string()
 }
 
-/// Name of the syntect syntax chosen for this file (by extension, then first
-/// line, then plain text). Public for unit tests.
-pub fn detect_language(source: &str, path: &Path) -> String {
-    let ss = &SYNTAX_SET;
-    let syntax = path
-        .extension()
+fn find_syntax(source: &str, path: &Path) -> &'static SyntaxReference {
+    let ss: &'static SyntaxSet = &SYNTAX_SET;
+    path.extension()
         .and_then(|e| e.to_str())
         .and_then(|ext| ss.find_syntax_by_extension(ext))
         .or_else(|| {
@@ -46,8 +42,14 @@ pub fn detect_language(source: &str, path: &Path) -> String {
                 .next()
                 .and_then(|first| ss.find_syntax_by_first_line(first))
         })
-        .unwrap_or_else(|| ss.find_syntax_plain_text());
-    syntax.name.clone()
+        .unwrap_or_else(|| ss.find_syntax_plain_text())
+}
+
+/// Name of the syntect syntax chosen for this file (by extension, then first
+/// line, then plain text). Only used by unit tests.
+#[cfg(test)]
+pub fn detect_language(source: &str, path: &Path) -> String {
+    find_syntax(source, path).name.clone()
 }
 
 fn plain_numbered(source: &str) -> String {
@@ -68,18 +70,8 @@ pub fn render_code(source: &str, path: &Path, theme: &str) -> String {
         return plain_numbered(source);
     }
 
-    let ss = &SYNTAX_SET;
-    let syntax = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .and_then(|ext| ss.find_syntax_by_extension(ext))
-        .or_else(|| {
-            source
-                .lines()
-                .next()
-                .and_then(|first| ss.find_syntax_by_first_line(first))
-        })
-        .unwrap_or_else(|| ss.find_syntax_plain_text());
+    let ss: &'static SyntaxSet = &SYNTAX_SET;
+    let syntax = find_syntax(source, path);
 
     let theme_obj = match theme {
         "dark" => &THEME_SET.themes["base16-ocean.dark"],
@@ -162,6 +154,7 @@ mod tests {
         assert!(!is_binary(b"hello world"));
         assert!(is_binary(b"a\0b"));
         assert!(is_binary(&[0xff, 0xfe, 0x00]));
+        assert!(is_binary(&[0xff, 0xfe]));
     }
 
     #[test]

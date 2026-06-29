@@ -116,14 +116,21 @@ pub fn render_file(
     raw: Option<bool>,
 ) -> Result<RenderedFile, String> {
     let p = PathBuf::from(&path);
-    let contents =
-        std::fs::read_to_string(&p).map_err(|e| format!("cannot read '{}': {}", p.display(), e))?;
+    let bytes = std::fs::read(&p).map_err(|e| format!("cannot read '{}': {}", p.display(), e))?;
     let theme = theme.as_deref().unwrap_or("light");
     let raw = raw.unwrap_or(false);
-    let html = if !raw && markdown::is_markdown_path(&p) {
-        markdown::render_markdown(&contents, theme)
+    let html = if markdown::is_markdown_path(&p) {
+        let contents = String::from_utf8_lossy(&bytes);
+        if raw {
+            markdown::render_plain(&contents)
+        } else {
+            markdown::render_markdown(&contents, theme)
+        }
+    } else if crate::code::is_binary(&bytes) {
+        crate::code::unsupported_html()
     } else {
-        markdown::render_plain(&contents)
+        let contents = String::from_utf8_lossy(&bytes);
+        crate::code::render_code(&contents, &p, theme)
     };
     Ok(RenderedFile { html, path, raw })
 }
@@ -141,7 +148,7 @@ pub fn render_preview(
     if markdown::is_markdown_path(&p) {
         Ok(markdown::render_markdown(&source, theme))
     } else {
-        Ok(markdown::render_plain(&source))
+        Ok(crate::code::render_code(&source, &p, theme))
     }
 }
 
