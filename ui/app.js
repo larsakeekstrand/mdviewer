@@ -3897,6 +3897,16 @@ async function checkForUpdates({ silent = true } = {}) {
 }
 
 async function installCli() {
+  const proceed = await dialogApi.ask(
+    "This adds an `mdviewer` command to your terminal, so you can open files with `mdviewer file.md` from any shell.\n\nmacOS will ask for your password to link it into /usr/local/bin.",
+    {
+      title: "Install Command Line Tool",
+      kind: "info",
+      okLabel: "Install",
+      cancelLabel: "Cancel",
+    },
+  );
+  if (!proceed) return;
   let outcome;
   try {
     outcome = await invoke("install_cli");
