@@ -100,10 +100,6 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 cd .. && for f in ui/*.test.js; do node --test "$f"; done                       # JS helper tests
 ```
 
-If anything fails, stop and fix it before tagging — a bad tag is painful to
-unwind. After publishing, re-run `gh release view vX.Y.Z --json assets` and
-confirm `latest.json` is present (it's what the in-app updater reads).
-
 Before publishing the release (after step 8's build, against the artifact you
 are about to ship), run the launch smoke test — it boots the bundled app and
 confirms the frontend responds:
@@ -113,6 +109,10 @@ confirms the frontend responds:
 ```
 
 If it times out or fails, do not publish — the bundle does not boot.
+
+If anything fails, stop and fix it before tagging — a bad tag is painful to
+unwind. After publishing, re-run `gh release view vX.Y.Z --json assets` and
+confirm `latest.json` is present (it's what the in-app updater reads).
 
 ## Don't
 
