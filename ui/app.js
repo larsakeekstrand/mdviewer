@@ -2611,6 +2611,7 @@ function renderMath() {
 function addCopyButtons() {
   for (const pre of preview.querySelectorAll("pre")) {
     if (pre.classList.contains("mermaid")) continue;
+    if (pre.classList.contains("code-view")) continue;
     if (pre.querySelector(":scope > .copy-btn")) continue;
     const btn = document.createElement("button");
     btn.type = "button";
