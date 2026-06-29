@@ -506,6 +506,53 @@ body {
   padding: 20px;
 }
 
+/* Standalone code/text files: full-width monospace with a CSS-counter gutter.
+   Background uses the theme canvas so the syntect token colors (tuned for
+   InspiredGitHub / base16-ocean.dark) read correctly in both themes. */
+.code-body {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 16px 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+pre.code-view {
+  margin: 0;
+  padding: 0;
+  counter-reset: line;
+  tab-size: 4;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.code-view .cl {
+  display: block;
+  white-space: pre;
+}
+
+.code-view .cl::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3em;
+  margin-right: 1em;
+  padding-right: 0.6em;
+  text-align: right;
+  color: var(--sidebar-muted);
+  border-right: 1px solid var(--sidebar-border);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.code-unsupported {
+  padding: 40px;
+  text-align: center;
+  color: var(--sidebar-muted);
+}
+
 /* Plain-text fallback for non-markdown files */
 .markdown-body pre.plain-text {
   padding: 16px;

@@ -27,7 +27,7 @@ import {
   nextTheme,
   themeButtonFace,
 } from "./theme.js";
-import { isImagePath } from "./filetype.js";
+import { isImagePath, isMarkdownPath, isCodeView } from "./filetype.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
@@ -1662,12 +1662,15 @@ async function renderActive({ scrollLock = true, forceMermaid = false } = {}) {
 async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false } = {}) {
   previewEmpty.hidden = true;
   preview.hidden = false;
-  preview.classList.toggle("raw-body", raw);
+  const code = isCodeView(t.path);
+  preview.classList.toggle("raw-body", raw && !code);
 
   const anchor = scrollLock ? captureAnchor() : null;
 
   const incoming = document.createElement("article");
-  incoming.className = "markdown-body" + (raw ? " raw-body" : "");
+  incoming.className = code
+    ? "code-body"
+    : "markdown-body" + (raw ? " raw-body" : "");
   incoming.id = "preview";
   incoming.innerHTML = html;
 
