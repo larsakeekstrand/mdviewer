@@ -10,7 +10,7 @@ const EXT_MODE = {
   hxx: "clike", java: "clike", cs: "clike",
   css: "css", scss: "css", less: "css",
   html: "htmlmixed", htm: "htmlmixed", xhtml: "htmlmixed",
-  xml: "xml", svg: "xml",
+  xml: "xml",
   sh: "shell", bash: "shell", zsh: "shell",
   yml: "yaml", yaml: "yaml",
   go: "go",

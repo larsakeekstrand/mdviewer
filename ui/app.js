@@ -1552,7 +1552,7 @@ async function reloadFromDisk(t) {
   t.dirty = false;
   hideConflict();
   renderTabBar();
-  await renderFromEditor(t, { scrollLock: false });
+  if (!isCodeView(t.path)) await renderFromEditor(t, { scrollLock: false });
 }
 
 async function forceSave(t) {
@@ -1611,7 +1611,7 @@ async function applyTheme(theme) {
   updateThemeButton();
   const t = activeTab();
   if (t) {
-    if (t.editing) {
+    if (t.editing && !isCodeView(t.path)) {
       await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
     } else {
       await renderActive({ scrollLock: false, forceMermaid: true });
@@ -2025,7 +2025,7 @@ async function restoreViewState(t, snap) {
   t.raw = snap.raw;
   t.reviewMode = snap.reviewMode;
   initMermaid();
-  if (t.editing) {
+  if (t.editing && !isCodeView(t.path)) {
     await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
   } else {
     await renderActive({ scrollLock: false, forceMermaid: true });

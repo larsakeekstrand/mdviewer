@@ -1383,9 +1383,6 @@ pre.code-view {
 .pane-body.editing-inplace .preview-scroll {
   display: none;
 }
-.editor-pane .CodeMirror.cm-s-default {
-  white-space: pre;
-}
 
 /* CodeMirror ships only a light "default" theme; recolor it for dark mode so the
    editor follows the app theme. Attribute-driven, so toggling the theme while
