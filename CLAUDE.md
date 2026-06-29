@@ -198,8 +198,7 @@ icon.svg          — source for icon regeneration
   image tabs.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw / toggle-edit / save),
-  `open-file`, `open-folder`, `menu-check-updates`, `menu-install-claude-hook`,
-  `menu-install-mcp-server`.
+  `open-file`, `open-folder`, `menu-check-updates`.
 - **Update check** runs after `init()` on every launch and then on a
   `setInterval` of `UPDATE_CHECK_INTERVAL_MS` (1 h) for the lifetime of the
   process (silent on failure / current; the silent path also respects the
@@ -322,9 +321,9 @@ icon.svg          — source for icon regeneration
   `reviewMode` off during its re-render (like `prevRaw`) so review chrome never
   leaks into HTML/PDF. State is ephemeral — excluded from session restore and
   reset on the `openPreview` tab-reuse path.
-- **Claude Code hook install**: **MDViewer ▸ Install Claude Code Hook…**
-  (`menu.rs` emits `menu-install-claude-hook`, un-gated so it shows on both
-  platforms) → frontend `installClaudeHook()` (guards on an open `treeRoot`) →
+- **Claude Code hook install**: reached only via the **Claude Code
+  Integration** window's hook-row button (`ui/claude-integration.js` →
+  `invoke("install_claude_hook")`; there is no standalone menu item) →
   `commands::install_claude_hook`. The command resolves the open root via
   `current_root`, builds the hook command with `claude_hook::hook_command()`
   (POSIX single-quote / Windows double-quote escaping of `current_exe()`), and
@@ -342,7 +341,8 @@ icon.svg          — source for icon regeneration
   and non-matches exit 0 silently so the hook never disrupts Claude. No new IPC
   beyond the one command; no recursion risk (opening a file is a viewer action,
   not a Write).
-- **MCP server**: **MDViewer ▸ Install MCP Server…** merges
+- **MCP server**: the **Claude Code Integration** window's MCP-row button
+  (`invoke("install_mcp_server")`; no standalone menu item) merges
   `{"mcpServers":{"mdviewer":{"command":<exe>,"args":["--mcp"]}}}` into
   `<root>/.mcp.json` (`mcp::merge_mcp_config`, idempotent like `merge_hook`).
   Claude Code spawns `mdviewer --mcp` (checked in `main.rs` next to
@@ -394,10 +394,10 @@ icon.svg          — source for icon regeneration
   `claude_hook::hook_installed` on `.claude/settings.local.json` +
   `mcp::mcp_installed` on `.mcp.json`, both pure/unit-tested; returns
   `{hook, mcp, root}`) to render per-row Install/Update buttons wired to the
-  existing `install_claude_hook` / `install_mcp_server` commands. Those
-  commands now emit `integration-changed` on success (from any entry point —
-  window or the two standalone menu items), which the main window listens for
-  to re-evaluate the **first-run nudge**: a banner (reusing `.update-banner`,
+  existing `install_claude_hook` / `install_mcp_server` commands (this window
+  is the only entry point for both — there are no standalone menu items). Those
+  commands emit `integration-changed` on success, which the main window listens
+  for to re-evaluate the **first-run nudge**: a banner (reusing `.update-banner`,
   and yielding to the update banner when both would show) gated by
   `shouldNudge(isGitRepo, hook, mcp, dismissed)` — `gitRepoRoot` set, neither
   installed, and the global `mdviewer.integration.nudge_dismissed` localStorage
