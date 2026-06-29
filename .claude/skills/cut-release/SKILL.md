@@ -104,6 +104,16 @@ If anything fails, stop and fix it before tagging — a bad tag is painful to
 unwind. After publishing, re-run `gh release view vX.Y.Z --json assets` and
 confirm `latest.json` is present (it's what the in-app updater reads).
 
+Before publishing the release (after step 8's build, against the artifact you
+are about to ship), run the launch smoke test — it boots the bundled app and
+confirms the frontend responds:
+
+```sh
+./scripts/smoke-test.sh   # builds MDViewer.app, launches it, round-trips get_viewer_state
+```
+
+If it times out or fails, do not publish — the bundle does not boot.
+
 ## Don't
 
 - Don't change the bundle identifier `com.mdviewer.app` (orphans all persisted

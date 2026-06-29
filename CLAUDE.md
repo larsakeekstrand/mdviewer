@@ -675,6 +675,10 @@ cargo build --release
 cargo install tauri-cli --version "^2"
 cd src-tauri
 cargo tauri build
+
+# pre-release launch smoke test (macOS): builds the bundle, launches it,
+# and round-trips get_viewer_state over the MCP socket to prove it boots
+./scripts/smoke-test.sh
 ```
 
 ### Cutting a release
