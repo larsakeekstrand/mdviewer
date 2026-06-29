@@ -3,6 +3,20 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.21.0] - 2026-06-29
+
+Clearer Claude Code integration and command-line setup.
+
+### Changed
+- **Consolidated Claude Code setup.** The standalone Install Claude Code Hook…
+  and Install MCP Server… menu items are gone — install and update both from
+  MDViewer ▸ Claude Code Integration…, which also shows whether each is
+  already installed.
+- **Clearer integration explanations.** The Integration window now describes
+  what the hook and MCP server do and which file each edits.
+- **Command-line install explains itself.** Install Command Line Tool… now
+  shows what it does, and that macOS will ask for your password, before it runs.
+
 ## [1.20.0] - 2026-06-17
 
 Customizable PDF export with presets, live preview, and page numbers.
