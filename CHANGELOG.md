@@ -3,6 +3,22 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.22.0] - 2026-06-29
+
+Syntax-highlighted viewing and in-place editing for code and text files.
+
+### Added
+- **Syntax-highlighted code & text files.** Opening any non-markdown text file
+  (source code, JSON, YAML, config, …) now renders it with syntax highlighting
+  and a line-number gutter instead of flat plain text. Unrecognized text is
+  shown line-numbered; binary files get a friendly "can't preview" notice.
+- **In-place code editing.** Editing a code or text file now happens in a
+  single-pane editor in the same spot (with per-language highlighting for a
+  dozen common languages) rather than the markdown side-by-side split. Markdown
+  still opens the split with live preview.
+- **Tab edit indicators.** A tab being edited shows an accent-colored name, so
+  you can tell which tabs are in edit mode even when another tab is active.
+
 ## [1.21.0] - 2026-06-29
 
 Clearer Claude Code integration and command-line setup.

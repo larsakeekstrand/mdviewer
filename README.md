@@ -12,11 +12,12 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - VS Code–style file tree (lazy expansion, shows every file on disk) that updates live as files are added, removed, or renamed by other apps
 - **Git status decoration** — `M` / `A` / `U` / `D` badges on modified, added, untracked, and deleted files when the folder is a git repo, with directory roll-up
 - GitHub-flavored markdown rendering with syntax-highlighted code blocks
+- **Syntax-highlighted code & text files** — open any non-markdown text file (source code, JSON, YAML, config, …) to view it with server-side syntax highlighting (syntect, ~150 languages) and a line-number gutter; unrecognized text is shown line-numbered, and binary files get a friendly "can't preview" notice
 - **Mermaid diagrams** rendered inline, with hover-revealed **SVG / PNG export** buttons on each diagram (Retina-quality PNG with white background)
 - **LaTeX math** via KaTeX — inline `$…$` and display `$$…$$`, with the strict GFM delimiter rules (so `$5 and $10` stays as text)
 - **Copy button** on every fenced code block (hover to reveal)
 - **Interactive task lists** — click a `- [ ]` / `- [x]` checkbox in the rendered view and the change is written back to the source file atomically
-- **In-app editing** — click **Edit** (or **Actions ▸ Toggle Edit**) to open a side-by-side split: a CodeMirror source editor on the left, the live-rendered preview on the right (re-renders as you type). Save with ⌘S (**Actions ▸ Save**). Unsaved tabs show a ● dot. If the file changes on disk while you have unsaved edits, a banner lets you choose to reload or keep your version. The editor is hidden for image tabs.
+- **In-app editing** — click **Edit** (or **Actions ▸ Toggle Edit**) to edit the file. **Markdown** opens a side-by-side split: a CodeMirror source editor on the left, the live-rendered preview on the right (re-renders as you type). **Code and other text files edit in place** — the highlighted view becomes a single-pane editor (CodeMirror, with per-language highlighting for a dozen common languages, plain text otherwise) instead of the split. A tab being edited shows an **accent-colored name** (so you can spot it from another tab), and unsaved tabs show a ● dot. Save with ⌘S (**Actions ▸ Save**). If the file changes on disk while you have unsaved edits, a banner lets you choose to reload or keep your version. The editor is hidden for image tabs.
 - **File management from the tree** — right-click any file or folder row (or the sidebar background) for **New File…**, **New Folder…**, **Rename…**, **Duplicate** (files only), and **Delete**. Rename uses VS Code–style inline editing; Enter commits, Esc cancels. Delete moves to the system **Trash** (recoverable). Open tabs follow a rename, and tabs under a deleted path are closed.
 - **Review Mode** — click **💬 Review** to annotate a rendered document: hover any block for a gutter **+**, attach a comment, and add a document-wide general note. Clicking the toggle again — now **✓ Finish & Copy** — puts a structured markdown summary (the file path, your note, and each quoted block with its comment, in document order) on the clipboard — ready to paste into an AI coding assistant like Claude Code. Comments re-anchor to their blocks across live reloads; ones whose text changed are flagged. Annotations are per-tab and ephemeral (not saved to disk).
 - **In-document find** (⌘F) with case-sensitive and whole-word toggles, match count, and next/previous navigation
@@ -131,7 +132,7 @@ that case.
 - The **active tab's file is revealed in the tree** — its folders expand, its row scrolls into view, and it's highlighted with an accent bar — so you always know which file you're looking at. (Files opened from outside the current folder simply aren't highlighted.)
 - Every file on disk is shown — including dotfiles, entries matched by `.gitignore`, and `node_modules` / `target`.
 - The tree updates live: files added, removed, or renamed by other apps in the root or any expanded folder appear without reopening the folder, and git badges refresh with them.
-- Markdown files render as a preview; image files open as images; anything else is shown as plain text.
+- Markdown files render as a preview; image files open as images; code and other text files are shown with syntax highlighting and a line-number gutter (binary files show a "can't preview" notice).
 
 ### Tabs
 
