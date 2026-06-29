@@ -31,11 +31,23 @@ pub fn unsupported_html() -> String {
     "<div class=\"code-unsupported\">Can't preview this file type</div>".to_string()
 }
 
+/// Extensions syntect's default set doesn't cover, mapped to a near-equivalent
+/// extension it does. Keeps the read view in step with the editor's mode choice.
+fn alias_ext(ext: &str) -> Option<&'static str> {
+    match ext.to_ascii_lowercase().as_str() {
+        "ts" | "tsx" | "mts" | "cts" => Some("js"),
+        _ => None,
+    }
+}
+
 fn find_syntax(source: &str, path: &Path) -> &'static SyntaxReference {
     let ss: &'static SyntaxSet = &SYNTAX_SET;
-    path.extension()
-        .and_then(|e| e.to_str())
-        .and_then(|ext| ss.find_syntax_by_extension(ext))
+    let ext = path.extension().and_then(|e| e.to_str());
+    ext.and_then(|ext| ss.find_syntax_by_extension(ext))
+        .or_else(|| {
+            ext.and_then(alias_ext)
+                .and_then(|alias| ss.find_syntax_by_extension(alias))
+        })
         .or_else(|| {
             source
                 .lines()
@@ -103,6 +115,20 @@ mod tests {
     #[test]
     fn detects_rust_by_extension() {
         assert_eq!(detect_language("fn main() {}", Path::new("x.rs")), "Rust");
+    }
+
+    #[test]
+    fn typescript_uses_javascript_syntax() {
+        // syntect's default set has no TypeScript syntax; alias .ts/.tsx to
+        // JavaScript so the read view colors them (matching the editor mode).
+        assert_eq!(
+            detect_language("const x: number = 1;", Path::new("x.ts")),
+            "JavaScript"
+        );
+        assert_eq!(
+            detect_language("export const x = 1;", Path::new("x.tsx")),
+            "JavaScript"
+        );
     }
 
     #[test]
