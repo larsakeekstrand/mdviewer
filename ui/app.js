@@ -28,6 +28,7 @@ import {
   themeButtonFace,
 } from "./theme.js";
 import { isImagePath, isMarkdownPath, isCodeView } from "./filetype.js";
+import { modeForPath } from "./editor-modes.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
@@ -1219,11 +1220,14 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   const t = tabs[idx];
   if (t.editing) {
     ensureCm();
-    showEditorChrome(true);
+    const inPlace = isCodeView(t.path);
+    cm.setOption("mode", modeForPath(t.path));
+    cm.setOption("lineWrapping", !inPlace);
+    showEditorChrome(true, inPlace);
     cm.setValue(t.editBuffer != null ? t.editBuffer : t.savedContent);
     cm.clearHistory();
     cm.refresh();
-    await renderFromEditor(t, { scrollLock: same && !forceRender });
+    if (!inPlace) await renderFromEditor(t, { scrollLock: same && !forceRender });
   } else {
     showEditorChrome(false);
     await renderActive({ scrollLock: same && !forceRender });
@@ -1421,13 +1425,16 @@ async function enterEditMode(t) {
   t.dirty = false;
   t.editBuffer = src;
   ensureCm();
+  const inPlace = isCodeView(t.path);
+  cm.setOption("mode", modeForPath(t.path));
+  cm.setOption("lineWrapping", !inPlace);
   cm.setValue(src);
   cm.clearHistory();
-  showEditorChrome(true);
+  showEditorChrome(true, inPlace);
   renderTabBar();
   cm.refresh();
   cm.focus();
-  await renderFromEditor(t, { scrollLock: false });
+  if (!inPlace) await renderFromEditor(t, { scrollLock: false });
 }
 
 async function exitEditMode(t) {
@@ -1446,10 +1453,11 @@ async function exitEditMode(t) {
   await renderActive({ scrollLock: false });
 }
 
-function showEditorChrome(on) {
+function showEditorChrome(on, inPlace = false) {
   editorPane.hidden = !on;
-  editorSplitter.hidden = !on;
+  editorSplitter.hidden = !on || inPlace;
   paneBody.classList.toggle("editing", on);
+  paneBody.classList.toggle("editing-inplace", on && inPlace);
 }
 
 function onEditorChange() {
@@ -1461,6 +1469,7 @@ function onEditorChange() {
     t.dirty = dirty;
     renderTabBar();
   }
+  if (isCodeView(t.path)) return; // in-place editor has no live-preview pane
   if (previewDebounce) clearTimeout(previewDebounce);
   const path = t.path;
   previewDebounce = setTimeout(() => {

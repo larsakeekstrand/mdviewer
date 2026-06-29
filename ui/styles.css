@@ -1371,6 +1371,18 @@ pre.code-view {
   font-size: 13px;
 }
 
+/* In-place code editing: the editor fills the pane; no preview, no splitter. */
+.pane-body.editing-inplace .editor-pane {
+  width: 100%;
+  border-right: none;
+}
+.pane-body.editing-inplace .preview-scroll {
+  display: none;
+}
+.editor-pane .CodeMirror.cm-s-default {
+  white-space: pre;
+}
+
 /* CodeMirror ships only a light "default" theme; recolor it for dark mode so the
    editor follows the app theme. Attribute-driven, so toggling the theme while
    editing restyles the editor with no JS. Palette mirrors github-markdown dark. */
@@ -1429,6 +1441,16 @@ pre.code-view {
 [data-theme="dark"] .editor-pane .cm-variable-2,
 [data-theme="dark"] .editor-pane .cm-def {
   color: #ffa657;
+}
+[data-theme="dark"] .editor-pane .cm-property,
+[data-theme="dark"] .editor-pane .cm-builtin {
+  color: #79c0ff;
+}
+[data-theme="dark"] .editor-pane .cm-variable-3 {
+  color: #ffa657;
+}
+[data-theme="dark"] .editor-pane .cm-meta {
+  color: #8b949e;
 }
 [data-theme="dark"] .editor-pane .cm-em {
   color: var(--fg, #e6edf3);
