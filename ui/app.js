@@ -1322,6 +1322,7 @@ function makeTabEl(tab, idx) {
   el.className = "tab";
   if (!tab.sticky) el.classList.add("preview");
   if (idx === activeIdx) el.classList.add("active");
+  if (tab.editing) el.classList.add("editing");
   el.title = tab.path;
   el.setAttribute("role", "tab");
 

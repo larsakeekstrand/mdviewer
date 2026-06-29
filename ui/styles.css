@@ -363,6 +363,10 @@ body {
   font-style: italic;
 }
 
+.tab.editing .tab-name {
+  color: #5599ff;
+}
+
 .tab-name {
   overflow: hidden;
   text-overflow: ellipsis;
