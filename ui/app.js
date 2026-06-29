@@ -1288,18 +1288,19 @@ function renderTabBar() {
   const t = activeTab();
   if (t) {
     const image = isImagePath(t.path);
+    const code = isCodeView(t.path);
     editBtn.hidden = image;
     if (!image) {
       editBtn.textContent = t.editing ? "Done" : "Edit";
       editBtn.setAttribute("aria-pressed", t.editing ? "true" : "false");
     }
     saveBtn.hidden = !t.editing;
-    rawBtn.hidden = image || t.editing;
-    if (!image) {
+    rawBtn.hidden = image || code || t.editing;
+    if (!image && !code) {
       rawBtn.textContent = t.raw ? "Rendered" : "Raw";
       rawBtn.setAttribute("aria-pressed", t.raw ? "true" : "false");
     }
-    reviewBtn.hidden = image || t.editing || t.raw;
+    reviewBtn.hidden = image || code || t.editing || t.raw;
     if (!reviewBtn.hidden) {
       reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
       reviewBtn.textContent = reviewButtonLabel(t.reviewMode, t.mcpRequestId);
@@ -1967,8 +1968,8 @@ async function onExport(format) {
     showTransientError("Open a document before exporting.");
     return;
   }
-  if (isImagePath(t.path)) {
-    showTransientError("Export is only available for text documents.");
+  if (!isMarkdownPath(t.path)) {
+    showTransientError("Export is only available for Markdown documents.");
     return;
   }
   const ext = format === "pdf" ? "pdf" : "html";
@@ -3166,6 +3167,10 @@ async function runEditAction(name) {
     (name === "copy-source" || name === "toggle-raw" || name === "toggle-edit")
   ) {
     showTransientError("Not available for images.");
+    return;
+  }
+  if (t && isCodeView(t.path) && name === "toggle-raw") {
+    showTransientError("Raw view isn't available for code files.");
     return;
   }
   switch (name) {
