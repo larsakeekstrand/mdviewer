@@ -1,4 +1,5 @@
 mod claude_hook;
+mod code;
 mod commands;
 mod export;
 mod fs_ops;
