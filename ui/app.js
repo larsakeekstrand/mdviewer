@@ -457,6 +457,16 @@ async function init() {
   await listen("pdf-export-request-preview", (ev) => {
     const t = activeTab();
     if (t) emit("pdf-export-active-name", { name: exportFilename(t.path, "pdf") }).catch(() => {});
+    // The Export-to-PDF window is opened unconditionally from the menu (no
+    // gate on the active tab), so a PDF tab's own iframe #preview can be live
+    // underneath it — exportDocument/servePreview must not run against that.
+    if (!t || !isExportable(viewKind(t.path))) {
+      emit("pdf-export-preview-html", {
+        html: "",
+        error: "Export is only available for Markdown and spreadsheets.",
+      }).catch(() => {});
+      return;
+    }
     pendingPreviewSettings = ev.payload.settings;
     servePreview();
   });
@@ -466,6 +476,16 @@ async function init() {
     if (exportInProgress) {
       await emit("pdf-export-done", { ok: false, error: "an export is already in progress" });
       return;
+    }
+    {
+      const t = activeTab();
+      if (!t || !isExportable(viewKind(t.path))) {
+        await emit("pdf-export-done", {
+          ok: false,
+          error: "Export is only available for Markdown and spreadsheets.",
+        });
+        return;
+      }
     }
     // Compute dest before the previewRendering guard so no await sits between
     // the guard's exit and exportDocument setting exportInProgress = true.
