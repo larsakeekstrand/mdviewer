@@ -11,7 +11,7 @@ static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LINES: usize = 50_000;
 
-fn escape_html(s: &str) -> String {
+pub(crate) fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
