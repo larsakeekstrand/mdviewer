@@ -270,10 +270,20 @@ icon.svg          — source for icon regeneration
 - **Spreadsheets**: `src-tauri/src/xlsx.rs` (calamine) renders
   xlsx/xlsm/xlsb/xls/ods to HTML tables (`.sheet-body` in `#preview`) in
   `render_file`, in an arm placed *above* the `is_binary` check because xlsx
-  is a zip. Because the output is ordinary HTML, find, both exports, print,
-  the render cache, and retained DOM all work with no sheet-specific
-  handling; the first row becomes `<thead>`, so the existing print rule
-  repeats headers across PDF pages. Values and cached formula results
+  is a zip. Because the output is ordinary HTML, find, the render cache, and
+  retained DOM all work with no sheet-specific handling. PDF export is NOT
+  handling-free: `.sheet-body` cells are `white-space: nowrap`
+  (`ui/styles.css`), so Wrap mode's CSS-only reflow can't fit a wide sheet —
+  `ui/app.js`'s PDF export forces the `fitWideTablesForPrint` JS scaler for
+  every sheet tab regardless of the chosen tableFit preset, and
+  `ui/pdf-presets.js` (`settingsToCss` / `tableStyleCss` / `tableFitCss`) and
+  the `@media print` block in `ui/styles.css` duplicate their `.markdown-body`
+  selectors onto `.sheet-body` so presets (fonts, margins, table style) and
+  print color/pagination rules apply to sheets too. The first row becomes
+  `<thead>`, and headers repeat across PDF pages from WebKit's own UA default
+  for a `display: table` `<thead>` — NOT from the `.markdown-body thead` print
+  rule, which is deliberately left unwidened (redundant for sheets). Values
+  and cached formula results
   only — no fonts, colors, column widths, charts, or pivot tables; a formula
   cell shows whatever the writing application cached (a tool that caches
   nothing shows 0). `xlsx::Caps` enforces five limits: `max_file_bytes`

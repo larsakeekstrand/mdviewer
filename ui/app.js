@@ -2368,8 +2368,11 @@ async function exportDocument(format, path, settings) {
       // undone in the finally block.
       // Fit mode scales wide tables down as a unit; Wrap mode skips the scaler
       // and injects wrap CSS (PDF-only — appended to the export style element,
-      // never into the shared settingsToCss / HTML output).
-      if (settings.tableFit === "fit") {
+      // never into the shared settingsToCss / HTML output). Sheet cells are
+      // `white-space: nowrap` (ui/styles.css), so Wrap's CSS-only reflow can't
+      // shrink a spreadsheet table — force the scaler regardless of the
+      // chosen preset for sheet tabs.
+      if (settings.tableFit === "fit" || viewKind(t.path) === "sheet") {
         fittedTables = fitWideTablesForPrint(printContentWidthPx(settings));
       } else {
         styleEl.textContent += "\n" + tableFitCss(settings);
@@ -2421,7 +2424,7 @@ async function renderExportPreviewHtml(settings) {
     await swapMermaidForPrint();
     const boundary = treeRoot || parentDir(t.path);
     await neutralizeOutsideWorkspaceImages(preview, boundary);
-    if (settings.tableFit === "fit") {
+    if (settings.tableFit === "fit" || viewKind(t.path) === "sheet") {
       fitted = fitWideTablesForPrint(printContentWidthPx(settings));
     }
     const body = await buildExportHtml(t, boundary, settings);

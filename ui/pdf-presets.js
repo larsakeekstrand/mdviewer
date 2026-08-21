@@ -125,16 +125,20 @@ function presetRecord(settings) {
   return PRESETS[settings.preset] || PRESETS.clean;
 }
 
-/** CSS scoped to `.markdown-body`, applied both to the standalone HTML preview
- *  and (injected as a <style>) to the live #preview during the in-app PDF
- *  print. Typography + accent + left/right margins live here; paper size and
- *  top/bottom margins + page numbers are applied natively (not CSS). */
+/** CSS scoped to `.markdown-body` AND `.sheet-body` (the two preview body
+ *  classes — markdown and spreadsheet previews), applied both to the
+ *  standalone HTML preview and (injected as a <style>) to the live #preview
+ *  during the in-app PDF print. Typography + accent + left/right margins live
+ *  here; paper size and top/bottom margins + page numbers are applied
+ *  natively (not CSS). Every rule below is duplicated onto `.sheet-body` so a
+ *  spreadsheet tab picks up the same preset — never REPLACED, since the
+ *  `.markdown-body` selector must keep matching markdown exactly as before. */
 export function settingsToCss(settings) {
   const p = presetRecord(settings);
   const size = clampBaseSize(settings.baseSize);
   const m = marginMm(settings.margins);
   const justify = p.justify ? "\n  text-align: justify;" : "";
-  return `.markdown-body {
+  return `.markdown-body, .sheet-body {
   --pdf-accent: ${p.accent};
   font-family: ${p.bodyFont};
   font-size: ${size}pt;
@@ -145,51 +149,64 @@ export function settingsToCss(settings) {
   padding-right: ${m.right}mm;${justify}
 }
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
-.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+.markdown-body h4, .markdown-body h5, .markdown-body h6,
+.sheet-body h1, .sheet-body h2, .sheet-body h3,
+.sheet-body h4, .sheet-body h5, .sheet-body h6 {
   font-family: ${p.headingFont};
   color: var(--pdf-accent);
   line-height: 1.25;
 }
-.markdown-body h1 { font-size: ${(2.0 * p.headingScale).toFixed(3)}em; }
-.markdown-body h2 { font-size: ${(1.6 * p.headingScale).toFixed(3)}em; }
-.markdown-body h3 { font-size: ${(1.3 * p.headingScale).toFixed(3)}em; }
-.markdown-body a { color: var(--pdf-accent); text-decoration: underline; }
+.markdown-body h1, .sheet-body h1 { font-size: ${(2.0 * p.headingScale).toFixed(3)}em; }
+.markdown-body h2, .sheet-body h2 { font-size: ${(1.6 * p.headingScale).toFixed(3)}em; }
+.markdown-body h3, .sheet-body h3 { font-size: ${(1.3 * p.headingScale).toFixed(3)}em; }
+.markdown-body a, .sheet-body a { color: var(--pdf-accent); text-decoration: underline; }
 ${tableStyleCss(settings)}
-.markdown-body pre, .markdown-body code { font-family: ${FONT_MONO}; }
-.markdown-body pre { font-size: 0.85em; }
+.markdown-body pre, .markdown-body code,
+.sheet-body pre, .sheet-body code { font-family: ${FONT_MONO}; }
+.markdown-body pre, .sheet-body pre { font-size: 0.85em; }
 `;
 }
 
 /** Paint-only table CSS by style. Appended after github-markdown.css (equal
  *  specificity, later wins), so it overrides the base grid. Shared by PDF and
- *  HTML export via settingsToCss. */
+ *  HTML export via settingsToCss. Matches both `.markdown-body table` and
+ *  `.sheet-body table` — widened, not replaced, so markdown tables keep their
+ *  existing rules unchanged. */
 export function tableStyleCss(settings) {
   // editorial suppresses github-markdown's zebra striping; grid and minimal
   // intentionally keep it (minimal = header underline + subtle zebra).
   switch (settings.tableStyle) {
     case "grid":
-      return `.markdown-body table th { background: color-mix(in srgb, var(--pdf-accent) 12%, transparent); }`;
+      return `.markdown-body table th, .sheet-body table th { background: color-mix(in srgb, var(--pdf-accent) 12%, transparent); }`;
     case "minimal":
-      return `.markdown-body table th, .markdown-body table td { border: 0; }
-.markdown-body table th { border-bottom: 2px solid var(--borderColor-default, #d0d7de); font-weight: 700; }
-.markdown-body table tr { background-color: transparent; border-top: 0; }`;
+      return `.markdown-body table th, .markdown-body table td,
+.sheet-body table th, .sheet-body table td { border: 0; }
+.markdown-body table th, .sheet-body table th { border-bottom: 2px solid var(--borderColor-default, #d0d7de); font-weight: 700; }
+.markdown-body table tr, .sheet-body table tr { background-color: transparent; border-top: 0; }`;
     case "editorial":
     default:
-      return `.markdown-body table { border-top: 2px solid var(--fgColor-default, #1f2328); border-bottom: 2px solid var(--fgColor-default, #1f2328); }
-.markdown-body table th, .markdown-body table td { border: 0; }
-.markdown-body table th { border-bottom: 1px solid var(--fgColor-default, #1f2328); font-weight: 700; }
-.markdown-body table td { border-bottom: 1px solid var(--borderColor-muted, #d8dee4); }
-.markdown-body table tr { background-color: transparent; border-top: 0; }
-.markdown-body table tr:nth-child(2n) { background-color: transparent; }`;
+      return `.markdown-body table, .sheet-body table { border-top: 2px solid var(--fgColor-default, #1f2328); border-bottom: 2px solid var(--fgColor-default, #1f2328); }
+.markdown-body table th, .markdown-body table td,
+.sheet-body table th, .sheet-body table td { border: 0; }
+.markdown-body table th, .sheet-body table th { border-bottom: 1px solid var(--fgColor-default, #1f2328); font-weight: 700; }
+.markdown-body table td, .sheet-body table td { border-bottom: 1px solid var(--borderColor-muted, #d8dee4); }
+.markdown-body table tr, .sheet-body table tr { background-color: transparent; border-top: 0; }
+.markdown-body table tr:nth-child(2n), .sheet-body table tr:nth-child(2n) { background-color: transparent; }`;
   }
 }
 
 /** Page-geometry table CSS for Wrap mode: hold the table to the page width and
  *  wrap cell text (table grows taller) instead of scaling it down. Empty in Fit
  *  mode (the JS scaler handles that). PDF-only — injected by app.js, never by
- *  settingsToCss, so HTML export is unaffected. */
+ *  settingsToCss, so HTML export is unaffected. Also matches `.sheet-body
+ *  table`; in practice app.js forces the JS scaler (fitWideTablesForPrint) for
+ *  sheet tabs regardless of the Wrap/Fit setting, because sheet cells are
+ *  `white-space: nowrap` (styles.css) and can't be reflowed by CSS alone — but
+ *  this stays widened too so it is never silently mismatched with
+ *  settingsToCss/tableStyleCss above. */
 export function tableFitCss(settings) {
   if (settings.tableFit !== "wrap") return "";
-  return `.markdown-body table { display: table; width: 100%; table-layout: fixed; }
-.markdown-body table th, .markdown-body table td { overflow-wrap: anywhere; white-space: normal; }`;
+  return `.markdown-body table, .sheet-body table { display: table; width: 100%; table-layout: fixed; }
+.markdown-body table th, .markdown-body table td,
+.sheet-body table th, .sheet-body table td { overflow-wrap: anywhere; white-space: normal; }`;
 }

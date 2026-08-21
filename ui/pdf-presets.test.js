@@ -82,9 +82,9 @@ test("paperMm portrait dimensions", () => {
   assert.deepEqual(paperMm("letter"), { w: 215.9, h: 279.4 });
 });
 
-test("settingsToCss is scoped to .markdown-body and reflects base size", () => {
+test("settingsToCss is scoped to .markdown-body (widened to also cover .sheet-body) and reflects base size", () => {
   const css = settingsToCss(mergeSettings(defaultSettings(), { baseSize: 13 }));
-  assert.match(css, /\.markdown-body\s*\{/);
+  assert.match(css, /\.markdown-body,\s*\.sheet-body\s*\{/);
   assert.match(css, /font-size:\s*13pt/);
 });
 
@@ -109,7 +109,10 @@ test("defaults are editorial / wrap / portrait", () => {
 
 test("editorial style: bounding rules, no zebra, no full grid", () => {
   const css = settingsToCss(presetDefaults("clean")); // clean => editorial
-  assert.match(css, /\.markdown-body table\s*\{[^}]*border-top:\s*2px solid/);
+  assert.match(
+    css,
+    /\.markdown-body table,\s*\.sheet-body table\s*\{[^}]*border-top:\s*2px solid/,
+  );
   assert.match(css, /tr:nth-child\(2n\)\s*\{\s*background-color:\s*transparent/);
 });
 
@@ -144,4 +147,38 @@ test("tableFitCss emits wrap layout only in wrap mode", () => {
   assert.match(wrap, /table-layout:\s*fixed/);
   assert.match(wrap, /overflow-wrap:\s*anywhere/);
   assert.equal(tableFitCss(mergeSettings(defaultSettings(), { tableFit: "fit" })), "");
+});
+
+test("settingsToCss, tableStyleCss, and tableFitCss are widened to .sheet-body, not markdown-only", () => {
+  const settings = defaultSettings();
+  assert.match(settingsToCss(settings), /\.sheet-body\s*\{/);
+  assert.match(settingsToCss(settings), /\.sheet-body h1/);
+  for (const tableStyle of ["editorial", "grid", "minimal"]) {
+    assert.match(
+      tableStyleCss(mergeSettings(settings, { tableStyle })),
+      /\.sheet-body table/,
+      `tableStyleCss(${tableStyle}) should also target .sheet-body`,
+    );
+  }
+  assert.match(
+    tableFitCss(mergeSettings(settings, { tableFit: "wrap" })),
+    /\.sheet-body table/,
+  );
+});
+
+test("widening to .sheet-body does not drop any .markdown-body rule", () => {
+  // Every selector in the pre-widening CSS ("PLAIN" run below) must still be
+  // present verbatim once .sheet-body is added — proves we widened, not
+  // replaced.
+  const settings = mergeSettings(defaultSettings(), { tableStyle: "grid", tableFit: "wrap" });
+  const css = settingsToCss(settings);
+  for (const selector of [
+    ".markdown-body, .sheet-body {",
+    ".markdown-body h1, .markdown-body h2, .markdown-body h3,",
+    ".markdown-body a, .sheet-body a",
+    ".markdown-body pre, .markdown-body code,",
+    ".markdown-body pre, .sheet-body pre {",
+  ]) {
+    assert.ok(css.includes(selector), `missing markdown selector: ${selector}`);
+  }
 });

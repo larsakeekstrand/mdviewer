@@ -996,19 +996,28 @@ pre.code-view {
      Mermaid node fills all carry information. Force them to print as shown so
      the PDF matches the viewer. */
   .markdown-body,
-  .markdown-body * {
+  .markdown-body *,
+  .sheet-body,
+  .sheet-body * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
   /* Keep a heading glued to the start of its section — never let it sit alone
-     at the bottom of a page. */
+     at the bottom of a page. (.sheet-body's only heading is its optional
+     per-sheet <h2> name.) */
   .markdown-body h1,
   .markdown-body h2,
   .markdown-body h3,
   .markdown-body h4,
   .markdown-body h5,
-  .markdown-body h6 {
+  .markdown-body h6,
+  .sheet-body h1,
+  .sheet-body h2,
+  .sheet-body h3,
+  .sheet-body h4,
+  .sheet-body h5,
+  .sheet-body h6 {
     break-inside: avoid;
     break-after: avoid;
   }
@@ -1026,14 +1035,24 @@ pre.code-view {
   /* Long tables: lay out as a real table (github-markdown sets display:block,
      which disables header-group repetition), repeat the header on every page,
      and keep individual rows intact. display:table here only affects the print
-     capture, so the on-screen horizontal-scroll behavior is preserved. */
-  .markdown-body table {
+     capture, so the on-screen horizontal-scroll behavior is preserved.
+     .sheet-body's table is already `display: table` (styles.css above), so
+     this rule is a no-op there; listed for symmetry and in case that ever
+     changes. .sheet-body's table DOES have a real <thead> (xlsx.rs), but the
+     `.markdown-body thead` rule below is deliberately not widened to match it
+     — WebKit's print pipeline already repeats a `<thead>` on every page by
+     UA default once the table itself is `display: table`, so the explicit
+     rule is redundant for sheets (kept markdown-only since that's the case it
+     was written for). */
+  .markdown-body table,
+  .sheet-body table {
     display: table;
   }
   .markdown-body thead {
     display: table-header-group;
   }
-  .markdown-body tr {
+  .markdown-body tr,
+  .sheet-body tr {
     break-inside: avoid;
   }
 
