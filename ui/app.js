@@ -28,13 +28,13 @@ import {
   themeButtonFace,
 } from "./theme.js";
 import {
-  isMarkdownPath,
   viewKind,
   isEditable,
   hasSplitPreview,
   hasRawToggle,
   isAnnotatable,
   isRetainable,
+  isExportable,
   rendersFromDisk,
   bustsCacheOnChange,
 } from "./filetype.js";
@@ -2267,8 +2267,8 @@ async function onExport(format) {
     showTransientError("Open a document before exporting.");
     return;
   }
-  if (!isMarkdownPath(t.path)) {
-    showTransientError("Export is only available for Markdown documents.");
+  if (!isExportable(viewKind(t.path))) {
+    showTransientError("Export is only available for Markdown and spreadsheets.");
     return;
   }
   const ext = format === "pdf" ? "pdf" : "html";
