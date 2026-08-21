@@ -3783,15 +3783,21 @@ document.addEventListener("contextmenu", (ev) => {
   }
 
   if (tab) {
-    items.push({
-      label: "Copy Source",
-      action: actionCopySource,
-    });
-    if (items.length) items.push("---");
-    items.push({
-      label: tab.raw ? "Show Rendered" : "Show Raw",
-      action: onToggleRaw,
-    });
+    const kind = viewKind(tab.path);
+    const menuLenBefore = items.length;
+    if (isEditable(kind)) {
+      items.push({
+        label: "Copy Source",
+        action: actionCopySource,
+      });
+    }
+    if (hasRawToggle(kind)) {
+      if (items.length > menuLenBefore) items.push("---");
+      items.push({
+        label: tab.raw ? "Show Rendered" : "Show Raw",
+        action: onToggleRaw,
+      });
+    }
   }
 
   if (items.length === 0) return;
