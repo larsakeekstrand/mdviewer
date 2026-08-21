@@ -53,6 +53,15 @@ pub fn is_spreadsheet_path(p: &Path) -> bool {
 /// 1900-02-29 at serial 60, so serials at or below 59 sit one day ahead of the
 /// real calendar and take a different epoch offset.
 pub fn excel_serial_to_iso(serial: f64) -> String {
+    // Excel's own range: 1900-01-01 (serial 1) .. 9999-12-31 (2_958_465). A
+    // crafted or corrupt cell (calamine does no range clamping) can carry an
+    // out-of-range or non-finite serial — `days as i64` would saturate to
+    // i64::MAX/MIN for something like 1e300, and civil_from_days's `z +
+    // 719_468` then panics in debug builds / wraps to a garbage year in
+    // release. Bail out to the raw number instead of converting.
+    if !serial.is_finite() || !(-694_000.0..=2_958_465.0).contains(&serial) {
+        return format!("{serial}");
+    }
     let days = serial.trunc() as i64;
     let epoch_offset = if days <= 59 { 25_568 } else { 25_569 };
     let (y, m, d) = civil_from_days(days - epoch_offset);
@@ -312,6 +321,20 @@ mod tests {
         assert_eq!(excel_serial_to_iso(61.0), "1900-03-01");
         assert_eq!(excel_serial_to_iso(25569.0), "1970-01-01");
         assert_eq!(excel_serial_to_iso(45000.0), "2023-03-15");
+    }
+
+    #[test]
+    fn clamps_out_of_range_and_non_finite_serials_instead_of_panicking() {
+        // A crafted `<v>1e300</v>` in a date-formatted cell (calamine applies
+        // no range clamping) must not panic in debug builds nor wrap to a
+        // garbage year in release; it must fall back to the raw number.
+        assert_eq!(excel_serial_to_iso(1e300), format!("{}", 1e300));
+        assert_eq!(excel_serial_to_iso(f64::INFINITY), "inf");
+        assert_eq!(excel_serial_to_iso(f64::NEG_INFINITY), "-inf");
+        assert_eq!(excel_serial_to_iso(f64::NAN), "NaN");
+        // Just outside Excel's own date range on both ends.
+        assert_eq!(excel_serial_to_iso(2_958_466.0), "2958466");
+        assert_eq!(excel_serial_to_iso(-694_001.0), "-694001");
     }
 
     #[test]
