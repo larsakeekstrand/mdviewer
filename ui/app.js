@@ -33,6 +33,7 @@ import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
 import { buildDirStatuses } from "./gitstatus.js";
 import { RenderCache } from "./rendercache.js";
+import { DomCache, canRetain, entryUsable } from "./domcache.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
 import {
   reviewButtonLabel,
@@ -109,6 +110,15 @@ const childCache = new Map();
 // while its tab sat in the background still re-renders.
 const RENDER_CACHE_BYTES = 32 * 1024 * 1024;
 const renderCache = new RenderCache(RENDER_CACHE_BYTES);
+
+// Retained rendered DOM for the hottest tabs, so a revisit reattaches nodes
+// that are already painted, highlighted and diagrammed instead of repainting.
+const DOM_CACHE_ENTRIES = 8;
+const domCache = new DomCache(DOM_CACHE_ENTRIES);
+// What #preview currently shows. Gates retention: only a disk render of the
+// active tab in its current raw mode and theme may be kept.
+let liveRender = null;
+let validateSeq = 0;
 
 /* ---- Git decoration state ---- */
 
@@ -1178,6 +1188,75 @@ async function restoreSession(paths, active) {
   await setActiveTab(idx);
 }
 
+/** Detach the active tab's rendered nodes into the DOM cache, so returning to
+ *  it can reattach them instead of repainting. The stamp comes from the HTML
+ *  cache entry that produced this render; without one (an uncacheable render,
+ *  or an evicted entry) the retained DOM is still reattached, it just always
+ *  revalidates with a full render. */
+function stashActiveTab(t) {
+  if (!canRetain({ tab: t, live: liveRender, theme: currentTheme, exporting: exportInProgress })) {
+    domCache.delete(t.path);
+    return;
+  }
+  const cached = renderCache.get(t.path, currentTheme, t.raw);
+  const fragment = document.createDocumentFragment();
+  fragment.append(...preview.childNodes);
+  domCache.set(t.path, {
+    fragment,
+    className: preview.className,
+    stamp: cached ? cached.stamp : null,
+    raw: t.raw,
+    theme: currentTheme,
+  });
+  clearFindHighlights();
+  liveRender = null;
+}
+
+/** Reattach `t`'s retained render. Returns the stamp to revalidate against, or
+ *  null when there was nothing usable to reattach. */
+function restoreTabDom(t) {
+  const entry = domCache.get(t.path);
+  if (!entryUsable(entry, { raw: t.raw, theme: currentTheme })) return null;
+  previewEmpty.hidden = true;
+  preview.hidden = false;
+  preview.className = entry.className;
+  preview.replaceChildren(entry.fragment);
+  previewScroll.scrollTop = t.scrollTop || 0;
+  // replaceChildren MOVES the nodes out of the fragment, leaving it empty — the
+  // entry is spent, and the nodes are live again until the next stash.
+  domCache.delete(t.path);
+  liveRender = { path: t.path, raw: t.raw, theme: currentTheme, fromDisk: true };
+  if (findOpen()) runFind({ keepCurrent: true, scroll: false });
+  return { stamp: entry.stamp };
+}
+
+/** Confirm a reattached render still matches disk, repainting if it doesn't.
+ *  Runs after the paint, so the switch itself never waits on IPC. */
+async function validateRestored(t, stamp) {
+  const token = ++validateSeq;
+  let result;
+  try {
+    result = await invoke("render_file", {
+      path: t.path,
+      theme: currentTheme,
+      raw: t.raw,
+      stamp,
+    });
+  } catch (e) {
+    // The retained nodes are still the last known-good render; keep them on
+    // screen rather than blanking the preview the way a cold failure does.
+    console.error("render_file (revalidation) failed", e);
+    showTransientError(String(e));
+    return;
+  }
+  if (token !== validateSeq || activeTab() !== t) return;
+  if (result.html == null) return; // the retained render was current
+  if (result.stamp) {
+    renderCache.set(t.path, currentTheme, t.raw, result.html, result.stamp);
+  }
+  await paintHtml(t, result.html, result.raw, { scrollLock: true, fromDisk: true });
+}
+
 async function setActiveTab(idx, { forceRender = false } = {}) {
   if (idx < 0 || idx >= tabs.length) {
     activeIdx = -1;
@@ -1189,19 +1268,29 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   const same = idx === activeIdx;
   if (!same) {
     const outgoing = activeTab();
-    if (outgoing) outgoing.scrollTop = previewScroll.scrollTop;
+    if (outgoing) {
+      outgoing.scrollTop = previewScroll.scrollTop;
+      stashActiveTab(outgoing);
+    }
   }
   activeIdx = idx;
   if (typeof hideConflict === "function") hideConflict();
   renderTabBar();
   persistSession();
   revealInTree(tabs[idx].path);
+  const t = tabs[idx];
+  let restored = null;
+  if (!forceRender && !same && !t.editing && !isImagePath(t.path)) {
+    // Settle the chrome before painting: the outgoing tab may have been in the
+    // split editor, and the restored document must not flash beside it.
+    showEditorChrome(false);
+    restored = restoreTabDom(t);
+  }
   try {
     await invoke("open_file", { path: tabs[idx].path });
   } catch (e) {
     console.warn("open_file failed", e);
   }
-  const t = tabs[idx];
   if (t.editing) {
     ensureCm();
     const inPlace = isCodeView(t.path);
@@ -1214,10 +1303,14 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     if (!inPlace) await renderFromEditor(t, { scrollLock: same && !forceRender });
   } else {
     showEditorChrome(false);
-    await renderActive({
-      scrollLock: same && !forceRender,
-      scrollTo: same ? 0 : t.scrollTop || 0,
-    });
+    if (restored) {
+      validateRestored(t, restored.stamp);
+    } else {
+      await renderActive({
+        scrollLock: same && !forceRender,
+        scrollTo: same ? 0 : t.scrollTop || 0,
+      });
+    }
   }
 }
 
@@ -1630,6 +1723,7 @@ function showEmptyState() {
   preview.replaceChildren();
   preview.classList.remove("raw-body");
   if (findOpen()) closeFind();
+  liveRender = null;
 }
 
 async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo = 0 } = {}) {
@@ -1672,12 +1766,12 @@ async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo 
   } else if (result.stamp) {
     renderCache.set(t.path, currentTheme, t.raw, html, result.stamp);
   }
-  await paintHtml(t, html, result.raw, { scrollLock, forceMermaid, scrollTo });
+  await paintHtml(t, html, result.raw, { scrollLock, forceMermaid, scrollTo, fromDisk: true });
 }
 
 /** Diff `html` into #preview and run the post-render pipeline. Shared by the
  *  disk renderer (renderActive) and the editor's live preview. */
-async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false, scrollTo = 0 } = {}) {
+async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false, scrollTo = 0, fromDisk = false } = {}) {
   previewEmpty.hidden = true;
   preview.hidden = false;
   const code = isCodeView(t.path);
@@ -1725,6 +1819,10 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
     },
   });
 
+  liveRender = fromDisk
+    ? { path: t.path, raw, theme: currentTheme, fromDisk: true }
+    : null;
+
   const hadPendingJump = t.pendingJumpLine != null;
   await postRender(t, { raw, forceMermaid });
 
@@ -1769,6 +1867,7 @@ function renderImage(t, { scrollLock = true } = {}) {
   preview.replaceChildren(img);
   previewScroll.scrollTop = top;
   previewScroll.scrollLeft = left;
+  liveRender = null;
 }
 
 /* ---- Post-render hooks ---- */
@@ -3115,6 +3214,7 @@ function showError(msg) {
   div.style.padding = "12px 16px";
   div.textContent = "Failed to render: " + msg;
   preview.appendChild(div);
+  liveRender = null;
 }
 
 /* ---- Scroll anchoring across live reloads ---- */
