@@ -1721,3 +1721,49 @@ pre.code-view {
 [data-theme="dark"] .review-decline-btn {
   border-color: #444c56;
 }
+
+.sheet-body {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 24px 32px;
+  overflow-x: auto;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.sheet-body h2 {
+  font-size: 1.1rem;
+  margin: 24px 0 8px;
+}
+
+.sheet-body h2:first-child {
+  margin-top: 0;
+}
+
+.sheet-body table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+.sheet-body th,
+.sheet-body td {
+  border: 1px solid var(--sidebar-border);
+  padding: 4px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sheet-body th {
+  background: var(--sidebar-hover);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.sheet-truncated,
+.sheet-empty {
+  color: var(--sidebar-muted);
+  font-style: italic;
+  margin: 8px 0 0;
+}
