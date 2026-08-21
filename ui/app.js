@@ -31,6 +31,8 @@ import { isImagePath, isMarkdownPath, isCodeView } from "./filetype.js";
 import { modeForPath } from "./editor-modes.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
+import { buildDirStatuses } from "./gitstatus.js";
+import { RenderCache } from "./rendercache.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
 import {
   reviewButtonLabel,
@@ -101,11 +103,22 @@ let currentTheme = resolveTheme(localStorage.getItem(THEME_KEY), colorScheme());
 document.documentElement.dataset.theme = currentTheme;
 const childCache = new Map();
 
+// Rendered HTML per (file, theme, raw), so revisiting a tab skips the render
+// pass when the file on disk is unchanged. Bounded by total HTML size; the
+// backend's stamp is what decides freshness, so a file edited by another app
+// while its tab sat in the background still re-renders.
+const RENDER_CACHE_BYTES = 32 * 1024 * 1024;
+const renderCache = new RenderCache(RENDER_CACHE_BYTES);
+
 /* ---- Git decoration state ---- */
 
 // Plain object map: absolute path → 2-char porcelain code. Empty when the
 // current folder isn't inside a git working tree.
 let gitEntries = Object.create(null);
+// Aggregated badge code per ancestor directory, rebuilt whenever gitEntries
+// is. Precomputed so decorating a row is a map lookup rather than a scan of
+// every entry.
+let gitDirStatus = new Map();
 let gitRepoRoot = null;
 let gitRefreshTimer = null;
 const GIT_REFRESH_DEBOUNCE_MS = 200;
@@ -243,6 +256,7 @@ async function init() {
   // Register listeners before the readiness handshake so a file opened the
   // instant the app becomes ready isn't missed.
   await listen("file-changed", async (ev) => {
+    renderCache.deleteByPath(ev.payload);
     const tab = activeTab();
     if (tab && ev.payload === tab.path) {
       if (tab.editing) {
@@ -529,33 +543,6 @@ function gitDecoration(code) {
   }
 }
 
-/** TODO(user): decide how a directory rolls up its descendants' statuses.
- *
- * `codes` is the list of porcelain codes for every changed descendant. Return
- * a single code string to show as the directory's badge, or null for none.
- *
- * Trade-offs to weigh:
- *   - VS Code shows "M" if anything inside is modified, dropping untracked-only
- *     dirs to a dimmer dot. Calmer, but hides new files.
- *   - You could surface "U" so an untracked subfolder still draws the eye —
- *     better for "what's new" but noisier in repos with many untracked.
- *   - You could return null entirely so only files get badges (least visual
- *     noise, but loses the "something inside changed" cue).
- *
- * Default below: prefer modified > added > deleted > conflict > untracked.
- * Swap the priority array (or the whole function body) to taste.
- */
-function aggregateDirStatus(codes) {
-  if (codes.length === 0) return null;
-  const priority = ["UU", "DD", "AA", "M", "A", "D", "R", "C", "T", "?"];
-  for (const want of priority) {
-    for (const code of codes) {
-      if (code.includes(want[0]) || code === want) return code;
-    }
-  }
-  return codes[0];
-}
-
 /** Set or clear the `.badge` element on a tree row according to `code`. */
 function applyBadge(row, code) {
   let badge = row.querySelector(":scope > .badge");
@@ -575,16 +562,6 @@ function applyBadge(row, code) {
   row.classList.add("git-decorated");
 }
 
-/** For a directory's absolute path, collect codes of every entry inside it. */
-function codesUnder(dirPath) {
-  const prefix = dirPath.endsWith("/") ? dirPath : dirPath + "/";
-  const out = [];
-  for (const [p, code] of Object.entries(gitEntries)) {
-    if (p.startsWith(prefix)) out.push(code);
-  }
-  return out;
-}
-
 /** Walk every rendered tree row and (re)apply its badge. Idempotent. */
 function applyGitDecorations(scope = tree) {
   const lis = scope === tree ? tree.querySelectorAll("li[data-path]")
@@ -596,7 +573,7 @@ function applyGitDecorations(scope = tree) {
     const isDir = li.dataset.isDir === "1";
     let code = gitEntries[path] || null;
     if (!code && isDir) {
-      code = aggregateDirStatus(codesUnder(path));
+      code = gitDirStatus.get(path) || null;
     }
     applyBadge(row, code);
   }
@@ -608,12 +585,14 @@ async function refreshGitStatus() {
     const report = await invoke("git_status", { path: treeRoot });
     gitRepoRoot = report.repo_root;
     gitEntries = report.entries || Object.create(null);
+    gitDirStatus = buildDirStatuses(gitEntries);
   } catch (e) {
     // Not in a repo, git unavailable, or another transient error. Treat as
     // "no decorations" rather than surfacing — git status is a nice-to-have.
     console.debug("git_status skipped:", e);
     gitRepoRoot = null;
     gitEntries = Object.create(null);
+    gitDirStatus = new Map();
   }
   applyGitDecorations();
   maybeShowIntegrationNudge();
@@ -1653,19 +1632,37 @@ async function renderActive({ scrollLock = true, forceMermaid = false } = {}) {
     renderImage(t, { scrollLock });
     return;
   }
+  const cached = renderCache.get(t.path, currentTheme, t.raw);
   let result;
   try {
     result = await invoke("render_file", {
       path: t.path,
       theme: currentTheme,
       raw: t.raw,
+      stamp: cached ? cached.stamp : null,
     });
+    if (result.html == null && !cached) {
+      // "Unchanged" with nothing to reuse can't happen (we only send a stamp
+      // we hold HTML for), but painting nothing would blank the document.
+      result = await invoke("render_file", {
+        path: t.path,
+        theme: currentTheme,
+        raw: t.raw,
+        stamp: null,
+      });
+    }
   } catch (e) {
     console.error("render_file failed", e);
     showError(String(e));
     return;
   }
-  await paintHtml(t, result.html, result.raw, { scrollLock, forceMermaid });
+  let html = result.html;
+  if (html == null) {
+    html = cached.html;
+  } else if (result.stamp) {
+    renderCache.set(t.path, currentTheme, t.raw, html, result.stamp);
+  }
+  await paintHtml(t, html, result.raw, { scrollLock, forceMermaid });
 }
 
 /** Diff `html` into #preview and run the post-render pipeline. Shared by the

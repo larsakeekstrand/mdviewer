@@ -72,6 +72,10 @@ ui/
   editor.js       — pure helpers: isDirty, classifyFileChange (unit-tested)
   treeops.js      — pure helpers: validateName (inline-rename) + treeAncestors
                     (folders to expand to reveal a file); unit-tested
+  rendercache.js  — RenderCache: LRU (byte-bounded) of rendered HTML per
+                    (path, theme, raw), keyed to the backend file stamp
+  gitstatus.js    — pure helpers: aggregateDirStatus + buildDirStatuses
+                    (precomputed dir→badge map); unit-tested
   review.js       — pure helpers: quoteBlock, formatReview, reanchorReviews
                     for Review Mode (unit-tested); DOM wiring lives in app.js
   mcp.js          — pure helpers: reviewButtonLabel, mcpHintText, reviewBusy,
@@ -103,6 +107,23 @@ icon.svg          — source for icon regeneration
   watchers on macOS.
 - **Live reload**: backend emits `file-changed`; JS re-renders the active tab
   and restores scroll position via comrak's `data-sourcepos` attributes.
+- **Render cache**: `render_file` takes an optional `stamp` (mtime + size,
+  `commands.rs::file_stamp`) and returns `html: None` when it still matches the
+  file on disk, so revisiting a tab skips comrak/syntect and the HTML
+  round-trip. The frontend holds the HTML in `renderCache` (`ui/rendercache.js`,
+  byte-bounded LRU keyed on path + theme + raw). Freshness is decided by the
+  stamp, NOT by events — the watcher only ever watches the *active* file
+  (`WatcherSlot` has a single slot), so a background tab edited by another app
+  would otherwise go stale. `file-changed` also drops the path from the cache,
+  covering filesystems whose mtime granularity is too coarse to notice a
+  same-second rewrite. A file that changes *during* its own read gets
+  `stamp: None` (`stable_stamp`) so that render is never cached.
+- **Git decorations**: `refreshGitStatus` rebuilds `gitDirStatus` via
+  `buildDirStatuses` (`ui/gitstatus.js`) — one pass over the status entries
+  yielding each ancestor directory's rolled-up badge. `applyGitDecorations` is
+  then a map lookup per row; it used to scan every status entry per directory
+  row (O(rows × entries), with a fresh `Object.entries` array each time), which
+  ran on every tree refresh and every 200 ms-debounced git refresh.
 - **Mermaid**: `markdown.rs` emits ` ```mermaid ` fences as
   `<pre class="mermaid">` (a comrak `codefence_renderers` entry, not syntect);
   the frontend's `renderMermaid()` turns them into SVG after each morphdom
