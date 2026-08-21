@@ -2,3 +2,6 @@
 /src-tauri/gen
 **/*.rs.bk
 .DS_Store
+
+# superpowers subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
