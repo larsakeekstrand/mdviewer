@@ -1745,7 +1745,6 @@ pre.code-view {
   box-sizing: border-box;
   min-height: 100%;
   padding: 24px 32px;
-  overflow-x: auto;
   background: var(--bg);
   color: var(--fg);
 }
