@@ -3,6 +3,22 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.23.0] - 2026-08-21
+
+Instant tab switching, and tabs that remember where you were reading.
+
+### Changed
+- **Switching tabs is instant.** A tab you return to is restored as it was
+  instead of being rendered again, so Mermaid diagrams, math and syntax
+  highlighting no longer redraw and there is no pause between the click and
+  the document. If the file changed while the tab was in the background, the
+  view refreshes a moment after it appears.
+- **Tabs remember their scroll position.** Switching away from a document and
+  back returns you to where you were reading rather than to the top.
+- **Faster git decorations in the file tree.** Badge roll-up no longer rescans
+  every changed file for each folder row, which is most noticeable in large
+  repositories with many modified files.
+
 ## [1.22.0] - 2026-06-29
 
 Syntax-highlighted viewing and in-place editing for code and text files.

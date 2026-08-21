@@ -24,7 +24,7 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Folder content search** (⌘⇧F) — recursively search every file in the open tree (or a single folder via right-click). Case-sensitive, whole-word, and an "include .gitignored files" toggle (off by default — `.gitignore` / `.ignore` / global gitignore are honored like ripgrep). Click a result to open the file and jump the preview to the matching line.
 - **Document export** — export the rendered page to **self-contained HTML** (CSS, fonts, and local images inlined; always light-themed) or **PDF** (macOS only — opens a dedicated **Export to PDF** window with three presets — **Clean**, **Report** (serif body, justified), and **Compact** (denser) — plus adjustable base font size, paper size (A4 / Letter / Legal), margins (Narrow / Normal / Wide), page numbers (None / Bottom center / Bottom right), **table style** (Editorial / Grid / Minimal — also applied to HTML export), **wide tables** (Wrap text / Scale to fit), and **orientation** (Portrait / Landscape). Long tables automatically repeat their header row across pages. A **live preview** updates as you tune the settings; switch to the **Exact PDF** tab to render the real file — correct page breaks, margins, and footers — before saving. Settings persist as your global default and are also used by the MCP `generate_pdf` tool. Smart page breaks keep headings with their content and prevent atomic blocks from splitting.)
 - Live reload when the open file changes on disk
-- Tabs with VS Code–style sticky/preview behavior (single-click replaces preview, double-click sticks)
+- Tabs with VS Code–style sticky/preview behavior (single-click replaces preview, double-click sticks). Switching between open tabs is **instant** — a tab you return to is restored as it was rather than re-rendered, so diagrams, math and highlighted code don't redraw — and each tab **remembers its scroll position**, so you come back to where you were reading
 - **Session restore** — the last folder you opened and your open tabs are reopened on the next launch
 - Per-tab raw / rendered toggle
 - **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
@@ -140,6 +140,7 @@ that case.
 - Double-click a tab to promote a preview tab to sticky.
 - Click the **×** on the tab or middle-click the tab to close it.
 - The active tab's file is watched on disk; saves elsewhere live-reload the preview while preserving scroll position.
+- Switching tabs is instant: the document you return to is restored as you left it, scroll position included. If the file changed while the tab was in the background, it refreshes a moment after it appears.
 
 ### Raw vs rendered view
 
