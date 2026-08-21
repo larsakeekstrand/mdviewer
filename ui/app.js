@@ -33,7 +33,12 @@ import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
 import { buildDirStatuses } from "./gitstatus.js";
 import { RenderCache } from "./rendercache.js";
-import { DomCache, canRetain, entryUsable } from "./domcache.js";
+import {
+  DomCache,
+  canRetain,
+  entryUsable,
+  revalidationApplies,
+} from "./domcache.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
 import {
   reviewButtonLabel,
@@ -1114,6 +1119,13 @@ async function openPreview(path) {
   }
   const previewIdx = tabs.findIndex((t) => !t.sticky);
   if (previewIdx !== -1) {
+    // Retained entries are keyed by path but their nodes' listeners close over
+    // the TAB OBJECT (task checkboxes call toggle_task with `t.path`, review
+    // gutters push into `t.reviews`). Repurposing this tab severs its object
+    // from its old path, so the entry filed under that path would reattach
+    // handlers now pointing at a different file. Any site that breaks that
+    // pairing must evict first.
+    domCache.delete(tabs[previewIdx].path);
     tabs[previewIdx].path = path;
     tabs[previewIdx].raw = false;
     tabs[previewIdx].editing = false;
@@ -1249,22 +1261,25 @@ async function validateRestored(t, stamp) {
     showTransientError(String(e));
     return;
   }
-  // Every condition here is a way the view moved on while the IPC was in
-  // flight, and dropping the repaint is safe in all of them because whoever
+  // Each condition is a distinct way the view moved on while the IPC was in
+  // flight, and dropping the repaint is safe in all of them because whatever
   // changed the state repaints: a newer validation (token), a tab switch
-  // (activeTab) — its own render, an export (exportInProgress) whose light
-  // re-render this would stomp mid-capture and whose `finally` restores the
-  // view, a theme toggle (applyTheme re-renders), a raw toggle (onToggleRaw
-  // re-renders). None of these are redundant; each catches a distinct source.
-  if (
-    token !== validateSeq ||
-    activeTab() !== t ||
-    exportInProgress ||
-    theme !== currentTheme ||
-    raw !== t.raw
-  ) {
-    return;
-  }
+  // (active) — its own render, entering the split editor (editing) where
+  // #preview is the live-preview pane and disk HTML does not belong, an export
+  // (exporting) whose light re-render this would stomp mid-capture and whose
+  // `finally` restores the view, a theme toggle (applyTheme re-renders), a raw
+  // toggle (onToggleRaw re-renders). None is redundant.
+  const applies = revalidationApplies({
+    token,
+    seq: validateSeq,
+    tab: t,
+    active: activeTab(),
+    exporting: exportInProgress,
+    theme,
+    currentTheme,
+    raw,
+  });
+  if (!applies) return;
   if (result.html == null) return; // the retained render was current
   if (result.stamp) {
     renderCache.set(t.path, theme, raw, result.html, result.stamp);
@@ -1319,7 +1334,11 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   } else {
     showEditorChrome(false);
     if (restored) {
-      validateRestored(t, restored.stamp);
+      // Deliberately not awaited — the whole point is that the switch does not
+      // wait on IPC — so it needs its own rejection sink.
+      void validateRestored(t, restored.stamp).catch((e) =>
+        console.error("revalidation failed", e),
+      );
     } else {
       await renderActive({
         scrollLock: same && !forceRender,
@@ -1834,12 +1853,18 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
     },
   });
 
-  liveRender = fromDisk
-    ? { path: t.path, raw, theme: currentTheme, fromDisk: true }
-    : null;
+  // Null for the whole of postRender, which yields at the mermaid await: a tab
+  // switch landing in that window must find no descriptor, so it declines to
+  // retain nodes that are only half-decorated (no mermaid export buttons, no
+  // review markers). The descriptor goes up only once the document is whole.
+  liveRender = null;
 
   const hadPendingJump = t.pendingJumpLine != null;
   await postRender(t, { raw, forceMermaid });
+
+  liveRender = fromDisk
+    ? { path: t.path, raw, theme: currentTheme, fromDisk: true }
+    : null;
 
   if (!hadPendingJump) {
     if (anchor) restoreAnchor(anchor);
@@ -1899,6 +1924,12 @@ async function postRender(t, { raw = false, forceMermaid = false } = {}) {
   if (!raw) {
     renderMath();
     await renderMermaid({ force: forceMermaid });
+    // renderMermaid is the one yield in this pipeline, and everything below
+    // queries the live #preview. If the tab changed while it ran, #preview now
+    // holds another document: decorating it here would strip that tab's review
+    // markers (renderReviewMarkers is keyed on `t`) and scroll it to this tab's
+    // pending line. Bail instead — the switch painted what it needs.
+    if (activeTab() !== t) return;
     addMermaidExportButtons();
     renderReviewMarkers(t);
   }

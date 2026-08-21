@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DomCache, canRetain, entryUsable } from "./domcache.js";
+import {
+  DomCache,
+  canRetain,
+  entryUsable,
+  revalidationApplies,
+} from "./domcache.js";
 
 test("a stored entry comes back", () => {
   const c = new DomCache(2);
@@ -96,4 +101,52 @@ test("an entry is usable only for the same raw mode and theme", () => {
   assert.equal(entryUsable(entry, { raw: true, theme: "light" }), false);
   assert.equal(entryUsable(entry, { raw: false, theme: "dark" }), false);
   assert.equal(entryUsable(null, { raw: false, theme: "light" }), false);
+});
+
+/* ---- revalidationApplies ---- */
+
+const REVAL = {
+  token: 3,
+  seq: 3,
+  tab: { path: "/a.md", raw: false, editing: false },
+  exporting: false,
+  theme: "light",
+  currentTheme: "light",
+  raw: false,
+};
+// The tab the request was dispatched for is still the displayed one.
+REVAL.active = REVAL.tab;
+
+test("a revalidation whose view state is unchanged applies", () => {
+  assert.equal(revalidationApplies(REVAL), true);
+});
+
+test("a superseded revalidation does not apply", () => {
+  assert.equal(revalidationApplies({ ...REVAL, seq: 4 }), false);
+});
+
+test("a revalidation for a tab that is no longer displayed does not apply", () => {
+  assert.equal(
+    revalidationApplies({ ...REVAL, active: { path: "/b.md", raw: false, editing: false } }),
+    false,
+  );
+  assert.equal(revalidationApplies({ ...REVAL, active: null }), false);
+});
+
+test("a revalidation does not apply once the tab entered edit mode", () => {
+  const tab = { ...REVAL.tab, editing: true };
+  assert.equal(revalidationApplies({ ...REVAL, tab, active: tab }), false);
+});
+
+test("a revalidation does not apply while an export is in flight", () => {
+  assert.equal(revalidationApplies({ ...REVAL, exporting: true }), false);
+});
+
+test("a revalidation rendered for the previous theme does not apply", () => {
+  assert.equal(revalidationApplies({ ...REVAL, currentTheme: "dark" }), false);
+});
+
+test("a revalidation rendered for the previous raw mode does not apply", () => {
+  const tab = { ...REVAL.tab, raw: true };
+  assert.equal(revalidationApplies({ ...REVAL, tab, active: tab }), false);
 });

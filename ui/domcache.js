@@ -56,3 +56,29 @@ export function entryUsable(entry, { raw, theme }) {
   if (!entry || !entry.fragment) return false;
   return entry.raw === raw && entry.theme === theme;
 }
+
+/** Whether a revalidation's result may still be painted.
+ *
+ *  A revalidation is dispatched for one specific view — a tab, in a theme, in a
+ *  raw mode — and the IPC gives the user time to change any of that before the
+ *  answer arrives. `token`/`seq`, `theme` and `raw` are what the request was
+ *  built from; `seq`, `active`, `tab.editing`, `exporting` and `currentTheme`
+ *  are the world as it is now. Any mismatch means the result describes a view
+ *  that is no longer on screen, and the state that moved on repaints itself. */
+export function revalidationApplies({
+  token,
+  seq,
+  tab,
+  active,
+  exporting,
+  theme,
+  currentTheme,
+  raw,
+}) {
+  if (token !== seq) return false;
+  if (!tab || active !== tab) return false;
+  if (tab.editing) return false;
+  if (exporting) return false;
+  if (theme !== currentTheme) return false;
+  return raw === tab.raw;
+}
