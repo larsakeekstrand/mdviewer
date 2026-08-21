@@ -110,11 +110,12 @@ document.documentElement.dataset.theme = currentTheme;
 const childCache = new Map();
 
 // Rendered HTML per (file, theme, raw), so revisiting a tab skips the render
-// pass when the file on disk is unchanged. Bounded by total HTML size; the
-// backend's stamp is what decides freshness, so a file edited by another app
-// while its tab sat in the background still re-renders.
-const RENDER_CACHE_BYTES = 32 * 1024 * 1024;
-const renderCache = new RenderCache(RENDER_CACHE_BYTES);
+// pass when the file on disk is unchanged. Bounded by total HTML length in
+// characters (UTF-16 code units — see rendercache.js; ~2x that in bytes
+// resident); the backend's stamp is what decides freshness, so a file edited by
+// another app while its tab sat in the background still re-renders.
+const RENDER_CACHE_CHARS = 32 * 1024 * 1024;
+const renderCache = new RenderCache(RENDER_CACHE_CHARS);
 
 // Retained rendered DOM for the hottest tabs, so a revisit reattaches nodes
 // that are already painted, highlighted and diagrammed instead of repainting.

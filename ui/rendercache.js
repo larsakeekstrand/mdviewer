@@ -7,11 +7,17 @@
 // would be a poor proxy for memory. Eviction is least-recently-used, relying on
 // Map preserving insertion order — a read re-inserts to move the entry to the
 // young end.
+//
+// The budget is measured in CHARACTERS (`String.length`, UTF-16 code units),
+// not bytes — an O(1) property of the string, where a true byte count would
+// mean encoding every render just to size it. A JS engine stores those at up to
+// two bytes each, so the resident cost of a full cache is up to ~2x the budget;
+// size the constant with that in mind.
 
 export class RenderCache {
-  constructor(maxBytes) {
-    this.maxBytes = maxBytes;
-    this.bytes = 0;
+  constructor(maxChars) {
+    this.maxChars = maxChars;
+    this.chars = 0;
     this.entries = new Map();
   }
 
@@ -33,13 +39,13 @@ export class RenderCache {
     const existing = this.entries.get(k);
     if (existing) {
       this.entries.delete(k);
-      this.bytes -= existing.html.length;
+      this.chars -= existing.html.length;
     }
     // A document that can never coexist with anything else isn't worth
     // emptying the cache for.
-    if (html.length > this.maxBytes) return;
+    if (html.length > this.maxChars) return;
     this.entries.set(k, { path, html, stamp });
-    this.bytes += html.length;
+    this.chars += html.length;
     this.evict();
   }
 
@@ -47,21 +53,21 @@ export class RenderCache {
     for (const [k, entry] of this.entries) {
       if (entry.path === path) {
         this.entries.delete(k);
-        this.bytes -= entry.html.length;
+        this.chars -= entry.html.length;
       }
     }
   }
 
   clear() {
     this.entries.clear();
-    this.bytes = 0;
+    this.chars = 0;
   }
 
   evict() {
     for (const [k, entry] of this.entries) {
-      if (this.bytes <= this.maxBytes) return;
+      if (this.chars <= this.maxChars) return;
       this.entries.delete(k);
-      this.bytes -= entry.html.length;
+      this.chars -= entry.html.length;
     }
   }
 }
