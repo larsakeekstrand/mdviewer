@@ -1270,6 +1270,8 @@ Append to `ui/styles.css`:
 
 ```css
 .sheet-body {
+  box-sizing: border-box;
+  min-height: 100%;
   padding: 24px 32px;
   overflow-x: auto;
   background: var(--bg);
