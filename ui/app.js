@@ -1234,14 +1234,14 @@ function restoreTabDom(t) {
  *  Runs after the paint, so the switch itself never waits on IPC. */
 async function validateRestored(t, stamp) {
   const token = ++validateSeq;
+  // The view state this render is being asked for. Everything below keys off
+  // these, not the globals, so a result that arrives after the view moved on
+  // is recognisable as such instead of being filed (or painted) as current.
+  const theme = currentTheme;
+  const raw = t.raw;
   let result;
   try {
-    result = await invoke("render_file", {
-      path: t.path,
-      theme: currentTheme,
-      raw: t.raw,
-      stamp,
-    });
+    result = await invoke("render_file", { path: t.path, theme, raw, stamp });
   } catch (e) {
     // The retained nodes are still the last known-good render; keep them on
     // screen rather than blanking the preview the way a cold failure does.
@@ -1249,10 +1249,25 @@ async function validateRestored(t, stamp) {
     showTransientError(String(e));
     return;
   }
-  if (token !== validateSeq || activeTab() !== t) return;
+  // Every condition here is a way the view moved on while the IPC was in
+  // flight, and dropping the repaint is safe in all of them because whoever
+  // changed the state repaints: a newer validation (token), a tab switch
+  // (activeTab) — its own render, an export (exportInProgress) whose light
+  // re-render this would stomp mid-capture and whose `finally` restores the
+  // view, a theme toggle (applyTheme re-renders), a raw toggle (onToggleRaw
+  // re-renders). None of these are redundant; each catches a distinct source.
+  if (
+    token !== validateSeq ||
+    activeTab() !== t ||
+    exportInProgress ||
+    theme !== currentTheme ||
+    raw !== t.raw
+  ) {
+    return;
+  }
   if (result.html == null) return; // the retained render was current
   if (result.stamp) {
-    renderCache.set(t.path, currentTheme, t.raw, result.html, result.stamp);
+    renderCache.set(t.path, theme, raw, result.html, result.stamp);
   }
   await paintHtml(t, result.html, result.raw, { scrollLock: true, fromDisk: true });
 }
