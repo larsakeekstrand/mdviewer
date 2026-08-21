@@ -98,7 +98,7 @@ icon.svg          — source for icon regeneration
 
 ## Architecture quick-tour
 
-- **Tab model**: `tabs[]` of `{ path, sticky, raw, editing, dirty, savedContent, editBuffer, reviewMode, reviews, generalNote, orphanedReviews }` + `activeIdx`. The last four are Review Mode state (ephemeral; never serialized in session restore). Single-click
+- **Tab model**: `tabs[]` of `{ path, sticky, raw, editing, dirty, savedContent, editBuffer, reviewMode, reviews, generalNote, orphanedReviews, scrollTop, scrollLeft, revalidating }` + `activeIdx`. `reviewMode`/`reviews`/`generalNote`/`orphanedReviews` are Review Mode state; `scrollTop`/`scrollLeft` are the tab's own scroll offset and `revalidating` counts in-flight freshness checks against reattached DOM (task-list toggles refuse while it is non-zero). All seven are ephemeral — never serialized in session restore. Single-click
   on a tree file replaces the non-sticky "preview" tab (or creates one);
   double-click promotes to sticky. Each tab tracks its own raw/rendered state
   and its own in-progress editor buffer (`editBuffer`), so switching tabs
@@ -129,11 +129,22 @@ icon.svg          — source for icon regeneration
   render was current, anything else repaints. `liveRender` (set by `paintHtml`,
   cleared by `showError`/`showEmptyState`/`renderImage`) is what makes retention
   safe: only a disk render of the active tab in its current raw mode and theme
-  is eligible, so editor-buffer previews and error panels are never retained.
-  Entries are dropped on `file-changed`, theme toggle (syntect colors are baked
-  into the HTML), tab close, rename, delete and after an export.
-  `replaceChildren` MOVES nodes out of the fragment, so a restored entry is
-  deleted, not reused. Each tab also keeps its own `scrollTop`.
+  is eligible, so editor-buffer previews and error panels are never retained
+  (`previewRendering` blocks it too — the PDF window's live preview mutates
+  `#preview` for print without setting `exportInProgress`). `liveRender` also
+  carries the stamp the paint was made from, so a stash records the version it
+  actually holds rather than whatever the HTML cache last saw. Entries are
+  dropped on `file-changed`, theme toggle (syntect colors are baked into the
+  HTML), tab close, rename, delete, after an export or export-preview build,
+  **on preview-tab reuse** (`openPreview` — see the tab-repointing invariant
+  below), and whenever review state changes on a tab that is *not* active
+  (review chrome is a `postRender` hook, and the reattach path skips
+  `postRender`). `replaceChildren` MOVES nodes out of the fragment, so a
+  restored entry is deleted, not reused. Each tab also keeps its own
+  `scrollTop`/`scrollLeft`. Because the paint is optimistic, the reattached
+  document is *interactive* before it is confirmed: `restoreTabDom` marks the
+  tab `revalidating` and `onTaskCheckboxClick` refuses until `validateRestored`
+  releases it, since a stale `data-sourcepos` would write to the wrong line.
 - **Git decorations**: `refreshGitStatus` rebuilds `gitDirStatus` via
   `buildDirStatuses` (`ui/gitstatus.js`) — one pass over the status entries
   yielding each ancestor directory's rolled-up badge. `applyGitDecorations` is
@@ -522,6 +533,20 @@ Windows-specific gotchas:
   Dictation, and Emoji & Symbols into ANY submenu titled exactly `Edit`,
   regardless of items. That's why our menu is titled **Actions**. Do not rename
   it back without an alternative way to suppress the auto-inserts.
+- **Retained DOM is keyed by path, but its listeners close over the TAB
+  OBJECT**: a stashed fragment's task checkboxes call `toggle_task` with
+  `t.path` *read at click time*, and its review gutters push into `t.reviews`.
+  So **any site that repoints `tab.path` must evict that tab's DOM-cache entry
+  first, and must not let an in-flight `validateRestored` paint into it** —
+  today those sites are `openPreview`'s preview-tab reuse branch (`domCache
+  .delete` before the repoint) and `retargetTabsForRename` (`domCache.clear`).
+  Tab identity is NOT a proxy for document identity, which is why
+  `revalidationApplies` checks the captured `path` against `tab.path` in
+  addition to `active === tab`. Get this wrong and the old file's document —
+  with its live checkbox handlers — reattaches under a tab that now names a
+  different file, and a click writes to the wrong file. `toggle_task` cannot
+  catch it: it verifies the checkbox state at the target line, not which file
+  or item that line belongs to.
 - **Bundle identifier `com.mdviewer.app`**: don't change. The recent-folders
   store, localStorage update-dismissal flag, and any future persistent state
   are keyed off `app_data_dir()` which is bundle-id-based. Renaming would

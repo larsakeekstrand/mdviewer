@@ -1,23 +1,29 @@
 // Pure helpers for git status decoration in the file tree. DOM-free.
 
-/** TODO(user): decide how a directory rolls up its descendants' statuses.
+/** The roll-up policy: how a directory summarises its descendants' statuses.
  *
- * `codes` is the list of porcelain codes for every changed descendant. Return
- * a single code string to show as the directory's badge, or null for none.
+ * Prefer modified > added > deleted > conflict > untracked. Both roll-up
+ * functions below read this array, so changing the priority (or the tie-break)
+ * here changes the badges everywhere.
  *
- * Trade-offs to weigh:
+ * TODO(user): this is a taste call and can be changed. Trade-offs to weigh:
  *   - VS Code shows "M" if anything inside is modified, dropping untracked-only
  *     dirs to a dimmer dot. Calmer, but hides new files.
  *   - You could surface "U" so an untracked subfolder still draws the eye —
  *     better for "what's new" but noisier in repos with many untracked.
- *   - You could return null entirely so only files get badges (least visual
- *     noise, but loses the "something inside changed" cue).
+ *   - You could drop directory badges entirely (least visual noise, but loses
+ *     the "something inside changed" cue).
  *
- * Default below: prefer modified > added > deleted > conflict > untracked.
- * Swap the priority array (or the whole function body) to taste.
+ * Production goes through `buildDirStatuses`, NOT `aggregateDirStatus` — edit
+ * the policy where it runs. `aggregateDirStatus` is kept as the readable
+ * reference the equivalence test in gitstatus.test.js pins the fast path
+ * against, so a policy change has to be made in both to stay green.
  */
 const PRIORITY = ["UU", "DD", "AA", "M", "A", "D", "R", "C", "T", "?"];
 
+/** Reference implementation of the roll-up (see PRIORITY): the single badge
+ *  code for a directory whose changed descendants carry `codes`, or null for
+ *  none. Not on the decoration path — see `buildDirStatuses`. */
 export function aggregateDirStatus(codes) {
   if (codes.length === 0) return null;
   for (const want of PRIORITY) {
@@ -46,6 +52,8 @@ function parentOf(path) {
 }
 
 /** Aggregated badge code for every ancestor directory of every changed path.
+ *  THIS is what applyGitDecorations calls — the roll-up policy documented on
+ *  PRIORITY takes effect here, via `rank`.
  *
  * One pass over `entries` (absolute path → porcelain code) instead of scanning
  * the whole entry set per directory row, which made decoration O(rows ×
