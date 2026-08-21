@@ -28,7 +28,6 @@ import {
   themeButtonFace,
 } from "./theme.js";
 import {
-  isImagePath,
   isMarkdownPath,
   viewKind,
   isEditable,
