@@ -190,6 +190,17 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
     }
 }
 
+// `.size()` is uncompressed_size read straight from the zip central
+// directory, so it's attacker-controlled: zip64 extra fields let a single
+// entry declare up to u64::MAX, and a plain `+` here would let two crafted
+// entries overflow the accumulator (a panic in debug builds, a silent wrap
+// in release). Saturate instead: a workbook that declares more bytes than
+// fit in a u64 is self-evidently hostile, and saturating to u64::MAX still
+// clears any sane max_declared_bytes cap and gets rejected below.
+fn sum_declared_bytes(sizes: impl IntoIterator<Item = u64>) -> u64 {
+    sizes.into_iter().fold(0u64, u64::saturating_add)
+}
+
 pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
     if bytes.len() > caps.max_file_bytes {
         return Err(format!(
@@ -209,10 +220,11 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
     // archive at all, so a failed open here just skips the precheck; the
     // real parse below is still the authoritative outcome either way.
     if let Ok(mut archive) = zip::ZipArchive::new(Cursor::new(bytes)) {
-        let declared = (0..archive.len()).try_fold(0u64, |acc, i| {
-            archive.by_index_raw(i).map(|f| acc + f.size())
-        });
-        if let Ok(declared) = declared {
+        let sizes: Result<Vec<u64>, _> = (0..archive.len())
+            .map(|i| archive.by_index_raw(i).map(|f| f.size()))
+            .collect();
+        if let Ok(sizes) = sizes {
+            let declared = sum_declared_bytes(sizes);
             if declared > caps.max_declared_bytes {
                 return Err(format!(
                     "spreadsheet declares too much uncompressed data to preview ({} MB; limit {} MB)",
@@ -558,5 +570,11 @@ mod tests {
         };
         let err = render_workbook(&fixture(), &caps).unwrap_err();
         assert!(err.contains("too much"), "{err}");
+    }
+
+    #[test]
+    fn sum_declared_bytes_saturates_instead_of_overflowing() {
+        let total = sum_declared_bytes([u64::MAX, u64::MAX]);
+        assert_eq!(total, u64::MAX, "must saturate, not wrap: {total}");
     }
 }
