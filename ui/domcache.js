@@ -1,0 +1,99 @@
+// Per-tab retained render: the detached child nodes of #preview, so returning
+// to a tab reattaches an already-painted document instead of repainting it.
+// DOM-free — values are opaque, which is what keeps the policy unit-testable.
+//
+// Bounded by entry count rather than bytes: detached nodes have no cheap size
+// measure, and the cost that matters (live listeners, SVG, KaTeX spans) tracks
+// documents, not characters.
+
+export class DomCache {
+  constructor(maxEntries) {
+    this.maxEntries = maxEntries;
+    this.entries = new Map();
+  }
+
+  get(path) {
+    const hit = this.entries.get(path);
+    if (!hit) return null;
+    this.entries.delete(path);
+    this.entries.set(path, hit);
+    return hit;
+  }
+
+  set(path, value) {
+    this.entries.delete(path);
+    this.entries.set(path, value);
+    for (const key of this.entries.keys()) {
+      if (this.entries.size <= this.maxEntries) break;
+      this.entries.delete(key);
+    }
+  }
+
+  delete(path) {
+    this.entries.delete(path);
+  }
+
+  clear() {
+    this.entries.clear();
+  }
+}
+
+/** Whether what is currently painted may be kept for `tab`.
+ *
+ *  `live` describes what the preview actually shows — set by the paint path,
+ *  cleared by the image/error/empty paths, and carrying the `stamp` the paint
+ *  was made from so the entry records the version it actually holds. Requiring
+ *  it to match the tab is what stops a half-finished raw toggle, an
+ *  editor-buffer preview, or an error panel from being retained as if it were
+ *  the document.
+ *
+ *  `exporting` and `previewRendering` are the two ways the preview is being
+ *  mutated for print rather than for reading — light theme forced, Mermaid
+ *  swapped to export config, out-of-workspace images neutralized, wide tables
+ *  scaled. Both leave the element holding something that is not the document,
+ *  and both interleave with tab switches across their awaits. */
+export function canRetain({ tab, live, theme, exporting, previewRendering }) {
+  if (!tab || !live || exporting || previewRendering) return false;
+  if (tab.editing) return false;
+  if (!live.fromDisk) return false;
+  return live.path === tab.path && live.raw === tab.raw && live.theme === theme;
+}
+
+/** Whether a stored entry can be reattached for the current view. */
+export function entryUsable(entry, { raw, theme }) {
+  if (!entry || !entry.fragment) return false;
+  return entry.raw === raw && entry.theme === theme;
+}
+
+/** Whether a revalidation's result may still be painted.
+ *
+ *  A revalidation is dispatched for one specific view — a file, in a tab, in a
+ *  theme, in a raw mode — and the IPC gives the user time to change any of that
+ *  before the answer arrives. `token`/`seq`, `path`, `theme` and `raw` are what
+ *  the request was built from; `seq`, `active`, `tab.path`, `tab.editing`,
+ *  `exporting` and `currentTheme` are the world as it is now. Any mismatch
+ *  means the result describes a view that is no longer on screen, and the state
+ *  that moved on repaints itself.
+ *
+ *  `path` is checked separately from tab identity because they can diverge:
+ *  openPreview's reuse branch repoints an existing tab object at a new file, so
+ *  `active === tab` stays true across a change of document. */
+export function revalidationApplies({
+  token,
+  seq,
+  path,
+  tab,
+  active,
+  exporting,
+  theme,
+  currentTheme,
+  raw,
+}) {
+  if (token !== seq) return false;
+  if (!tab || active !== tab) return false;
+  if (path !== tab.path) return false;
+  if (tab.editing) return false;
+  if (exporting) return false;
+  if (theme !== currentTheme) return false;
+  return raw === tab.raw;
+}

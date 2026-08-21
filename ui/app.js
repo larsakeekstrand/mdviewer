@@ -31,6 +31,14 @@ import { isImagePath, isMarkdownPath, isCodeView } from "./filetype.js";
 import { modeForPath } from "./editor-modes.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
+import { buildDirStatuses } from "./gitstatus.js";
+import { RenderCache } from "./rendercache.js";
+import {
+  DomCache,
+  canRetain,
+  entryUsable,
+  revalidationApplies,
+} from "./domcache.js";
 import { formatReview, reanchorReviews, quoteBlock } from "./review.js";
 import {
   reviewButtonLabel,
@@ -101,11 +109,36 @@ let currentTheme = resolveTheme(localStorage.getItem(THEME_KEY), colorScheme());
 document.documentElement.dataset.theme = currentTheme;
 const childCache = new Map();
 
+// Rendered HTML per (file, theme, raw), so revisiting a tab skips the render
+// pass when the file on disk is unchanged. Bounded by total HTML length in
+// characters (UTF-16 code units — see rendercache.js; ~2x that in bytes
+// resident); the backend's stamp is what decides freshness, so a file edited by
+// another app while its tab sat in the background still re-renders.
+const RENDER_CACHE_CHARS = 32 * 1024 * 1024;
+const renderCache = new RenderCache(RENDER_CACHE_CHARS);
+
+// Retained rendered DOM for the hottest tabs, so a revisit reattaches nodes
+// that are already painted, highlighted and diagrammed instead of repainting.
+const DOM_CACHE_ENTRIES = 8;
+const domCache = new DomCache(DOM_CACHE_ENTRIES);
+// What #preview currently shows, including the file stamp it was rendered
+// from. Gates retention: only a disk render of the active tab in its current
+// raw mode and theme may be kept.
+let liveRender = null;
+let validateSeq = 0;
+// Bumped by every paint. postRender yields, so two paints of the SAME tab can
+// overlap; only the newest may claim the finished document.
+let paintSeq = 0;
+
 /* ---- Git decoration state ---- */
 
 // Plain object map: absolute path → 2-char porcelain code. Empty when the
 // current folder isn't inside a git working tree.
 let gitEntries = Object.create(null);
+// Aggregated badge code per ancestor directory, rebuilt whenever gitEntries
+// is. Precomputed so decorating a row is a map lookup rather than a scan of
+// every entry.
+let gitDirStatus = new Map();
 let gitRepoRoot = null;
 let gitRefreshTimer = null;
 const GIT_REFRESH_DEBOUNCE_MS = 200;
@@ -243,6 +276,8 @@ async function init() {
   // Register listeners before the readiness handshake so a file opened the
   // instant the app becomes ready isn't missed.
   await listen("file-changed", async (ev) => {
+    renderCache.deleteByPath(ev.payload);
+    domCache.delete(ev.payload);
     const tab = activeTab();
     if (tab && ev.payload === tab.path) {
       if (tab.editing) {
@@ -359,7 +394,12 @@ async function init() {
     t.mcpRequestId = requestId;
     t.mcpInstructions = instructions || "";
     renderTabBar();
+    // Review chrome is painted by renderReviewMarkers, a postRender hook — and
+    // the reattach path skips postRender. A background tab's retained nodes
+    // would come back without the gutters and Decline button its state now
+    // says it has, so drop them and let the return repaint.
     if (t === activeTab()) await renderActive({ scrollLock: false });
+    else domCache.delete(t.path);
   });
 
   await listen("mcp-get-state", async (ev) => {
@@ -529,33 +569,6 @@ function gitDecoration(code) {
   }
 }
 
-/** TODO(user): decide how a directory rolls up its descendants' statuses.
- *
- * `codes` is the list of porcelain codes for every changed descendant. Return
- * a single code string to show as the directory's badge, or null for none.
- *
- * Trade-offs to weigh:
- *   - VS Code shows "M" if anything inside is modified, dropping untracked-only
- *     dirs to a dimmer dot. Calmer, but hides new files.
- *   - You could surface "U" so an untracked subfolder still draws the eye —
- *     better for "what's new" but noisier in repos with many untracked.
- *   - You could return null entirely so only files get badges (least visual
- *     noise, but loses the "something inside changed" cue).
- *
- * Default below: prefer modified > added > deleted > conflict > untracked.
- * Swap the priority array (or the whole function body) to taste.
- */
-function aggregateDirStatus(codes) {
-  if (codes.length === 0) return null;
-  const priority = ["UU", "DD", "AA", "M", "A", "D", "R", "C", "T", "?"];
-  for (const want of priority) {
-    for (const code of codes) {
-      if (code.includes(want[0]) || code === want) return code;
-    }
-  }
-  return codes[0];
-}
-
 /** Set or clear the `.badge` element on a tree row according to `code`. */
 function applyBadge(row, code) {
   let badge = row.querySelector(":scope > .badge");
@@ -575,16 +588,6 @@ function applyBadge(row, code) {
   row.classList.add("git-decorated");
 }
 
-/** For a directory's absolute path, collect codes of every entry inside it. */
-function codesUnder(dirPath) {
-  const prefix = dirPath.endsWith("/") ? dirPath : dirPath + "/";
-  const out = [];
-  for (const [p, code] of Object.entries(gitEntries)) {
-    if (p.startsWith(prefix)) out.push(code);
-  }
-  return out;
-}
-
 /** Walk every rendered tree row and (re)apply its badge. Idempotent. */
 function applyGitDecorations(scope = tree) {
   const lis = scope === tree ? tree.querySelectorAll("li[data-path]")
@@ -596,7 +599,7 @@ function applyGitDecorations(scope = tree) {
     const isDir = li.dataset.isDir === "1";
     let code = gitEntries[path] || null;
     if (!code && isDir) {
-      code = aggregateDirStatus(codesUnder(path));
+      code = gitDirStatus.get(path) || null;
     }
     applyBadge(row, code);
   }
@@ -608,12 +611,14 @@ async function refreshGitStatus() {
     const report = await invoke("git_status", { path: treeRoot });
     gitRepoRoot = report.repo_root;
     gitEntries = report.entries || Object.create(null);
+    gitDirStatus = buildDirStatuses(gitEntries);
   } catch (e) {
     // Not in a repo, git unavailable, or another transient error. Treat as
     // "no decorations" rather than surfacing — git status is a nice-to-have.
     console.debug("git_status skipped:", e);
     gitRepoRoot = null;
     gitEntries = Object.create(null);
+    gitDirStatus = new Map();
   }
   applyGitDecorations();
   maybeShowIntegrationNudge();
@@ -912,6 +917,7 @@ async function revealInTree(path) {
 /** After a rename, rewrite any open tab whose path is the renamed entry or
  *  nested under it (folder rename), and rewire the active tab's watcher. */
 function retargetTabsForRename(from, to) {
+  domCache.clear();
   let activeChanged = false;
   for (let i = 0; i < tabs.length; i++) {
     const p = tabs[i].path;
@@ -933,6 +939,7 @@ function retargetTabsForRename(from, to) {
 
 /** Close any tab pointing at `path` or nested under it (folder delete). */
 function closeTabsUnder(path) {
+  domCache.clear();
   for (let i = tabs.length - 1; i >= 0; i--) {
     const p = tabs[i].path;
     if (p === path || p.startsWith(path + "/")) {
@@ -1125,6 +1132,13 @@ async function openPreview(path) {
   }
   const previewIdx = tabs.findIndex((t) => !t.sticky);
   if (previewIdx !== -1) {
+    // Retained entries are keyed by path but their nodes' listeners close over
+    // the TAB OBJECT (task checkboxes call toggle_task with `t.path`, review
+    // gutters push into `t.reviews`). Repurposing this tab severs its object
+    // from its old path, so the entry filed under that path would reattach
+    // handlers now pointing at a different file. Any site that breaks that
+    // pairing must evict first.
+    domCache.delete(tabs[previewIdx].path);
     tabs[previewIdx].path = path;
     tabs[previewIdx].raw = false;
     tabs[previewIdx].editing = false;
@@ -1146,10 +1160,14 @@ async function openPreview(path) {
     tabs[previewIdx].mcpRequestId = null;
     tabs[previewIdx].mcpInstructions = "";
     tabs[previewIdx].pendingJumpLine = null;
+    tabs[previewIdx].scrollTop = 0;
+    tabs[previewIdx].scrollLeft = 0;
+    // `revalidating` is deliberately NOT reset: a validation for the old path
+    // may still be in flight, and it releases its own hold when it returns.
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
-  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
+  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1160,7 +1178,7 @@ async function openSticky(path) {
     await setActiveTab(existing);
     return;
   }
-  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
+  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1190,12 +1208,148 @@ function persistSession() {
 
 async function restoreSession(paths, active) {
   for (const p of paths) {
-    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
+    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
   }
   if (tabs.length === 0) return;
   const idx =
     active != null && active >= 0 && active < tabs.length ? active : 0;
   await setActiveTab(idx);
+}
+
+/** Detach the active tab's rendered nodes into the DOM cache, so returning to
+ *  it can reattach them instead of repainting. The stamp is carried on the
+ *  descriptor by whatever painted these nodes, so the entry always records the
+ *  version it actually holds — reading it back out of the HTML cache instead
+ *  would file these nodes under whichever stamp landed there last. Without one
+ *  (an uncacheable render) the retained DOM is still reattached, it just always
+ *  revalidates with a full render. */
+function stashActiveTab(t) {
+  if (
+    !canRetain({
+      tab: t,
+      live: liveRender,
+      theme: currentTheme,
+      exporting: exportInProgress,
+      previewRendering,
+    })
+  ) {
+    domCache.delete(t.path);
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  fragment.append(...preview.childNodes);
+  domCache.set(t.path, {
+    fragment,
+    className: preview.className,
+    stamp: liveRender.stamp || null,
+    raw: t.raw,
+    theme: currentTheme,
+  });
+  clearFindHighlights();
+  liveRender = null;
+}
+
+/** The reattached document has not been checked against disk yet, so anything
+ *  that would write through it (a task-list toggle resolves its line from the
+ *  DOM's sourcepos) has to wait. Counted rather than boolean: switching away
+ *  and straight back leaves two validations in flight, and the first to return
+ *  must not clear a mark the second still needs. */
+function beginRevalidation(t) {
+  t.revalidating = (t.revalidating || 0) + 1;
+}
+
+function endRevalidation(t) {
+  // Never below zero: a stray release would make the count negative and so
+  // permanently truthy, refusing every toggle for the rest of the session.
+  if (t.revalidating > 0) t.revalidating -= 1;
+}
+
+/** Reattach `t`'s retained render. Returns the stamp to revalidate against, or
+ *  null when there was nothing usable to reattach. */
+function restoreTabDom(t) {
+  const entry = domCache.get(t.path);
+  if (!entryUsable(entry, { raw: t.raw, theme: currentTheme })) return null;
+  previewEmpty.hidden = true;
+  preview.hidden = false;
+  preview.className = entry.className;
+  preview.replaceChildren(entry.fragment);
+  previewScroll.scrollTop = t.scrollTop || 0;
+  previewScroll.scrollLeft = t.scrollLeft || 0;
+  // replaceChildren MOVES the nodes out of the fragment, leaving it empty — the
+  // entry is spent, and the nodes are live again until the next stash.
+  domCache.delete(t.path);
+  liveRender = {
+    path: t.path,
+    raw: t.raw,
+    theme: currentTheme,
+    fromDisk: true,
+    stamp: entry.stamp,
+  };
+  beginRevalidation(t);
+  if (findOpen()) runFind({ keepCurrent: true, scroll: false });
+  return { stamp: entry.stamp };
+}
+
+/** Confirm a reattached render still matches disk, repainting if it doesn't.
+ *  Runs after the paint, so the switch itself never waits on IPC. */
+async function validateRestored(t, stamp) {
+  const token = ++validateSeq;
+  // The view state this render is being asked for. Everything below keys off
+  // these, not the globals, so a result that arrives after the view moved on
+  // is recognisable as such instead of being filed (or painted) as current.
+  // `path` in particular is not recoverable from `t`: openPreview repoints an
+  // existing tab object at another file, so `t.path` can name a different
+  // document by the time this returns.
+  const theme = currentTheme;
+  const raw = t.raw;
+  const path = t.path;
+  // Every exit — answered, failed, or dropped as stale — has to release the
+  // interaction hold taken when the retained nodes went on screen.
+  try {
+    let result;
+    try {
+      result = await invoke("render_file", { path, theme, raw, stamp });
+    } catch (e) {
+      // The retained nodes are still the last known-good render; keep them on
+      // screen rather than blanking the preview the way a cold failure does.
+      console.error("render_file (revalidation) failed", e);
+      showTransientError(String(e));
+      return;
+    }
+    // Each condition is a distinct way the view moved on while the IPC was in
+    // flight, and dropping the repaint is safe in all of them because whatever
+    // changed the state repaints: a newer validation (token), a tab switch
+    // (active) — its own render, the tab being repointed at another file
+    // (path) whose own render is already under way, entering the split editor
+    // (editing) where #preview is the live-preview pane and disk HTML does not
+    // belong, an export (exporting) whose light re-render this would stomp
+    // mid-capture and whose `finally` restores the view, a theme toggle
+    // (applyTheme re-renders), a raw toggle (onToggleRaw re-renders). None is
+    // redundant.
+    const applies = revalidationApplies({
+      token,
+      seq: validateSeq,
+      path,
+      tab: t,
+      active: activeTab(),
+      exporting: exportInProgress,
+      theme,
+      currentTheme,
+      raw,
+    });
+    if (!applies) return;
+    if (result.html == null) return; // the retained render was current
+    if (result.stamp) {
+      renderCache.set(path, theme, raw, result.html, result.stamp);
+    }
+    await paintHtml(t, result.html, result.raw, {
+      scrollLock: true,
+      fromDisk: true,
+      stamp: result.stamp || null,
+    });
+  } finally {
+    endRevalidation(t);
+  }
 }
 
 async function setActiveTab(idx, { forceRender = false } = {}) {
@@ -1207,18 +1361,36 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     return;
   }
   const same = idx === activeIdx;
+  if (!same) {
+    const outgoing = activeTab();
+    if (outgoing) {
+      outgoing.scrollTop = previewScroll.scrollTop;
+      outgoing.scrollLeft = previewScroll.scrollLeft;
+      stashActiveTab(outgoing);
+    }
+  }
   activeIdx = idx;
   if (typeof hideConflict === "function") hideConflict();
   renderTabBar();
   persistSession();
   revealInTree(tabs[idx].path);
+  const t = tabs[idx];
+  let restored = null;
+  if (!forceRender && !same && !t.editing && !isImagePath(t.path)) {
+    // Settle the chrome before painting: the outgoing tab may have been in the
+    // split editor, and the restored document must not flash beside it.
+    showEditorChrome(false);
+    restored = restoreTabDom(t);
+  }
   try {
     await invoke("open_file", { path: tabs[idx].path });
   } catch (e) {
     console.warn("open_file failed", e);
   }
-  const t = tabs[idx];
   if (t.editing) {
+    // open_file yields, so the tab can have entered the split editor since the
+    // restore; the editor owns #preview from here, and nothing revalidates it.
+    if (restored) endRevalidation(t);
     ensureCm();
     const inPlace = isCodeView(t.path);
     cm.setOption("mode", modeForPath(t.path));
@@ -1230,7 +1402,18 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     if (!inPlace) await renderFromEditor(t, { scrollLock: same && !forceRender });
   } else {
     showEditorChrome(false);
-    await renderActive({ scrollLock: same && !forceRender });
+    if (restored) {
+      // Deliberately not awaited — the whole point is that the switch does not
+      // wait on IPC — so it needs its own rejection sink.
+      void validateRestored(t, restored.stamp).catch((e) =>
+        console.error("revalidation failed", e),
+      );
+    } else {
+      await renderActive({
+        scrollLock: same && !forceRender,
+        scrollTo: same ? 0 : t.scrollTop || 0,
+      });
+    }
   }
 }
 
@@ -1262,6 +1445,12 @@ function closeTab(idx) {
     // Closing the reviewed tab is an unambiguous "not now".
     invoke("mcp_review_result", { requestId: t.mcpRequestId, review: null }).catch(() => {});
   }
+  const displayed = activeTab();
+  if (displayed) {
+    displayed.scrollTop = previewScroll.scrollTop;
+    displayed.scrollLeft = previewScroll.scrollLeft;
+  }
+  domCache.delete(t.path);
   tabs.splice(idx, 1);
   if (tabs.length === 0) {
     activeIdx = -1;
@@ -1606,6 +1795,7 @@ function updateThemeButton() {
 
 async function applyTheme(theme) {
   currentTheme = theme;
+  domCache.clear();
   document.documentElement.dataset.theme = theme;
   initMermaid();
   updateThemeButton();
@@ -1641,9 +1831,10 @@ function showEmptyState() {
   preview.replaceChildren();
   preview.classList.remove("raw-body");
   if (findOpen()) closeFind();
+  liveRender = null;
 }
 
-async function renderActive({ scrollLock = true, forceMermaid = false } = {}) {
+async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo = 0 } = {}) {
   const t = activeTab();
   if (!t) {
     showEmptyState();
@@ -1653,24 +1844,52 @@ async function renderActive({ scrollLock = true, forceMermaid = false } = {}) {
     renderImage(t, { scrollLock });
     return;
   }
+  const cached = renderCache.get(t.path, currentTheme, t.raw);
   let result;
   try {
     result = await invoke("render_file", {
       path: t.path,
       theme: currentTheme,
       raw: t.raw,
+      stamp: cached ? cached.stamp : null,
     });
+    if (result.html == null && !cached) {
+      // "Unchanged" with nothing to reuse can't happen (we only send a stamp
+      // we hold HTML for), but painting nothing would blank the document.
+      result = await invoke("render_file", {
+        path: t.path,
+        theme: currentTheme,
+        raw: t.raw,
+        stamp: null,
+      });
+    }
   } catch (e) {
     console.error("render_file failed", e);
     showError(String(e));
     return;
   }
-  await paintHtml(t, result.html, result.raw, { scrollLock, forceMermaid });
+  let html = result.html;
+  if (html == null) {
+    html = cached.html;
+  } else if (result.stamp) {
+    renderCache.set(t.path, currentTheme, t.raw, html, result.stamp);
+  }
+  // Unchanged answers carry the stamp they were checked against, so this is the
+  // version on screen either way.
+  const stamp = result.stamp || (cached ? cached.stamp : null);
+  await paintHtml(t, html, result.raw, {
+    scrollLock,
+    forceMermaid,
+    scrollTo,
+    fromDisk: true,
+    stamp,
+  });
 }
 
 /** Diff `html` into #preview and run the post-render pipeline. Shared by the
  *  disk renderer (renderActive) and the editor's live preview. */
-async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false } = {}) {
+async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false, scrollTo = 0, fromDisk = false, stamp = null } = {}) {
+  const gen = ++paintSeq;
   previewEmpty.hidden = true;
   preview.hidden = false;
   const code = isCodeView(t.path);
@@ -1718,12 +1937,28 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
     },
   });
 
+  // Null for the whole of postRender, which yields at the mermaid await: a tab
+  // switch landing in that window must find no descriptor, so it declines to
+  // retain nodes that are only half-decorated (no mermaid export buttons, no
+  // review markers). The descriptor goes up only once the document is whole.
+  liveRender = null;
+
   const hadPendingJump = t.pendingJumpLine != null;
   await postRender(t, { raw, forceMermaid });
 
+  // A newer paint started while postRender was yielding — into this same tab,
+  // so postRender's own `activeTab() !== t` bail does not catch it. Its DOM is
+  // what #preview holds now; claiming it as whole (and scrolling it) would
+  // certify a half-decorated document and let it be retained that way.
+  if (gen !== paintSeq) return;
+
+  liveRender = fromDisk
+    ? { path: t.path, raw, theme: currentTheme, fromDisk: true, stamp }
+    : null;
+
   if (!hadPendingJump) {
     if (anchor) restoreAnchor(anchor);
-    else previewScroll.scrollTop = 0;
+    else previewScroll.scrollTop = scrollTo;
   }
 
   if (findOpen()) runFind({ keepCurrent: true, scroll: false });
@@ -1762,6 +1997,7 @@ function renderImage(t, { scrollLock = true } = {}) {
   preview.replaceChildren(img);
   previewScroll.scrollTop = top;
   previewScroll.scrollLeft = left;
+  liveRender = null;
 }
 
 /* ---- Post-render hooks ---- */
@@ -1778,6 +2014,12 @@ async function postRender(t, { raw = false, forceMermaid = false } = {}) {
   if (!raw) {
     renderMath();
     await renderMermaid({ force: forceMermaid });
+    // renderMermaid is the one yield in this pipeline, and everything below
+    // queries the live #preview. If the tab changed while it ran, #preview now
+    // holds another document: decorating it here would strip that tab's review
+    // markers (renderReviewMarkers is keyed on `t`) and scroll it to this tab's
+    // pending line. Bail instead — the switch painted what it needs.
+    if (activeTab() !== t) return;
     addMermaidExportButtons();
     renderReviewMarkers(t);
   }
@@ -1863,6 +2105,18 @@ async function onTaskCheckboxClick(ev, input, t) {
   // input.checked has ALREADY been flipped by the browser to the new state.
   const newState = input.checked;
   const expectedCurrent = !newState;
+
+  if (t.revalidating) {
+    // These nodes were reattached optimistically and haven't been confirmed
+    // against disk yet. `line` comes from their sourcepos, so if the file
+    // changed while this tab was in the background, the write would land on
+    // whatever item now sits at that line — toggle_task verifies the checkbox
+    // state there, not which item it belongs to.
+    ev.preventDefault();
+    input.checked = expectedCurrent;
+    showTransientMessage("Checking this file for changes — try again.");
+    return;
+  }
 
   const key = `${t.path}|${line}`;
   if (pendingToggles.has(key)) {
@@ -2105,7 +2359,14 @@ async function exportDocument(format, path, settings) {
     if (styleEl) styleEl.remove();
     unwrapForPrint(headingWraps);
     unfitWideTables(fittedTables);
-    await restoreViewState(t, snap);
+    try {
+      await restoreViewState(t, snap);
+    } finally {
+      // Whatever the capture left in #preview is print-shaped, not the
+      // document. Dropping the entry unconditionally matters most when the
+      // restore threw and the mutations are still on screen.
+      domCache.delete(t.path);
+    }
   }
   return succeeded;
 }
@@ -2132,7 +2393,15 @@ async function renderExportPreviewHtml(settings) {
     return wrapInPageSheet(body, settings);
   } finally {
     unfitWideTables(fitted);
-    await restoreViewState(t, snap);
+    try {
+      await restoreViewState(t, snap);
+    } finally {
+      // Same contract as exportDocument: this function mutates the live
+      // preview for print across several awaits, so any entry stashed while it
+      // ran describes a print-shaped document that would revalidate as fresh.
+      // `previewRendering` stops new stashes; this drops one already taken.
+      domCache.delete(t.path);
+    }
   }
 }
 
@@ -2891,7 +3160,10 @@ function declineMcpReview(t) {
   t.mcpRequestId = null;
   t.mcpInstructions = "";
   renderTabBar();
+  // Retained nodes still carry this review's chrome; the reattach path won't
+  // re-run renderReviewMarkers to strip it.
   if (t === activeTab()) renderReviewMarkers(t);
+  else domCache.delete(t.path);
   invoke("mcp_review_result", { requestId, review: null }).catch(() => {});
 }
 
@@ -2949,7 +3221,10 @@ async function finishReview(t) {
   t.generalNote = "";
   t.reviewMode = false;
   renderTabBar();
+  // The delivery above awaits, so the user can have switched away: the retained
+  // nodes would still show cards for a review that has already been sent.
   if (t === activeTab()) renderReviewMarkers(t);
+  else domCache.delete(t.path);
 }
 
 /* ---- Link handling ---- */
@@ -3108,6 +3383,7 @@ function showError(msg) {
   div.style.padding = "12px 16px";
   div.textContent = "Failed to render: " + msg;
   preview.appendChild(div);
+  liveRender = null;
 }
 
 /* ---- Scroll anchoring across live reloads ---- */

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -104,21 +105,71 @@ pub fn watch_tree(
 
 #[derive(Serialize)]
 pub struct RenderedFile {
-    pub html: String,
+    /// `None` means "your cached HTML is still current": the caller supplied a
+    /// `stamp` that matches the file on disk, so nothing was rendered.
+    pub html: Option<String>,
     pub path: String,
     pub raw: bool,
+    /// Identity of the version this result describes, to be handed back on the
+    /// next render of the same file. `None` when it can't be trusted as a cache
+    /// key (unreadable metadata, or the file changed while we were reading it),
+    /// which tells the caller not to cache this render.
+    pub stamp: Option<String>,
 }
 
+/// Cheap identity of a file version: modification time plus size. Size is part
+/// of it because coarse-granularity filesystems (SMB, exFAT) can round two
+/// writes in the same second to the same mtime.
+fn file_stamp(modified: SystemTime, len: u64) -> Option<String> {
+    let d = modified.duration_since(UNIX_EPOCH).ok()?;
+    Some(format!("{}.{:09}:{}", d.as_secs(), d.subsec_nanos(), len))
+}
+
+fn current_stamp(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    file_stamp(meta.modified().ok()?, meta.len())
+}
+
+/// The stamp to report for a render, given the file's identity sampled before
+/// and after reading it. A file rewritten mid-read would otherwise be labelled
+/// with a version whose contents we never rendered — cached forever until the
+/// next write. Disagreement (or unusable metadata) means "don't cache this".
+fn stable_stamp(before: Option<String>, after: Option<String>) -> Option<String> {
+    match (before, after) {
+        (Some(a), Some(b)) if a == b => Some(a),
+        _ => None,
+    }
+}
+
+/// Renders `path`. When `stamp` is supplied and still matches the file on disk,
+/// returns `html: None` so the caller can reuse its cached render — the whole
+/// point being to skip the comrak/syntect pass and the HTML round-trip when a
+/// tab is revisited unchanged.
 #[tauri::command]
 pub fn render_file(
     path: String,
     theme: Option<String>,
     raw: Option<bool>,
+    stamp: Option<String>,
 ) -> Result<RenderedFile, String> {
     let p = PathBuf::from(&path);
-    let bytes = std::fs::read(&p).map_err(|e| format!("cannot read '{}': {}", p.display(), e))?;
-    let theme = theme.as_deref().unwrap_or("light");
     let raw = raw.unwrap_or(false);
+
+    let before = current_stamp(&p);
+    if let (Some(have), Some(current)) = (stamp.as_deref(), before.as_deref()) {
+        if have == current {
+            return Ok(RenderedFile {
+                html: None,
+                path,
+                raw,
+                stamp: before,
+            });
+        }
+    }
+
+    let bytes = std::fs::read(&p).map_err(|e| format!("cannot read '{}': {}", p.display(), e))?;
+    let stamp = stable_stamp(before, current_stamp(&p));
+    let theme = theme.as_deref().unwrap_or("light");
     let html = if markdown::is_markdown_path(&p) {
         let contents = String::from_utf8_lossy(&bytes);
         if raw {
@@ -132,7 +183,12 @@ pub fn render_file(
         let contents = String::from_utf8_lossy(&bytes);
         crate::code::render_code(&contents, &p, theme)
     };
-    Ok(RenderedFile { html, path, raw })
+    Ok(RenderedFile {
+        html: Some(html),
+        path,
+        raw,
+        stamp,
+    })
 }
 
 /// Render an in-memory editor buffer (NOT disk) for the split editor's live
@@ -1271,6 +1327,84 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "forced");
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn render_file_returns_html_and_a_stamp_when_no_stamp_is_supplied() {
+        let dir = std::env::temp_dir().join(format!("mdv-render1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.md");
+        std::fs::write(&f, b"# Hi").unwrap();
+
+        let out = render_file(f.to_string_lossy().into_owned(), None, None, None).unwrap();
+        assert!(out.html.unwrap().contains("<h1"));
+        assert!(out.stamp.is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn render_file_omits_html_when_the_supplied_stamp_still_matches() {
+        let dir = std::env::temp_dir().join(format!("mdv-render2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.md");
+        std::fs::write(&f, b"# Hi").unwrap();
+        let path = f.to_string_lossy().into_owned();
+
+        let first = render_file(path.clone(), None, None, None).unwrap();
+        let second = render_file(path, None, None, first.stamp.clone()).unwrap();
+
+        assert!(second.html.is_none(), "unchanged file should not re-render");
+        assert_eq!(second.stamp, first.stamp);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn render_file_re_renders_when_the_file_changed_since_the_stamp() {
+        let dir = std::env::temp_dir().join(format!("mdv-render3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.md");
+        std::fs::write(&f, b"# Hi").unwrap();
+        let path = f.to_string_lossy().into_owned();
+
+        let first = render_file(path.clone(), None, None, None).unwrap();
+        std::fs::write(&f, b"# Different heading").unwrap();
+        let second = render_file(path, None, None, first.stamp.clone()).unwrap();
+
+        assert!(second.html.unwrap().contains("Different heading"));
+        assert_ne!(second.stamp, first.stamp);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_stamp_distinguishes_size_and_mtime() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let t = UNIX_EPOCH + Duration::new(1_700_000_000, 123);
+        let later = UNIX_EPOCH + Duration::new(1_700_000_000, 124);
+
+        assert_eq!(file_stamp(t, 10), file_stamp(t, 10));
+        assert_ne!(file_stamp(t, 10), file_stamp(t, 11));
+        assert_ne!(file_stamp(t, 10), file_stamp(later, 10));
+    }
+
+    #[test]
+    fn stable_stamp_rejects_a_file_that_changed_while_being_read() {
+        let a = Some("1.000000000:10".to_string());
+        let b = Some("2.000000000:10".to_string());
+
+        assert_eq!(stable_stamp(a.clone(), a.clone()), a);
+        assert_eq!(stable_stamp(a.clone(), b), None);
+        assert_eq!(stable_stamp(None, a.clone()), None);
+        assert_eq!(stable_stamp(a, None), None);
+    }
+
+    #[test]
+    fn file_stamp_is_none_for_a_pre_epoch_mtime() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let before = UNIX_EPOCH - Duration::from_secs(1);
+        assert!(file_stamp(before, 10).is_none());
     }
 
     #[test]
