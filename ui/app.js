@@ -1249,6 +1249,8 @@ function closeTab(idx) {
     // Closing the reviewed tab is an unambiguous "not now".
     invoke("mcp_review_result", { requestId: t.mcpRequestId, review: null }).catch(() => {});
   }
+  const displayed = activeTab();
+  if (displayed) displayed.scrollTop = previewScroll.scrollTop;
   tabs.splice(idx, 1);
   if (tabs.length === 0) {
     activeIdx = -1;
