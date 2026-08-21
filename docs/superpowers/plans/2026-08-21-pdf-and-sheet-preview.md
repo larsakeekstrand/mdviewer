@@ -1272,12 +1272,13 @@ Append to `ui/styles.css`:
 .sheet-body {
   padding: 24px 32px;
   overflow-x: auto;
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .sheet-body h2 {
   font-size: 1.1rem;
   margin: 24px 0 8px;
-  color: var(--fg);
 }
 
 .sheet-body h2:first-child {
@@ -1292,14 +1293,14 @@ Append to `ui/styles.css`:
 
 .sheet-body th,
 .sheet-body td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--sidebar-border);
   padding: 4px 10px;
   text-align: left;
   white-space: nowrap;
 }
 
 .sheet-body th {
-  background: var(--surface-2);
+  background: var(--sidebar-hover);
   font-weight: 600;
   position: sticky;
   top: 0;
@@ -1307,13 +1308,13 @@ Append to `ui/styles.css`:
 
 .sheet-truncated,
 .sheet-empty {
-  color: var(--fg-muted);
+  color: var(--sidebar-muted);
   font-style: italic;
   margin: 8px 0 0;
 }
 ```
 
-Confirm the four CSS variables used here (`--fg`, `--border`, `--surface-2`, `--fg-muted`) exist in `styles.css`'s `:root` block; if any is named differently in this codebase, use the existing name — do not add new variables for this.
+The tokens above were checked against `styles.css` while planning and all four exist: `--bg`, `--fg`, `--sidebar-border`, `--sidebar-hover`, `--sidebar-muted`. They are named for the sidebar but are the app's general palette — `.code-unsupported` already uses `--sidebar-muted` for muted text inside the preview pane, and `.code-body` already sets `background: var(--bg); color: var(--fg)` for exactly the reason `.sheet-body` must: `#preview` no longer carries `.markdown-body`, so it supplies no colors of its own. **Do not add new CSS variables** — each is defined once in `:root` and again under `:root[data-theme="dark"]`, and a new one would need both.
 
 - [ ] **Step 6: Build and smoke test**
 
