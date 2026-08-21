@@ -238,7 +238,9 @@ fn validate(req: &GuiRequest, root: Option<&std::path::Path>) -> Result<(), Stri
         "open_document" => {
             let p = path()?;
             if !mcp::viewable_path(p) {
-                return Err(format!("'{p}' is not a markdown or image file"));
+                return Err(format!(
+                    "'{p}' is not a markdown, image, PDF, or spreadsheet file"
+                ));
             }
             if !std::path::Path::new(p).is_file() {
                 return Err(format!("file not found: {p}"));

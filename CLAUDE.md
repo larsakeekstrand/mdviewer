@@ -459,7 +459,7 @@ icon.svg          — source for icon regeneration
   the menu export), returns the written path. The proxy emits
   `notifications/progress` every 10 s to hold client timeouts open and exits
   when stdin or stdout closes. Validation is GUI-side (`mcp_server::validate`):
-  extension allowlist (markdown+images; markdown only for reviews;
+  extension allowlist (markdown+images+PDF+spreadsheets for opening; markdown only for reviews;
   markdown-in/`.pdf`-out for `generate_pdf`) + existence. `generate_pdf` also
   confines **both** source and output to the open workspace (`fs_ops::within_root`,
   needs a folder open) since it writes a file, and the resolved output
