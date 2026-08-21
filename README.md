@@ -160,7 +160,7 @@ Click **💬 Review** at the top-right of the tab bar to turn the rendered docum
 - When you're done, click the toggle again — now **✓ Finish & Copy** — to assemble everything into one markdown block (the file's path, the general note, and each annotated block quoted with its comment in document order), copy it to the clipboard, clear the annotations, exit review mode, and confirm with a toast. Paste it straight into your assistant. (Finishing with nothing to send just exits.)
 - Comments are anchored to block text, so they survive live reloads and follow their block when the document is rewritten above them; a comment whose block text changed is surfaced separately with a "⚠ this block changed" tag. Annotations live only for the session — they aren't written to disk, and they're excluded from exports.
 
-Review Mode is available on rendered markdown only (hidden in Raw view, Edit mode, and on image tabs).
+Review Mode is available on rendered markdown only (hidden in Raw view, Edit mode, and on image, PDF, and spreadsheet tabs).
 
 ### Theme
 

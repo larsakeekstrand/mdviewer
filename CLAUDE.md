@@ -245,7 +245,7 @@ icon.svg          — source for icon regeneration
   backend does `read_to_string` and would fail on binary data. `renderImage`
   builds an `<img>` at natural size via `convertFileSrc` (asset protocol; `#preview`
   takes the `image-view` class, not `markdown-body`, so the prose-width rules don't
-  shrink it). Live reload bumps a per-path `imageVersions` counter → `?v=N`
+  shrink it). Live reload bumps a per-path `assetVersions` counter → `?v=N`
   cache-bust. The Raw button is hidden and Copy Source / Export are guarded for
   image tabs.
 - **View dispatch (`viewKind`)**: `ui/filetype.js` classifies a path into one
