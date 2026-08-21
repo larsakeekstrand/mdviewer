@@ -2250,6 +2250,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-updater",
  "trash",
+ "zip 8.6.0",
 ]
 
 [[package]]

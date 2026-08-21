@@ -25,6 +25,7 @@ pub struct Caps {
     pub max_rows_per_sheet: usize,
     pub max_total_cells: usize,
     pub max_cell_chars: usize,
+    pub max_declared_bytes: u64,
 }
 
 impl Default for Caps {
@@ -35,6 +36,7 @@ impl Default for Caps {
             max_total_cells: 200_000,
             // Excel's own native cell text limit.
             max_cell_chars: 32_767,
+            max_declared_bytes: 256 * 1024 * 1024,
         }
     }
 }
@@ -197,6 +199,30 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
         ));
     }
 
+    // Cheap defense-in-depth: sum the *declared* uncompressed sizes from the
+    // zip central directory (by_index_raw reads only metadata; nothing is
+    // inflated). This is NOT a complete bound on amplification — shared
+    // strings referenced many times inflate further *after* decompression;
+    // a workbook measured declaring ~39 MB here can still expand to ~200 MB
+    // once those references are resolved — it only catches the cheap,
+    // common case before spending any CPU on it. `.xls` (BIFF) is not a zip
+    // archive at all, so a failed open here just skips the precheck; the
+    // real parse below is still the authoritative outcome either way.
+    if let Ok(mut archive) = zip::ZipArchive::new(Cursor::new(bytes)) {
+        let declared = (0..archive.len()).try_fold(0u64, |acc, i| {
+            archive.by_index_raw(i).map(|f| acc + f.size())
+        });
+        if let Ok(declared) = declared {
+            if declared > caps.max_declared_bytes {
+                return Err(format!(
+                    "spreadsheet declares too much uncompressed data to preview ({} MB; limit {} MB)",
+                    declared / (1024 * 1024),
+                    caps.max_declared_bytes / (1024 * 1024)
+                ));
+            }
+        }
+    }
+
     let mut wb = calamine::open_workbook_auto_from_rs(Cursor::new(bytes.to_vec()))
         .map_err(|e| format!("cannot read spreadsheet: {e}"))?;
 
@@ -208,6 +234,12 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
     // memory before being truncated for display.
     let mut remaining = caps.max_total_cells;
     let mut dropped_sheets = false;
+    // render_sheets can no longer tell truncated-here rows from rows that
+    // were always this short, because both the row cap and the cell budget
+    // are already applied before it ever sees a Sheet. Only this loop, by
+    // watching whether range.rows() still had a next row when it stopped,
+    // knows the difference — so it alone is responsible for the notice.
+    let mut truncated_rows = false;
 
     for name in names {
         if remaining == 0 {
@@ -219,8 +251,9 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
             .map_err(|e| format!("cannot read spreadsheet sheet '{name}': {e}"))?;
 
         let mut rows = Vec::new();
-        for r in range.rows().take(caps.max_rows_per_sheet) {
-            if remaining == 0 {
+        for (i, r) in range.rows().enumerate() {
+            if i >= caps.max_rows_per_sheet || remaining == 0 {
+                truncated_rows = true;
                 break;
             }
             let row: Vec<Cell> = r
@@ -234,6 +267,9 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
     }
 
     let mut html = render_sheets(&sheets, caps);
+    if truncated_rows {
+        html.push_str(&truncation_notice("Sheet"));
+    }
     if dropped_sheets {
         html.push_str(&truncation_notice("Remaining sheets"));
     }
@@ -479,5 +515,48 @@ mod tests {
         };
         let html = render_workbook(&fixture_long_cell(50), &caps).unwrap();
         assert_eq!(html.matches("&lt;").count(), 10, "{html}");
+    }
+
+    fn fixture_grid(rows: usize, cols: usize) -> Vec<u8> {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        let s = wb.add_worksheet();
+        for r in 0..rows {
+            for c in 0..cols {
+                s.write_string(r as u32, c as u16, format!("r{r}c{c}"))
+                    .unwrap();
+            }
+        }
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn shows_a_truncation_notice_when_the_cell_budget_divides_evenly_at_a_row_boundary() {
+        // 5 rows x 2 cols, budget = 4 (exactly rows 0 and 1) — remaining
+        // hits 0 right on a row boundary, and this is the only/last sheet,
+        // so neither dropped_sheets nor a row-count mismatch would catch
+        // it without the read loop tracking truncation directly.
+        let caps = Caps {
+            max_total_cells: 4,
+            ..Caps::default()
+        };
+        let html = render_workbook(&fixture_grid(5, 2), &caps).unwrap();
+        assert!(html.contains("r0c0"), "{html}");
+        assert!(html.contains("r1c0"), "{html}");
+        assert!(!html.contains("r2c0"), "row 2 must not be read: {html}");
+        assert!(
+            html.contains("sheet-truncated"),
+            "must surface a notice even though the budget divided evenly: {html}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_workbook_whose_declared_uncompressed_size_exceeds_the_cap() {
+        let caps = Caps {
+            max_declared_bytes: 10,
+            ..Caps::default()
+        };
+        let err = render_workbook(&fixture(), &caps).unwrap_err();
+        assert!(err.contains("too much"), "{err}");
     }
 }

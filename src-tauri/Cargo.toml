@@ -50,6 +50,12 @@ interprocess = "2"
 
 # Spreadsheet preview: reads xlsx/xlsm/xlsb/xls/ods. Pure Rust, no native deps.
 calamine = "0.36"
+# Already in the tree transitively via calamine; used directly for a cheap
+# zip-central-directory precheck (declared uncompressed size) before parsing.
+# default-features off: we only read central-directory metadata
+# (ZipArchive::new + by_index_raw), never decompress, so none of the codec
+# features (deflate/bzip2/lzma/...) are needed here.
+zip = { version = "8", default-features = false }
 
 # macOS-only: native WKWebView print-to-PDF (paginated, silent save).
 # objc2 0.6 core with the 0.3 framework wrappers Tauri 2.11 uses internally.
