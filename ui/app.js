@@ -27,7 +27,17 @@ import {
   nextTheme,
   themeButtonFace,
 } from "./theme.js";
-import { isImagePath, isMarkdownPath, isCodeView } from "./filetype.js";
+import {
+  isImagePath,
+  isMarkdownPath,
+  viewKind,
+  isEditable,
+  hasSplitPreview,
+  hasRawToggle,
+  isAnnotatable,
+  isRetainable,
+  bustsCacheOnChange,
+} from "./filetype.js";
 import { modeForPath } from "./editor-modes.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
@@ -102,7 +112,7 @@ const EDITOR_PREVIEW_DEBOUNCE_MS = 150;
 
 let treeRoot = null;
 // path → reload counter; bumped on file-changed so the asset: URL cache-busts.
-const imageVersions = new Map();
+const assetVersions = new Map();
 let currentTheme = resolveTheme(localStorage.getItem(THEME_KEY), colorScheme());
 // Set as early as the CSP allows (no inline <head> script) to minimize the
 // first-paint flash before the rest of the module runs.
@@ -283,8 +293,8 @@ async function init() {
       if (tab.editing) {
         await onEditingFileChanged(tab);
       } else {
-        if (isImagePath(tab.path)) {
-          imageVersions.set(tab.path, (imageVersions.get(tab.path) || 0) + 1);
+        if (bustsCacheOnChange(viewKind(tab.path))) {
+          assetVersions.set(tab.path, (assetVersions.get(tab.path) || 0) + 1);
         }
         await renderActive({ scrollLock: true });
       }
@@ -1376,7 +1386,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   revealInTree(tabs[idx].path);
   const t = tabs[idx];
   let restored = null;
-  if (!forceRender && !same && !t.editing && !isImagePath(t.path)) {
+  if (!forceRender && !same && !t.editing && isRetainable(viewKind(t.path))) {
     // Settle the chrome before painting: the outgoing tab may have been in the
     // split editor, and the restored document must not flash beside it.
     showEditorChrome(false);
@@ -1392,7 +1402,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     // restore; the editor owns #preview from here, and nothing revalidates it.
     if (restored) endRevalidation(t);
     ensureCm();
-    const inPlace = isCodeView(t.path);
+    const inPlace = !hasSplitPreview(viewKind(t.path));
     cm.setOption("mode", modeForPath(t.path));
     cm.setOption("lineWrapping", !inPlace);
     showEditorChrome(true, inPlace);
@@ -1480,20 +1490,19 @@ function renderTabBar() {
   }
   const t = activeTab();
   if (t) {
-    const image = isImagePath(t.path);
-    const code = isCodeView(t.path);
-    editBtn.hidden = image;
-    if (!image) {
+    const kind = viewKind(t.path);
+    editBtn.hidden = !isEditable(kind);
+    if (isEditable(kind)) {
       editBtn.textContent = t.editing ? "Done" : "Edit";
       editBtn.setAttribute("aria-pressed", t.editing ? "true" : "false");
     }
     saveBtn.hidden = !t.editing;
-    rawBtn.hidden = image || code || t.editing;
-    if (!image && !code) {
+    rawBtn.hidden = !hasRawToggle(kind) || t.editing;
+    if (hasRawToggle(kind)) {
       rawBtn.textContent = t.raw ? "Rendered" : "Raw";
       rawBtn.setAttribute("aria-pressed", t.raw ? "true" : "false");
     }
-    reviewBtn.hidden = image || code || t.editing || t.raw;
+    reviewBtn.hidden = !isAnnotatable(kind) || t.editing || t.raw;
     if (!reviewBtn.hidden) {
       reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
       reviewBtn.textContent = reviewButtonLabel(t.reviewMode, t.mcpRequestId);
@@ -1593,7 +1602,7 @@ function ensureCm() {
 
 async function onToggleEdit() {
   const t = activeTab();
-  if (!t || isImagePath(t.path)) return;
+  if (!t || !isEditable(viewKind(t.path))) return;
   if (t.editing) {
     await exitEditMode(t);
   } else {
@@ -1615,7 +1624,7 @@ async function enterEditMode(t) {
   t.dirty = false;
   t.editBuffer = src;
   ensureCm();
-  const inPlace = isCodeView(t.path);
+  const inPlace = !hasSplitPreview(viewKind(t.path));
   cm.setOption("mode", modeForPath(t.path));
   cm.setOption("lineWrapping", !inPlace);
   cm.setValue(src);
@@ -1659,7 +1668,7 @@ function onEditorChange() {
     t.dirty = dirty;
     renderTabBar();
   }
-  if (isCodeView(t.path)) return; // in-place editor has no live-preview pane
+  if (!hasSplitPreview(viewKind(t.path))) return; // in-place editor has no live-preview pane
   if (previewDebounce) clearTimeout(previewDebounce);
   const path = t.path;
   previewDebounce = setTimeout(() => {
@@ -1741,7 +1750,7 @@ async function reloadFromDisk(t) {
   t.dirty = false;
   hideConflict();
   renderTabBar();
-  if (!isCodeView(t.path)) await renderFromEditor(t, { scrollLock: false });
+  if (hasSplitPreview(viewKind(t.path))) await renderFromEditor(t, { scrollLock: false });
 }
 
 async function forceSave(t) {
@@ -1801,7 +1810,7 @@ async function applyTheme(theme) {
   updateThemeButton();
   const t = activeTab();
   if (t) {
-    if (t.editing && !isCodeView(t.path)) {
+    if (t.editing && hasSplitPreview(viewKind(t.path))) {
       await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
     } else {
       await renderActive({ scrollLock: false, forceMermaid: true });
@@ -1840,7 +1849,7 @@ async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo 
     showEmptyState();
     return;
   }
-  if (isImagePath(t.path)) {
+  if (viewKind(t.path) === "image") {
     renderImage(t, { scrollLock });
     return;
   }
@@ -1892,15 +1901,18 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
   const gen = ++paintSeq;
   previewEmpty.hidden = true;
   preview.hidden = false;
-  const code = isCodeView(t.path);
-  preview.classList.toggle("raw-body", raw && !code);
+  const kind = viewKind(t.path);
+  preview.classList.toggle("raw-body", raw && kind === "markdown");
 
   const anchor = scrollLock ? captureAnchor() : null;
 
   const incoming = document.createElement("article");
-  incoming.className = code
-    ? "code-body"
-    : "markdown-body" + (raw ? " raw-body" : "");
+  incoming.className =
+    kind === "code"
+      ? "code-body"
+      : kind === "sheet"
+        ? "sheet-body"
+        : "markdown-body" + (raw ? " raw-body" : "");
   incoming.id = "preview";
   incoming.innerHTML = html;
 
@@ -1983,7 +1995,7 @@ function renderImage(t, { scrollLock = true } = {}) {
 
   preview.className = "image-view";
 
-  const v = imageVersions.get(t.path) || 0;
+  const v = assetVersions.get(t.path) || 0;
   const img = document.createElement("img");
   img.alt = basename(t.path);
   img.onerror = () => {
@@ -2279,7 +2291,7 @@ async function restoreViewState(t, snap) {
   t.raw = snap.raw;
   t.reviewMode = snap.reviewMode;
   initMermaid();
-  if (t.editing && !isCodeView(t.path)) {
+  if (t.editing && hasSplitPreview(viewKind(t.path))) {
     await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
   } else {
     await renderActive({ scrollLock: false, forceMermaid: true });
@@ -3448,16 +3460,18 @@ async function actionCopySource() {
 
 async function runEditAction(name) {
   const t = activeTab();
+  const kind = t ? viewKind(t.path) : "code";
+  const labels = { image: "images", pdf: "PDFs", sheet: "spreadsheets" };
   if (
     t &&
-    isImagePath(t.path) &&
+    !isEditable(kind) &&
     (name === "copy-source" || name === "toggle-raw" || name === "toggle-edit")
   ) {
-    showTransientError("Not available for images.");
+    showTransientError(`Not available for ${labels[kind] || "this file type"}.`);
     return;
   }
-  if (t && isCodeView(t.path) && name === "toggle-raw") {
-    showTransientError("Raw view isn't available for code files.");
+  if (t && !hasRawToggle(kind) && name === "toggle-raw") {
+    showTransientError("Raw view isn't available for this file type.");
     return;
   }
   switch (name) {

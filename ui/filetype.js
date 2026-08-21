@@ -22,12 +22,6 @@ export function isSheetPath(path) {
   return SHEET_EXT.test(path || "");
 }
 
-// A "code view" tab is any file that isn't markdown and isn't an image —
-// it renders as syntax-highlighted, line-numbered text.
-export function isCodeView(path) {
-  return !isImagePath(path) && !isMarkdownPath(path);
-}
-
 /** How a file is shown. `code` is the fallback on purpose: an extension we
  *  don't recognize degrades to source view instead of failing to open. */
 export function viewKind(path) {

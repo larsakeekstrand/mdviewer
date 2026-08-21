@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   isImagePath,
   isMarkdownPath,
-  isCodeView,
   isPdfPath,
   isSheetPath,
   viewKind,
@@ -66,13 +65,6 @@ test("isMarkdownPath false for non-markdown", () => {
   for (const p of ["main.rs", "pic.png", "Makefile", ""]) {
     assert.equal(isMarkdownPath(p), false, p);
   }
-});
-
-test("isCodeView is true only for non-markdown, non-image", () => {
-  assert.equal(isCodeView("main.rs"), true);
-  assert.equal(isCodeView("Makefile"), true);
-  assert.equal(isCodeView("readme.md"), false);
-  assert.equal(isCodeView("pic.png"), false);
 });
 
 test("viewKind resolves each family, case-insensitively", () => {
