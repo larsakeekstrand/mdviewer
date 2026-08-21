@@ -6,13 +6,13 @@
 
 **Architecture:** `ui/filetype.js` gains `viewKind(path)` (five kinds) plus eight named capability predicates derived from a single table; `app.js`'s fourteen type checks migrate onto those predicates and `isCodeView` is deleted. PDF is frontend-only — `renderActive` short-circuits to `renderPdf` before the `render_file` IPC and frames the file via `convertFileSrc`. Excel is a new Rust module hooked into `render_file` ahead of the `is_binary` check, emitting ordinary HTML so it inherits find, export, print, and the render cache unmodified.
 
-**Tech Stack:** Vanilla ES modules + `node --test` (frontend); Rust 2021 + `calamine` (workbook parsing) + `rust_xlsxwriter` (dev-only, test fixtures); Tauri 2.11 asset protocol.
+**Tech Stack:** Vanilla ES modules + `node --test` (frontend); Rust 2021 + `calamine` 0.36 (workbook parsing) + `rust_xlsxwriter` 0.98 (dev-only, test fixtures); Tauri 2.11 asset protocol.
 
 **Spec:** `docs/superpowers/specs/2026-08-21-pdf-and-sheet-preview-design.md`
 
 ## Global Constraints
 
-- **MSRV 1.80**, Rust edition 2021. Any new dependency must build on it.
+- **MSRV becomes 1.88** (was 1.80), Rust edition 2021. Task 6 bumps `rust-version` in `src-tauri/Cargo.toml`. Rationale and cost are in the ledger under Ruling P3 — in short, 1.80 was declared but never tested (both workflows install `stable`; there is no MSRV job and no toolchain file), and no calamine version satisfies it transitively.
 - **Lint/test gate for every task:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (all from `src-tauri/`), and `node --test ui/*.test.js` (from the repo root). CI runs clippy with `-D warnings`, so a slip blocks merge.
 - **Frontend edits need `cargo build`.** Tauri bundles `frontendDist` at compile time via `tauri-codegen`; editing `ui/*` and reloading the webview shows stale UI.
 - **No comments in code unless the *why* is non-obvious.**
@@ -281,13 +281,11 @@ import {
   hasRawToggle,
   isAnnotatable,
   isRetainable,
-  isExportable,
-  rendersFromDisk,
   bustsCacheOnChange,
 } from "./filetype.js";
 ```
 
-`isExportable` and `rendersFromDisk` are imported now but first used in Tasks 3 and 8; leaving them unused would trip no linter here, but if you prefer, add them in the task that uses them.
+Import only what this task uses. `rendersFromDisk` and `isExportable` are added by Tasks 3 and 8 respectively, in the task that first consumes them — an unused import is exactly the kind of thing a reviewer should flag.
 
 - [ ] **Step 2: Rename the cache-bust map**
 
@@ -301,7 +299,7 @@ Expected: no output.
 
 - [ ] **Step 3: Migrate each gate site**
 
-Apply these thirteen edits. Each is a substitution of the *question*, not just the predicate name.
+Apply these seventeen edits. Each is a substitution of the *question*, not just the predicate name.
 
 | Site (pre-edit) | Before | After |
 |---|---|---|
@@ -1026,7 +1024,13 @@ In `src-tauri/Cargo.toml`, under `[dependencies]` (after the `trash`/`interproce
 
 ```toml
 # Spreadsheet preview: reads xlsx/xlsm/xlsb/xls/ods. Pure Rust, no native deps.
-calamine = "0.26"
+calamine = "0.36"
+```
+
+and bump the MSRV declaration at the top of the same file to match what this dependency tree actually requires:
+
+```toml
+rust-version = "1.88"
 ```
 
 and add a new section before `[profile.release]`:
@@ -1034,7 +1038,7 @@ and add a new section before `[profile.release]`:
 ```toml
 [dev-dependencies]
 # Builds xlsx fixtures in-test so no binary blobs live in the repo.
-rust_xlsxwriter = "0.79"
+rust_xlsxwriter = "0.98"
 ```
 
 Then pin the lockfile:
@@ -1157,7 +1161,7 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
 
 The `.take(caps.max_rows_per_sheet)` here is a second line of defense: it bounds memory *while reading*, before `render_sheets` bounds the output. A workbook declaring a million rows must not be materialized in full just to be truncated afterwards.
 
-If `calamine` 0.26's `Data` enum differs from the match above (variant names have moved across releases), fix `from_calamine` only — it is the single point of contact, which is why the boundary exists. Do not change `render_sheets`.
+The `from_calamine` match and the `render_workbook` body above were **compile-verified against calamine 0.36.1** while this plan was written — the exact code shown builds unchanged. If a later patch release moves a variant, `from_calamine` is the single point of contact; do not change `render_sheets`.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -1559,4 +1563,4 @@ Use the `superpowers:finishing-a-development-branch` skill to decide how to inte
 
 - **Spec coverage:** seam → Tasks 1–2; PDF → Tasks 3–4; Excel → Tasks 5–8; caps → Tasks 5–6; security review → Task 9; Windows parity → Task 4; export relaxation → Task 8; `escape_html` visibility → Task 5 Step 1; `sheet-body` class → Task 2 Step 4 + Task 7 Step 5. The spec's HTML section is explanatory only and intentionally has no task.
 - **Verified while planning:** all seven `excel_serial_to_iso` assertions were run against a reference implementation of the same algorithm and agree exactly, so a failure there means a transcription error rather than a wrong expectation.
-- **Known soft spot:** `calamine` 0.26's `Data` variants may differ from Task 6's match. The `from_calamine` boundary exists so that is a one-function fix, and Task 6 Step 4 says so.
+- **Verified while planning:** Task 6's `Data` match and `render_workbook` body compile unchanged against calamine 0.36.1, and `rust_xlsxwriter` 0.98.2 resolves alongside it. The `from_calamine` boundary remains the single point of contact if a future release moves a variant.
