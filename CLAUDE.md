@@ -74,6 +74,8 @@ ui/
                     (folders to expand to reveal a file); unit-tested
   rendercache.js  — RenderCache: LRU (byte-bounded) of rendered HTML per
                     (path, theme, raw), keyed to the backend file stamp
+  domcache.js     — DomCache (LRU of retained preview DOM) + canRetain /
+                    entryUsable eligibility helpers; unit-tested
   gitstatus.js    — pure helpers: aggregateDirStatus + buildDirStatuses
                     (precomputed dir→badge map); unit-tested
   review.js       — pure helpers: quoteBlock, formatReview, reanchorReviews
@@ -118,6 +120,20 @@ icon.svg          — source for icon regeneration
   covering filesystems whose mtime granularity is too coarse to notice a
   same-second rewrite. A file that changes *during* its own read gets
   `stamp: None` (`stable_stamp`) so that render is never cached.
+- **Retained preview DOM**: switching tabs stashes `#preview`'s child nodes into
+  a per-tab `DocumentFragment` (`ui/domcache.js`, 8-entry LRU) and reattaches
+  them on return — synchronously, so there is no `await` between the click and
+  the pixels, and `postRender` is skipped entirely because its work is already
+  in those nodes. Freshness is confirmed *after* the paint by `validateRestored`
+  calling `render_file` with the stored stamp; `html: null` means the retained
+  render was current, anything else repaints. `liveRender` (set by `paintHtml`,
+  cleared by `showError`/`showEmptyState`/`renderImage`) is what makes retention
+  safe: only a disk render of the active tab in its current raw mode and theme
+  is eligible, so editor-buffer previews and error panels are never retained.
+  Entries are dropped on `file-changed`, theme toggle (syntect colors are baked
+  into the HTML), tab close, rename, delete and after an export.
+  `replaceChildren` MOVES nodes out of the fragment, so a restored entry is
+  deleted, not reused. Each tab also keeps its own `scrollTop`.
 - **Git decorations**: `refreshGitStatus` rebuilds `gitDirStatus` via
   `buildDirStatuses` (`ui/gitstatus.js`) — one pass over the status entries
   yielding each ancestor directory's rolled-up badge. `applyGitDecorations` is
@@ -700,6 +716,10 @@ cargo tauri build
 # pre-release launch smoke test (macOS): builds the bundle, launches it,
 # and round-trips get_viewer_state over the MCP socket to prove it boots
 ./scripts/smoke-test.sh
+
+# tab-switching smoke test (macOS, needs `cargo build` first): proves a
+# revisited tab still paints and that a background edit is picked up
+cargo test --test tab_switch_smoke -- --ignored --nocapture
 ```
 
 ### Cutting a release
