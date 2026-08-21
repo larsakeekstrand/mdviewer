@@ -28,6 +28,7 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Session restore** — the last folder you opened and your open tabs are reopened on the next launch
 - Per-tab raw / rendered toggle
 - **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
+- **PDF and spreadsheet preview** — open `.pdf` files in the built-in viewer, and `.xlsx` / `.xlsm` / `.xlsb` / `.xls` / `.ods` workbooks as browsable data tables (values and cached formula results, exportable to HTML/PDF like any other document)
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
 - File menu with **Open File…**, **Open Folder…**, and **Open Recent** (persisted)
 - Custom right-click context menu — in the preview (Copy / Copy Source / Show Raw·Rendered) and on tree rows (Copy Relative / Absolute Path)
@@ -132,7 +133,7 @@ that case.
 - The **active tab's file is revealed in the tree** — its folders expand, its row scrolls into view, and it's highlighted with an accent bar — so you always know which file you're looking at. (Files opened from outside the current folder simply aren't highlighted.)
 - Every file on disk is shown — including dotfiles, entries matched by `.gitignore`, and `node_modules` / `target`.
 - The tree updates live: files added, removed, or renamed by other apps in the root or any expanded folder appear without reopening the folder, and git badges refresh with them.
-- Markdown files render as a preview; image files open as images; code and other text files are shown with syntax highlighting and a line-number gutter (binary files show a "can't preview" notice).
+- Markdown files render as a preview; image files open as images; PDFs open in the built-in PDF viewer; spreadsheets (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`) render as data tables; code and other text files are shown with syntax highlighting and a line-number gutter (binary files show a "can't preview" notice).
 
 ### Tabs
 
@@ -145,6 +146,10 @@ that case.
 ### Raw vs rendered view
 
 Each tab can be viewed rendered (default) or raw. Toggle with the **Raw** button at the top-right of the tab bar, or via the **Actions ▸ Toggle Raw** menu item, or via the right-click context menu. The toggle is per tab.
+
+### PDF and spreadsheet files
+
+PDFs render in the same built-in viewer your browser uses, so search inside a PDF with its own controls rather than MDViewer's ⌘F. Spreadsheets show cell values and cached formula results as a plain data table — no fonts, colors, column widths, charts, or pivot tables, and a formula written by a tool that doesn't cache its result shows `0`. Neither file type supports Raw view, in-app editing, or Review Mode; both support Export as HTML/PDF.
 
 ### Review Mode
 

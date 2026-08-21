@@ -56,6 +56,8 @@ src-tauri/
                     mermaid fences → <pre class="mermaid"> (codefence renderer)
     tree.rs       — std::fs::read_dir depth-1, unfiltered (shows all files)
     watcher.rs    — notify-debouncer-full, 200 ms debounce, watches PARENT dir
+    xlsx.rs       — calamine workbook → HTML tables; pure Cell/Sheet types,
+                    Excel serial-date conversion, row/cell/byte caps (unit-tested)
     menu.rs       — native menu bar; on_menu_event handler emits JS events
     recent.rs     — JSON-persisted recent-folders list + last_folder (app_data_dir)
     fs_ops.rs     — validate_name, duplicate_candidate, within_root, create_file,
@@ -70,6 +72,8 @@ ui/
                     mermaid render (renderMermaid) + live-reload preservation;
                     CodeMirror editor wiring (enter/exit edit, save, conflict)
   editor.js       — pure helpers: isDirty, classifyFileChange (unit-tested)
+  filetype.js     — viewKind(path) → markdown|image|pdf|sheet|code + the
+                    capability table (isEditable, hasRawToggle, …); unit-tested
   treeops.js      — pure helpers: validateName (inline-rename) + treeAncestors
                     (folders to expand to reveal a file); unit-tested
   rendercache.js  — RenderCache: LRU (byte-bounded) of rendered HTML per
@@ -244,6 +248,50 @@ icon.svg          — source for icon regeneration
   shrink it). Live reload bumps a per-path `imageVersions` counter → `?v=N`
   cache-bust. The Raw button is hidden and Copy Source / Export are guarded for
   image tabs.
+- **View dispatch (`viewKind`)**: `ui/filetype.js` classifies a path into one
+  of `markdown | image | pdf | sheet | code` and a capability table
+  (`isEditable`, `hasSplitPreview`, `hasRawToggle`, `isAnnotatable`,
+  `isRetainable`, `isExportable`, `rendersFromDisk`, `bustsCacheOnChange`)
+  answers the gates that used to be scattered `isImagePath`/`isCodeView`
+  checks across `app.js`. Adding a view type is a row in the table, not a
+  new call site.
+- **PDF files**: frontend-only. `renderPdf` (`ui/app.js`) frames the file via
+  `convertFileSrc` for the webview's native PDF viewer (`.pdf-view` iframe),
+  short-circuiting *before* the `render_file` IPC — the backend would reject a
+  PDF as binary. Not retained in the DOM cache — an iframe reloads on
+  reattach regardless. Live reload bumps `assetVersions` for the cache-bust
+  query param, same mechanism as images. Find and export are refused; the
+  built-in viewer has its own search. **Windows is unverified**: macOS is
+  well-founded (the PDF export preview already frames an `asset://` PDF the
+  same way), and WebView2 ships Edge's PDF viewer which is expected to
+  match, but nobody has observed it. If it turns out blank on Windows, add
+  an "Open in default application" fallback via `open_path` — and note `pdf`
+  is deliberately absent from `UNSAFE_OPEN_EXTS` and must not be added there.
+- **Spreadsheets**: `src-tauri/src/xlsx.rs` (calamine) renders
+  xlsx/xlsm/xlsb/xls/ods to HTML tables (`.sheet-body` in `#preview`) in
+  `render_file`, in an arm placed *above* the `is_binary` check because xlsx
+  is a zip. Because the output is ordinary HTML, find, both exports, print,
+  the render cache, and retained DOM all work with no sheet-specific
+  handling; the first row becomes `<thead>`, so the existing print rule
+  repeats headers across PDF pages. Values and cached formula results
+  only — no fonts, colors, column widths, charts, or pivot tables; a formula
+  cell shows whatever the writing application cached (a tool that caches
+  nothing shows 0). `xlsx::Caps` enforces five limits: `max_file_bytes`
+  (32 MB compressed), `max_declared_bytes` (256 MB, summed from the zip
+  central directory via `by_index_raw` so nothing is inflated to check it —
+  skipped gracefully for non-zip `.xls`), `max_rows_per_sheet` (5,000),
+  `max_total_cells` (200,000, enforced cumulatively *inside the read loop* in
+  `render_workbook` so reading stops before `worksheet_range` is even called
+  on further sheets), and `max_cell_chars` (32,767, Excel's own limit,
+  truncated by `char_indices` so it can't panic on a multi-byte boundary).
+  Any truncation — dropped rows or dropped sheets — always renders a visible
+  notice; silent truncation is treated as a defect. Two known gaps, both
+  deliberately deferred (see the entry under "Things that took hours"):
+  the 1904 date system isn't handled, and a single oversized sheet is still
+  fully materialized before the cross-sheet cell budget can act on it (the
+  declared-bytes precheck is cheap defense-in-depth, not a complete bound —
+  it under-reports shared-string amplification, which inflates only after
+  decompression).
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw / toggle-edit / save),
   `open-file`, `open-folder`, `menu-check-updates`.
@@ -529,6 +577,34 @@ Windows-specific gotchas:
 
 ## Things that took hours and shouldn't again
 
+- **`viewKind`, not a pile of `isXPath` checks**: the gates in `app.js` ask
+  several different questions (editable? split preview? raw toggle?
+  retainable? exportable? …), which `isImagePath`/`isCodeView` used to
+  conflate. Adding a view type is a row in the capability table in
+  `ui/filetype.js`. If you find yourself writing `|| isPdfPath(...)` at a
+  call site, the answer belongs in the table instead.
+- **The xlsx arm must precede `is_binary`** in `commands::render_file`. xlsx
+  is a zip archive; put the check after and every workbook renders "Can't
+  preview this file type".
+- **Spreadsheet caps must be enforced in the read loop, not only in the
+  render step**: calamine 0.36's `worksheet_range` has no early-stop hook —
+  it fully materializes a sheet before anything downstream can truncate it.
+  A measured 2.83 MB compressed workbook expanded to ~200 MB of cell text
+  (71×) with nothing but repeated plain strings; crafted shared-string
+  reuse goes higher. `render_workbook`'s per-sheet `remaining` budget stops
+  the loop from calling `worksheet_range` on further sheets once cells are
+  exhausted, but a single sheet that front-loads the whole budget is still
+  fully read before truncation shows up. Worst case is a self-inflicted OOM
+  on a file the user opened, not code execution — but it's why
+  `max_declared_bytes` exists as a cheap (~14µs) precheck, and why that
+  precheck is documented as *defense-in-depth*, not a bound.
+- **calamine ignores the 1904 date system**: `ExcelDateTime::is_1904()`
+  isn't public in calamine 0.36.1, so `xlsx.rs`'s hand-rolled
+  `excel_serial_to_iso` always assumes the 1900 epoch. A workbook saved in
+  1904 mode (Mac Excel 2008 and earlier) renders every date about four years
+  early, silently. The real fix — `as_datetime()` — needs calamine's `dates`
+  feature, which pulls in chrono and would replace the unit-tested hand-rolled
+  conversion; deferred as out of scope for this feature.
 - **`Edit` submenu**: macOS auto-injects Writing Tools, AutoFill, Start
   Dictation, and Emoji & Symbols into ANY submenu titled exactly `Edit`,
   regardless of items. That's why our menu is titled **Actions**. Do not rename
