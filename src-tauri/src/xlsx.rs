@@ -158,6 +158,52 @@ pub fn render_sheets(sheets: &[Sheet], caps: &Caps) -> String {
     out
 }
 
+use calamine::{Data, Reader};
+use std::io::Cursor;
+
+fn from_calamine(d: &Data) -> Cell {
+    match d {
+        Data::Empty => Cell::Empty,
+        Data::String(s) => Cell::Text(s.clone()),
+        Data::Float(f) => Cell::Number(*f),
+        Data::Int(i) => Cell::Number(*i as f64),
+        Data::Bool(b) => Cell::Bool(*b),
+        Data::Error(e) => Cell::Error(format!("{e:?}")),
+        Data::DateTime(dt) => Cell::DateTime(dt.as_f64()),
+        Data::DateTimeIso(s) | Data::DurationIso(s) => Cell::Text(s.clone()),
+    }
+}
+
+pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
+    if bytes.len() > caps.max_file_bytes {
+        return Err(format!(
+            "spreadsheet is too large to preview ({} MB; limit {} MB)",
+            bytes.len() / (1024 * 1024),
+            caps.max_file_bytes / (1024 * 1024)
+        ));
+    }
+
+    let mut wb = calamine::open_workbook_auto_from_rs(Cursor::new(bytes.to_vec()))
+        .map_err(|e| format!("cannot read spreadsheet: {e}"))?;
+
+    let names = wb.sheet_names().to_vec();
+    let mut sheets = Vec::with_capacity(names.len());
+    for name in names {
+        let range = wb
+            .worksheet_range(&name)
+            .map_err(|e| format!("cannot read spreadsheet sheet '{name}': {e}"))?;
+        sheets.push(Sheet {
+            name,
+            rows: range
+                .rows()
+                .take(caps.max_rows_per_sheet)
+                .map(|r| r.iter().map(from_calamine).collect())
+                .collect(),
+        });
+    }
+    Ok(render_sheets(&sheets, caps))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +345,54 @@ mod tests {
             &Caps::default(),
         );
         assert_eq!(html.matches("<th>").count(), 2, "header padded: {html}");
+    }
+
+    fn fixture() -> Vec<u8> {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        let s1 = wb.add_worksheet();
+        s1.set_name("Data").unwrap();
+        s1.write_string(0, 0, "Item").unwrap();
+        s1.write_string(0, 1, "Qty").unwrap();
+        s1.write_string(1, 0, "Bolt").unwrap();
+        s1.write_number(1, 1, 120.0).unwrap();
+        let s2 = wb.add_worksheet();
+        s2.set_name("Notes").unwrap();
+        s2.write_string(0, 0, "<hello>").unwrap();
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn reads_every_sheet_of_a_real_workbook() {
+        let html = render_workbook(&fixture(), &Caps::default()).unwrap();
+        assert!(html.contains("<h2>Data</h2>"), "{html}");
+        assert!(html.contains("<h2>Notes</h2>"), "{html}");
+        assert!(html.contains("<th>Item</th>"), "{html}");
+        assert!(html.contains("<td>Bolt</td>"), "{html}");
+        assert!(html.contains("<td>120</td>"), "number formatting: {html}");
+    }
+
+    #[test]
+    fn escapes_content_that_came_from_the_workbook() {
+        let html = render_workbook(&fixture(), &Caps::default()).unwrap();
+        assert!(!html.contains("<hello>"), "{html}");
+        assert!(html.contains("&lt;hello&gt;"), "{html}");
+    }
+
+    #[test]
+    fn rejects_a_workbook_over_the_byte_cap() {
+        let caps = Caps {
+            max_file_bytes: 16,
+            ..Caps::default()
+        };
+        let err = render_workbook(&fixture(), &caps).unwrap_err();
+        assert!(err.contains("too large"), "{err}");
+    }
+
+    #[test]
+    fn reports_a_readable_error_for_a_corrupt_workbook() {
+        let err = render_workbook(b"not a zip archive at all", &Caps::default()).unwrap_err();
+        assert!(!err.is_empty());
+        assert!(err.to_lowercase().contains("spreadsheet"), "{err}");
     }
 }

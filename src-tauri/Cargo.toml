@@ -3,7 +3,7 @@ name = "mdviewer"
 version = "1.23.0"
 description = "A markdown viewer with a file tree and beautifully rendered preview"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.88"
 license = "MIT"
 
 [[bin]]
@@ -48,6 +48,9 @@ opener = "0.7"
 trash = "5"
 interprocess = "2"
 
+# Spreadsheet preview: reads xlsx/xlsm/xlsb/xls/ods. Pure Rust, no native deps.
+calamine = "0.36"
+
 # macOS-only: native WKWebView print-to-PDF (paginated, silent save).
 # objc2 0.6 core with the 0.3 framework wrappers Tauri 2.11 uses internally.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -81,6 +84,10 @@ objc2-core-text = { version = "0.3", features = [
     "CTLine",
     "CTStringAttributes",
 ] }
+
+[dev-dependencies]
+# Builds xlsx fixtures in-test so no binary blobs live in the repo.
+rust_xlsxwriter = "0.98"
 
 [profile.release]
 opt-level = "s"
