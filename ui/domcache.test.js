@@ -95,6 +95,23 @@ test("editing tabs and in-flight exports are never retained", () => {
   assert.equal(canRetain({ tab: TAB, live: LIVE, theme: "light", exporting: true }), false);
 });
 
+test("a preview build in flight is never retained", () => {
+  // renderExportPreviewHtml runs the same print mutations as an export (Mermaid
+  // swapped, out-of-workspace images neutralized, tables scaled) without
+  // setting exportInProgress. Whatever is on screen mid-build is not the
+  // document, so it must not become an entry.
+  assert.equal(
+    canRetain({
+      tab: TAB,
+      live: LIVE,
+      theme: "light",
+      exporting: false,
+      previewRendering: true,
+    }),
+    false,
+  );
+});
+
 test("an entry is usable only for the same raw mode and theme", () => {
   const entry = { fragment: {}, raw: false, theme: "light" };
   assert.equal(entryUsable(entry, { raw: false, theme: "light" }), true);
@@ -108,6 +125,7 @@ test("an entry is usable only for the same raw mode and theme", () => {
 const REVAL = {
   token: 3,
   seq: 3,
+  path: "/a.md",
   tab: { path: "/a.md", raw: false, editing: false },
   exporting: false,
   theme: "light",
@@ -148,5 +166,14 @@ test("a revalidation rendered for the previous theme does not apply", () => {
 
 test("a revalidation rendered for the previous raw mode does not apply", () => {
   const tab = { ...REVAL.tab, raw: true };
+  assert.equal(revalidationApplies({ ...REVAL, tab, active: tab }), false);
+});
+
+test("a revalidation does not apply once its tab has been repointed at another file", () => {
+  // openPreview's reuse branch keeps the SAME tab object and rewrites .path, so
+  // identity alone cannot tell "still the displayed tab" from "still the file
+  // this render describes". Painting here would hang the old file's document —
+  // and its task-checkbox listeners — on a tab that now means a different file.
+  const tab = { ...REVAL.tab, path: "/b.md" };
   assert.equal(revalidationApplies({ ...REVAL, tab, active: tab }), false);
 });

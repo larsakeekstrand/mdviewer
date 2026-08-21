@@ -120,10 +120,14 @@ const renderCache = new RenderCache(RENDER_CACHE_BYTES);
 // that are already painted, highlighted and diagrammed instead of repainting.
 const DOM_CACHE_ENTRIES = 8;
 const domCache = new DomCache(DOM_CACHE_ENTRIES);
-// What #preview currently shows. Gates retention: only a disk render of the
-// active tab in its current raw mode and theme may be kept.
+// What #preview currently shows, including the file stamp it was rendered
+// from. Gates retention: only a disk render of the active tab in its current
+// raw mode and theme may be kept.
 let liveRender = null;
 let validateSeq = 0;
+// Bumped by every paint. postRender yields, so two paints of the SAME tab can
+// overlap; only the newest may claim the finished document.
+let paintSeq = 0;
 
 /* ---- Git decoration state ---- */
 
@@ -389,7 +393,12 @@ async function init() {
     t.mcpRequestId = requestId;
     t.mcpInstructions = instructions || "";
     renderTabBar();
+    // Review chrome is painted by renderReviewMarkers, a postRender hook — and
+    // the reattach path skips postRender. A background tab's retained nodes
+    // would come back without the gutters and Decline button its state now
+    // says it has, so drop them and let the return repaint.
     if (t === activeTab()) await renderActive({ scrollLock: false });
+    else domCache.delete(t.path);
   });
 
   await listen("mcp-get-state", async (ev) => {
@@ -1151,10 +1160,13 @@ async function openPreview(path) {
     tabs[previewIdx].mcpInstructions = "";
     tabs[previewIdx].pendingJumpLine = null;
     tabs[previewIdx].scrollTop = 0;
+    tabs[previewIdx].scrollLeft = 0;
+    // `revalidating` is deliberately NOT reset: a validation for the old path
+    // may still be in flight, and it releases its own hold when it returns.
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
-  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0 });
+  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1165,7 +1177,7 @@ async function openSticky(path) {
     await setActiveTab(existing);
     return;
   }
-  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0 });
+  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1195,7 +1207,7 @@ function persistSession() {
 
 async function restoreSession(paths, active) {
   for (const p of paths) {
-    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0 });
+    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
   }
   if (tabs.length === 0) return;
   const idx =
@@ -1204,27 +1216,51 @@ async function restoreSession(paths, active) {
 }
 
 /** Detach the active tab's rendered nodes into the DOM cache, so returning to
- *  it can reattach them instead of repainting. The stamp comes from the HTML
- *  cache entry that produced this render; without one (an uncacheable render,
- *  or an evicted entry) the retained DOM is still reattached, it just always
+ *  it can reattach them instead of repainting. The stamp is carried on the
+ *  descriptor by whatever painted these nodes, so the entry always records the
+ *  version it actually holds — reading it back out of the HTML cache instead
+ *  would file these nodes under whichever stamp landed there last. Without one
+ *  (an uncacheable render) the retained DOM is still reattached, it just always
  *  revalidates with a full render. */
 function stashActiveTab(t) {
-  if (!canRetain({ tab: t, live: liveRender, theme: currentTheme, exporting: exportInProgress })) {
+  if (
+    !canRetain({
+      tab: t,
+      live: liveRender,
+      theme: currentTheme,
+      exporting: exportInProgress,
+      previewRendering,
+    })
+  ) {
     domCache.delete(t.path);
     return;
   }
-  const cached = renderCache.get(t.path, currentTheme, t.raw);
   const fragment = document.createDocumentFragment();
   fragment.append(...preview.childNodes);
   domCache.set(t.path, {
     fragment,
     className: preview.className,
-    stamp: cached ? cached.stamp : null,
+    stamp: liveRender.stamp || null,
     raw: t.raw,
     theme: currentTheme,
   });
   clearFindHighlights();
   liveRender = null;
+}
+
+/** The reattached document has not been checked against disk yet, so anything
+ *  that would write through it (a task-list toggle resolves its line from the
+ *  DOM's sourcepos) has to wait. Counted rather than boolean: switching away
+ *  and straight back leaves two validations in flight, and the first to return
+ *  must not clear a mark the second still needs. */
+function beginRevalidation(t) {
+  t.revalidating = (t.revalidating || 0) + 1;
+}
+
+function endRevalidation(t) {
+  // Never below zero: a stray release would make the count negative and so
+  // permanently truthy, refusing every toggle for the rest of the session.
+  if (t.revalidating > 0) t.revalidating -= 1;
 }
 
 /** Reattach `t`'s retained render. Returns the stamp to revalidate against, or
@@ -1237,10 +1273,18 @@ function restoreTabDom(t) {
   preview.className = entry.className;
   preview.replaceChildren(entry.fragment);
   previewScroll.scrollTop = t.scrollTop || 0;
+  previewScroll.scrollLeft = t.scrollLeft || 0;
   // replaceChildren MOVES the nodes out of the fragment, leaving it empty — the
   // entry is spent, and the nodes are live again until the next stash.
   domCache.delete(t.path);
-  liveRender = { path: t.path, raw: t.raw, theme: currentTheme, fromDisk: true };
+  liveRender = {
+    path: t.path,
+    raw: t.raw,
+    theme: currentTheme,
+    fromDisk: true,
+    stamp: entry.stamp,
+  };
+  beginRevalidation(t);
   if (findOpen()) runFind({ keepCurrent: true, scroll: false });
   return { stamp: entry.stamp };
 }
@@ -1252,42 +1296,59 @@ async function validateRestored(t, stamp) {
   // The view state this render is being asked for. Everything below keys off
   // these, not the globals, so a result that arrives after the view moved on
   // is recognisable as such instead of being filed (or painted) as current.
+  // `path` in particular is not recoverable from `t`: openPreview repoints an
+  // existing tab object at another file, so `t.path` can name a different
+  // document by the time this returns.
   const theme = currentTheme;
   const raw = t.raw;
-  let result;
+  const path = t.path;
+  // Every exit — answered, failed, or dropped as stale — has to release the
+  // interaction hold taken when the retained nodes went on screen.
   try {
-    result = await invoke("render_file", { path: t.path, theme, raw, stamp });
-  } catch (e) {
-    // The retained nodes are still the last known-good render; keep them on
-    // screen rather than blanking the preview the way a cold failure does.
-    console.error("render_file (revalidation) failed", e);
-    showTransientError(String(e));
-    return;
+    let result;
+    try {
+      result = await invoke("render_file", { path, theme, raw, stamp });
+    } catch (e) {
+      // The retained nodes are still the last known-good render; keep them on
+      // screen rather than blanking the preview the way a cold failure does.
+      console.error("render_file (revalidation) failed", e);
+      showTransientError(String(e));
+      return;
+    }
+    // Each condition is a distinct way the view moved on while the IPC was in
+    // flight, and dropping the repaint is safe in all of them because whatever
+    // changed the state repaints: a newer validation (token), a tab switch
+    // (active) — its own render, the tab being repointed at another file
+    // (path) whose own render is already under way, entering the split editor
+    // (editing) where #preview is the live-preview pane and disk HTML does not
+    // belong, an export (exporting) whose light re-render this would stomp
+    // mid-capture and whose `finally` restores the view, a theme toggle
+    // (applyTheme re-renders), a raw toggle (onToggleRaw re-renders). None is
+    // redundant.
+    const applies = revalidationApplies({
+      token,
+      seq: validateSeq,
+      path,
+      tab: t,
+      active: activeTab(),
+      exporting: exportInProgress,
+      theme,
+      currentTheme,
+      raw,
+    });
+    if (!applies) return;
+    if (result.html == null) return; // the retained render was current
+    if (result.stamp) {
+      renderCache.set(path, theme, raw, result.html, result.stamp);
+    }
+    await paintHtml(t, result.html, result.raw, {
+      scrollLock: true,
+      fromDisk: true,
+      stamp: result.stamp || null,
+    });
+  } finally {
+    endRevalidation(t);
   }
-  // Each condition is a distinct way the view moved on while the IPC was in
-  // flight, and dropping the repaint is safe in all of them because whatever
-  // changed the state repaints: a newer validation (token), a tab switch
-  // (active) — its own render, entering the split editor (editing) where
-  // #preview is the live-preview pane and disk HTML does not belong, an export
-  // (exporting) whose light re-render this would stomp mid-capture and whose
-  // `finally` restores the view, a theme toggle (applyTheme re-renders), a raw
-  // toggle (onToggleRaw re-renders). None is redundant.
-  const applies = revalidationApplies({
-    token,
-    seq: validateSeq,
-    tab: t,
-    active: activeTab(),
-    exporting: exportInProgress,
-    theme,
-    currentTheme,
-    raw,
-  });
-  if (!applies) return;
-  if (result.html == null) return; // the retained render was current
-  if (result.stamp) {
-    renderCache.set(t.path, theme, raw, result.html, result.stamp);
-  }
-  await paintHtml(t, result.html, result.raw, { scrollLock: true, fromDisk: true });
 }
 
 async function setActiveTab(idx, { forceRender = false } = {}) {
@@ -1303,6 +1364,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     const outgoing = activeTab();
     if (outgoing) {
       outgoing.scrollTop = previewScroll.scrollTop;
+      outgoing.scrollLeft = previewScroll.scrollLeft;
       stashActiveTab(outgoing);
     }
   }
@@ -1325,6 +1387,9 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     console.warn("open_file failed", e);
   }
   if (t.editing) {
+    // open_file yields, so the tab can have entered the split editor since the
+    // restore; the editor owns #preview from here, and nothing revalidates it.
+    if (restored) endRevalidation(t);
     ensureCm();
     const inPlace = isCodeView(t.path);
     cm.setOption("mode", modeForPath(t.path));
@@ -1380,7 +1445,10 @@ function closeTab(idx) {
     invoke("mcp_review_result", { requestId: t.mcpRequestId, review: null }).catch(() => {});
   }
   const displayed = activeTab();
-  if (displayed) displayed.scrollTop = previewScroll.scrollTop;
+  if (displayed) {
+    displayed.scrollTop = previewScroll.scrollTop;
+    displayed.scrollLeft = previewScroll.scrollLeft;
+  }
   domCache.delete(t.path);
   tabs.splice(idx, 1);
   if (tabs.length === 0) {
@@ -1805,12 +1873,22 @@ async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo 
   } else if (result.stamp) {
     renderCache.set(t.path, currentTheme, t.raw, html, result.stamp);
   }
-  await paintHtml(t, html, result.raw, { scrollLock, forceMermaid, scrollTo, fromDisk: true });
+  // Unchanged answers carry the stamp they were checked against, so this is the
+  // version on screen either way.
+  const stamp = result.stamp || (cached ? cached.stamp : null);
+  await paintHtml(t, html, result.raw, {
+    scrollLock,
+    forceMermaid,
+    scrollTo,
+    fromDisk: true,
+    stamp,
+  });
 }
 
 /** Diff `html` into #preview and run the post-render pipeline. Shared by the
  *  disk renderer (renderActive) and the editor's live preview. */
-async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false, scrollTo = 0, fromDisk = false } = {}) {
+async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false, scrollTo = 0, fromDisk = false, stamp = null } = {}) {
+  const gen = ++paintSeq;
   previewEmpty.hidden = true;
   preview.hidden = false;
   const code = isCodeView(t.path);
@@ -1867,8 +1945,14 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
   const hadPendingJump = t.pendingJumpLine != null;
   await postRender(t, { raw, forceMermaid });
 
+  // A newer paint started while postRender was yielding — into this same tab,
+  // so postRender's own `activeTab() !== t` bail does not catch it. Its DOM is
+  // what #preview holds now; claiming it as whole (and scrolling it) would
+  // certify a half-decorated document and let it be retained that way.
+  if (gen !== paintSeq) return;
+
   liveRender = fromDisk
-    ? { path: t.path, raw, theme: currentTheme, fromDisk: true }
+    ? { path: t.path, raw, theme: currentTheme, fromDisk: true, stamp }
     : null;
 
   if (!hadPendingJump) {
@@ -2020,6 +2104,18 @@ async function onTaskCheckboxClick(ev, input, t) {
   // input.checked has ALREADY been flipped by the browser to the new state.
   const newState = input.checked;
   const expectedCurrent = !newState;
+
+  if (t.revalidating) {
+    // These nodes were reattached optimistically and haven't been confirmed
+    // against disk yet. `line` comes from their sourcepos, so if the file
+    // changed while this tab was in the background, the write would land on
+    // whatever item now sits at that line — toggle_task verifies the checkbox
+    // state there, not which item it belongs to.
+    ev.preventDefault();
+    input.checked = expectedCurrent;
+    showTransientMessage("Checking this file for changes — try again.");
+    return;
+  }
 
   const key = `${t.path}|${line}`;
   if (pendingToggles.has(key)) {
@@ -2262,8 +2358,14 @@ async function exportDocument(format, path, settings) {
     if (styleEl) styleEl.remove();
     unwrapForPrint(headingWraps);
     unfitWideTables(fittedTables);
-    await restoreViewState(t, snap);
-    domCache.delete(t.path);
+    try {
+      await restoreViewState(t, snap);
+    } finally {
+      // Whatever the capture left in #preview is print-shaped, not the
+      // document. Dropping the entry unconditionally matters most when the
+      // restore threw and the mutations are still on screen.
+      domCache.delete(t.path);
+    }
   }
   return succeeded;
 }
@@ -2290,7 +2392,15 @@ async function renderExportPreviewHtml(settings) {
     return wrapInPageSheet(body, settings);
   } finally {
     unfitWideTables(fitted);
-    await restoreViewState(t, snap);
+    try {
+      await restoreViewState(t, snap);
+    } finally {
+      // Same contract as exportDocument: this function mutates the live
+      // preview for print across several awaits, so any entry stashed while it
+      // ran describes a print-shaped document that would revalidate as fresh.
+      // `previewRendering` stops new stashes; this drops one already taken.
+      domCache.delete(t.path);
+    }
   }
 }
 
@@ -3049,7 +3159,10 @@ function declineMcpReview(t) {
   t.mcpRequestId = null;
   t.mcpInstructions = "";
   renderTabBar();
+  // Retained nodes still carry this review's chrome; the reattach path won't
+  // re-run renderReviewMarkers to strip it.
   if (t === activeTab()) renderReviewMarkers(t);
+  else domCache.delete(t.path);
   invoke("mcp_review_result", { requestId, review: null }).catch(() => {});
 }
 
@@ -3107,7 +3220,10 @@ async function finishReview(t) {
   t.generalNote = "";
   t.reviewMode = false;
   renderTabBar();
+  // The delivery above awaits, so the user can have switched away: the retained
+  // nodes would still show cards for a review that has already been sent.
   if (t === activeTab()) renderReviewMarkers(t);
+  else domCache.delete(t.path);
 }
 
 /* ---- Link handling ---- */

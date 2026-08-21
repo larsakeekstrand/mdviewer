@@ -41,11 +41,19 @@ export class DomCache {
 /** Whether what is currently painted may be kept for `tab`.
  *
  *  `live` describes what the preview actually shows — set by the paint path,
- *  cleared by the image/error/empty paths. Requiring it to match the tab is
- *  what stops a half-finished raw toggle, an editor-buffer preview, or an
- *  error panel from being retained as if it were the document. */
-export function canRetain({ tab, live, theme, exporting }) {
-  if (!tab || !live || exporting) return false;
+ *  cleared by the image/error/empty paths, and carrying the `stamp` the paint
+ *  was made from so the entry records the version it actually holds. Requiring
+ *  it to match the tab is what stops a half-finished raw toggle, an
+ *  editor-buffer preview, or an error panel from being retained as if it were
+ *  the document.
+ *
+ *  `exporting` and `previewRendering` are the two ways the preview is being
+ *  mutated for print rather than for reading — light theme forced, Mermaid
+ *  swapped to export config, out-of-workspace images neutralized, wide tables
+ *  scaled. Both leave the element holding something that is not the document,
+ *  and both interleave with tab switches across their awaits. */
+export function canRetain({ tab, live, theme, exporting, previewRendering }) {
+  if (!tab || !live || exporting || previewRendering) return false;
   if (tab.editing) return false;
   if (!live.fromDisk) return false;
   return live.path === tab.path && live.raw === tab.raw && live.theme === theme;
@@ -59,15 +67,21 @@ export function entryUsable(entry, { raw, theme }) {
 
 /** Whether a revalidation's result may still be painted.
  *
- *  A revalidation is dispatched for one specific view — a tab, in a theme, in a
- *  raw mode — and the IPC gives the user time to change any of that before the
- *  answer arrives. `token`/`seq`, `theme` and `raw` are what the request was
- *  built from; `seq`, `active`, `tab.editing`, `exporting` and `currentTheme`
- *  are the world as it is now. Any mismatch means the result describes a view
- *  that is no longer on screen, and the state that moved on repaints itself. */
+ *  A revalidation is dispatched for one specific view — a file, in a tab, in a
+ *  theme, in a raw mode — and the IPC gives the user time to change any of that
+ *  before the answer arrives. `token`/`seq`, `path`, `theme` and `raw` are what
+ *  the request was built from; `seq`, `active`, `tab.path`, `tab.editing`,
+ *  `exporting` and `currentTheme` are the world as it is now. Any mismatch
+ *  means the result describes a view that is no longer on screen, and the state
+ *  that moved on repaints itself.
+ *
+ *  `path` is checked separately from tab identity because they can diverge:
+ *  openPreview's reuse branch repoints an existing tab object at a new file, so
+ *  `active === tab` stays true across a change of document. */
 export function revalidationApplies({
   token,
   seq,
+  path,
   tab,
   active,
   exporting,
@@ -77,6 +91,7 @@ export function revalidationApplies({
 }) {
   if (token !== seq) return false;
   if (!tab || active !== tab) return false;
+  if (path !== tab.path) return false;
   if (tab.editing) return false;
   if (exporting) return false;
   if (theme !== currentTheme) return false;
