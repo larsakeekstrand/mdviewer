@@ -1,8 +1,19 @@
 //! Tab-switching smoke test (macOS, `--ignored`). Drives a real GUI over the
-//! MCP socket to prove that a revisited tab still paints real content, and that
-//! a file edited while its tab was in the background is corrected by the
-//! background revalidation. Run with:
-//! `cargo test --test tab_switch_smoke -- --ignored --nocapture`
+//! MCP socket to prove the app survives a tab-switch sequence and still
+//! exports: after A → B → A, `generate_pdf` produces a real document, and it
+//! picks up an edit made to that file afterwards.
+//!
+//! Scope, deliberately: this does NOT observe the retained preview DOM.
+//! `generate_pdf` runs `exportDocument`, which forces a light re-render from
+//! disk through `renderActive`/`paintHtml` and rebuilds `#preview` from
+//! scratch, consulting neither the DOM cache nor any reattached nodes — so
+//! both assertions would hold even if reattachment were a no-op. Retained-DOM
+//! correctness itself is covered by the `ui/domcache.test.js` unit tests
+//! (retention eligibility, entry usability, revalidation guards) and by manual
+//! verification; what this test adds is that the whole GUI + MCP + export path
+//! stays healthy across tab switches and file edits.
+//!
+//! Run with: `cargo test --test tab_switch_smoke -- --ignored --nocapture`
 #![cfg(target_os = "macos")]
 
 use std::io::{BufRead, BufReader, Write};
@@ -77,11 +88,11 @@ fn revisited_tab_paints_and_revalidates() {
         .len();
     assert!(
         first > 3000,
-        "a revisited tab produced a {first}-byte PDF — the reattached DOM is empty"
+        "exporting after a tab revisit produced a {first}-byte PDF — the preview \
+         holds no document"
     );
 
-    // Grow the file while its tab is active-but-retained, then revisit it. The
-    // background revalidation must replace the retained render.
+    // Grow the file, then switch away and back before exporting again.
     let mut grown = std::fs::read_to_string(&a).unwrap();
     for _ in 0..30 {
         grown.push_str("\n\n## Appended\n\nMore prose to make the document longer.\n");
@@ -100,7 +111,8 @@ fn revisited_tab_paints_and_revalidates() {
         .len();
     assert!(
         second > first,
-        "edited file still rendered at the old size ({first} -> {second}) — stale retained DOM"
+        "the appended prose never reached the PDF ({first} -> {second}) — the \
+         export path is serving a stale render of the file"
     );
 
     let _ = std::fs::remove_dir_all(&ws);
