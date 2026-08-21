@@ -35,6 +35,7 @@ import {
   hasRawToggle,
   isAnnotatable,
   isRetainable,
+  rendersFromDisk,
   bustsCacheOnChange,
 } from "./filetype.js";
 import { modeForPath } from "./editor-modes.js";
@@ -1848,8 +1849,10 @@ async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo 
     showEmptyState();
     return;
   }
-  if (viewKind(t.path) === "image") {
-    renderImage(t, { scrollLock });
+  const kind = viewKind(t.path);
+  if (rendersFromDisk(kind)) {
+    if (kind === "image") renderImage(t, { scrollLock });
+    else renderPdf(t);
     return;
   }
   const cached = renderCache.get(t.path, currentTheme, t.raw);
@@ -2008,6 +2011,27 @@ function renderImage(t, { scrollLock = true } = {}) {
   preview.replaceChildren(img);
   previewScroll.scrollTop = top;
   previewScroll.scrollLeft = left;
+  liveRender = null;
+}
+
+/** Frame a PDF for the webview's own viewer. Unlike renderImage there is no
+ *  same-file scroll preservation: the iframe owns its scroll, zoom, and page,
+ *  and we cannot read them back across the boundary. */
+function renderPdf(t) {
+  previewEmpty.hidden = true;
+  preview.hidden = false;
+  if (findOpen()) closeFind();
+
+  preview.className = "pdf-view";
+
+  const v = assetVersions.get(t.path) || 0;
+  const frame = document.createElement("iframe");
+  frame.title = basename(t.path);
+  frame.src = convertFileSrc(t.path) + (v ? `?v=${v}` : "");
+
+  preview.replaceChildren(frame);
+  previewScroll.scrollTop = 0;
+  previewScroll.scrollLeft = 0;
   liveRender = null;
 }
 
@@ -3857,7 +3881,12 @@ function findOpen() {
 }
 
 function openFind() {
-  if (!activeTab()) return;
+  const t = activeTab();
+  if (!t) return;
+  if (viewKind(t.path) === "pdf") {
+    showTransientError("Use the PDF viewer's own search for PDF files.");
+    return;
+  }
   const sel = selectedText();
   if (sel && sel.length <= 200 && !sel.includes("\n")) {
     findInput.value = sel;

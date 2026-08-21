@@ -510,6 +510,19 @@ body {
   padding: 20px;
 }
 
+.pdf-view {
+  display: flex;
+  height: 100%;
+  padding: 0;
+}
+
+.pdf-view iframe {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 /* Standalone code/text files: full-width monospace with a CSS-counter gutter.
    Background uses the theme canvas so the syntect token colors (tuned for
    InspiredGitHub / base16-ocean.dark) read correctly in both themes. */
