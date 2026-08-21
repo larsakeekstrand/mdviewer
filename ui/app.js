@@ -1125,10 +1125,11 @@ async function openPreview(path) {
     tabs[previewIdx].mcpRequestId = null;
     tabs[previewIdx].mcpInstructions = "";
     tabs[previewIdx].pendingJumpLine = null;
+    tabs[previewIdx].scrollTop = 0;
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
-  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
+  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0 });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1139,7 +1140,7 @@ async function openSticky(path) {
     await setActiveTab(existing);
     return;
   }
-  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
+  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0 });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1169,7 +1170,7 @@ function persistSession() {
 
 async function restoreSession(paths, active) {
   for (const p of paths) {
-    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [] });
+    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0 });
   }
   if (tabs.length === 0) return;
   const idx =
@@ -1186,6 +1187,10 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     return;
   }
   const same = idx === activeIdx;
+  if (!same) {
+    const outgoing = activeTab();
+    if (outgoing) outgoing.scrollTop = previewScroll.scrollTop;
+  }
   activeIdx = idx;
   if (typeof hideConflict === "function") hideConflict();
   renderTabBar();
@@ -1209,7 +1214,10 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     if (!inPlace) await renderFromEditor(t, { scrollLock: same && !forceRender });
   } else {
     showEditorChrome(false);
-    await renderActive({ scrollLock: same && !forceRender });
+    await renderActive({
+      scrollLock: same && !forceRender,
+      scrollTo: same ? 0 : t.scrollTop || 0,
+    });
   }
 }
 
@@ -1622,7 +1630,7 @@ function showEmptyState() {
   if (findOpen()) closeFind();
 }
 
-async function renderActive({ scrollLock = true, forceMermaid = false } = {}) {
+async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo = 0 } = {}) {
   const t = activeTab();
   if (!t) {
     showEmptyState();
@@ -1662,12 +1670,12 @@ async function renderActive({ scrollLock = true, forceMermaid = false } = {}) {
   } else if (result.stamp) {
     renderCache.set(t.path, currentTheme, t.raw, html, result.stamp);
   }
-  await paintHtml(t, html, result.raw, { scrollLock, forceMermaid });
+  await paintHtml(t, html, result.raw, { scrollLock, forceMermaid, scrollTo });
 }
 
 /** Diff `html` into #preview and run the post-render pipeline. Shared by the
  *  disk renderer (renderActive) and the editor's live preview. */
-async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false } = {}) {
+async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false, scrollTo = 0 } = {}) {
   previewEmpty.hidden = true;
   preview.hidden = false;
   const code = isCodeView(t.path);
@@ -1720,7 +1728,7 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
 
   if (!hadPendingJump) {
     if (anchor) restoreAnchor(anchor);
-    else previewScroll.scrollTop = 0;
+    else previewScroll.scrollTop = scrollTo;
   }
 
   if (findOpen()) runFind({ keepCurrent: true, scroll: false });
