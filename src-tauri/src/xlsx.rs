@@ -24,6 +24,7 @@ pub struct Caps {
     pub max_file_bytes: usize,
     pub max_rows_per_sheet: usize,
     pub max_total_cells: usize,
+    pub max_cell_chars: usize,
 }
 
 impl Default for Caps {
@@ -32,6 +33,8 @@ impl Default for Caps {
             max_file_bytes: 32 * 1024 * 1024,
             max_rows_per_sheet: 5_000,
             max_total_cells: 200_000,
+            // Excel's own native cell text limit.
+            max_cell_chars: 32_767,
         }
     }
 }
@@ -161,16 +164,27 @@ pub fn render_sheets(sheets: &[Sheet], caps: &Caps) -> String {
 use calamine::{Data, Reader};
 use std::io::Cursor;
 
-fn from_calamine(d: &Data) -> Cell {
+// Excel/ODS can label an attacker-controlled string as a "date" cell whose
+// text failed strict ISO 8601 parsing (DateTimeIso/DurationIso carry the raw
+// source text in that case), so those two variants get the same text cap as
+// Data::String rather than being assumed short.
+fn from_calamine(d: &Data, max_chars: usize) -> Cell {
     match d {
         Data::Empty => Cell::Empty,
-        Data::String(s) => Cell::Text(s.clone()),
+        Data::String(s) => Cell::Text(truncate_chars(s, max_chars)),
         Data::Float(f) => Cell::Number(*f),
         Data::Int(i) => Cell::Number(*i as f64),
         Data::Bool(b) => Cell::Bool(*b),
         Data::Error(e) => Cell::Error(format!("{e:?}")),
         Data::DateTime(dt) => Cell::DateTime(dt.as_f64()),
-        Data::DateTimeIso(s) | Data::DurationIso(s) => Cell::Text(s.clone()),
+        Data::DateTimeIso(s) | Data::DurationIso(s) => Cell::Text(truncate_chars(s, max_chars)),
+    }
+}
+
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => s[..byte_idx].to_string(),
+        None => s.to_string(),
     }
 }
 
@@ -188,20 +202,42 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
 
     let names = wb.sheet_names().to_vec();
     let mut sheets = Vec::with_capacity(names.len());
+    // Enforced here, not only inside render_sheets: without this, every
+    // sheet is read and fully materialized (worksheet_range) before any cap
+    // acts on it, which lets a small compressed file expand hugely in
+    // memory before being truncated for display.
+    let mut remaining = caps.max_total_cells;
+    let mut dropped_sheets = false;
+
     for name in names {
+        if remaining == 0 {
+            dropped_sheets = true;
+            break;
+        }
         let range = wb
             .worksheet_range(&name)
             .map_err(|e| format!("cannot read spreadsheet sheet '{name}': {e}"))?;
-        sheets.push(Sheet {
-            name,
-            rows: range
-                .rows()
-                .take(caps.max_rows_per_sheet)
-                .map(|r| r.iter().map(from_calamine).collect())
-                .collect(),
-        });
+
+        let mut rows = Vec::new();
+        for r in range.rows().take(caps.max_rows_per_sheet) {
+            if remaining == 0 {
+                break;
+            }
+            let row: Vec<Cell> = r
+                .iter()
+                .map(|d| from_calamine(d, caps.max_cell_chars))
+                .collect();
+            remaining = remaining.saturating_sub(row.len());
+            rows.push(row);
+        }
+        sheets.push(Sheet { name, rows });
     }
-    Ok(render_sheets(&sheets, caps))
+
+    let mut html = render_sheets(&sheets, caps);
+    if dropped_sheets {
+        html.push_str(&truncation_notice("Remaining sheets"));
+    }
+    Ok(html)
 }
 
 #[cfg(test)]
@@ -394,5 +430,54 @@ mod tests {
         let err = render_workbook(b"not a zip archive at all", &Caps::default()).unwrap_err();
         assert!(!err.is_empty());
         assert!(err.to_lowercase().contains("spreadsheet"), "{err}");
+    }
+
+    fn fixture_three_sheets() -> Vec<u8> {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        for name in ["A", "B", "C"] {
+            let s = wb.add_worksheet();
+            s.set_name(name).unwrap();
+            s.write_string(0, 0, name).unwrap();
+            s.write_string(0, 1, name).unwrap();
+        }
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn stops_reading_sheets_once_the_cell_budget_is_exhausted() {
+        let caps = Caps {
+            max_total_cells: 2,
+            ..Caps::default()
+        };
+        let html = render_workbook(&fixture_three_sheets(), &caps).unwrap();
+        assert!(html.contains("<h2>A</h2>"), "{html}");
+        assert!(
+            !html.contains("<h2>B</h2>"),
+            "B should never be read: {html}"
+        );
+        assert!(
+            !html.contains("<h2>C</h2>"),
+            "C should never be read: {html}"
+        );
+        assert!(html.contains("sheet-truncated"), "{html}");
+    }
+
+    fn fixture_long_cell(len: usize) -> Vec<u8> {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        let s = wb.add_worksheet();
+        s.write_string(0, 0, "<".repeat(len)).unwrap();
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn truncates_cell_text_to_the_configured_cap_and_still_escapes_it() {
+        let caps = Caps {
+            max_cell_chars: 10,
+            ..Caps::default()
+        };
+        let html = render_workbook(&fixture_long_cell(50), &caps).unwrap();
+        assert_eq!(html.matches("&lt;").count(), 10, "{html}");
     }
 }
