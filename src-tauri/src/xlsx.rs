@@ -17,6 +17,14 @@ pub enum Cell {
 pub struct Sheet {
     pub name: String,
     pub rows: Vec<Vec<Cell>>,
+    /// Set by the caller (`render_workbook`'s read loop) when it already
+    /// knows this specific sheet's rows were cut off — by the row cap or by
+    /// the cross-sheet cell budget running out mid-sheet — before
+    /// `render_sheets` ever sees it. `render_sheets` ORs this into its own
+    /// truncation detection so the notice always lands after the sheet that
+    /// was actually truncated, not appended once at the end of a multi-sheet
+    /// document regardless of which sheet triggered it.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -133,7 +141,7 @@ pub fn render_sheets(sheets: &[Sheet], caps: &Caps) -> String {
         }
 
         let width = sheet.rows.iter().map(|r| r.len()).max().unwrap_or(0);
-        let mut truncated = sheet.rows.len() > caps.max_rows_per_sheet;
+        let mut truncated = sheet.truncated || sheet.rows.len() > caps.max_rows_per_sheet;
         let limit = sheet.rows.len().min(caps.max_rows_per_sheet);
         let mut tbody_open = false;
 
@@ -244,7 +252,7 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
         }
     }
 
-    let mut wb = calamine::open_workbook_auto_from_rs(Cursor::new(bytes.to_vec()))
+    let mut wb = calamine::open_workbook_auto_from_rs(Cursor::new(bytes))
         .map_err(|e| format!("cannot read spreadsheet: {e}"))?;
 
     let names = wb.sheet_names().to_vec();
@@ -255,12 +263,6 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
     // memory before being truncated for display.
     let mut remaining = caps.max_total_cells;
     let mut dropped_sheets = false;
-    // render_sheets can no longer tell truncated-here rows from rows that
-    // were always this short, because both the row cap and the cell budget
-    // are already applied before it ever sees a Sheet. Only this loop, by
-    // watching whether range.rows() still had a next row when it stopped,
-    // knows the difference — so it alone is responsible for the notice.
-    let mut truncated_rows = false;
 
     for name in names {
         if remaining == 0 {
@@ -272,9 +274,19 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
             .map_err(|e| format!("cannot read spreadsheet sheet '{name}': {e}"))?;
 
         let mut rows = Vec::new();
+        // render_sheets can no longer tell truncated-here rows from rows that
+        // were always this short, because both the row cap and the cell
+        // budget are already applied before it ever sees a Sheet. Only this
+        // loop, by watching whether range.rows() still had a next row when it
+        // stopped, knows the difference — so it records it per-sheet on
+        // Sheet::truncated, which render_sheets folds into the notice it
+        // already emits right after THIS sheet's table (not a single flag
+        // appended once at the end of the whole multi-sheet document, which
+        // would misattribute the notice to whichever sheet rendered last).
+        let mut truncated = false;
         for (i, r) in range.rows().enumerate() {
             if i >= caps.max_rows_per_sheet || remaining == 0 {
-                truncated_rows = true;
+                truncated = true;
                 break;
             }
             let row: Vec<Cell> = r
@@ -284,13 +296,14 @@ pub fn render_workbook(bytes: &[u8], caps: &Caps) -> Result<String, String> {
             remaining = remaining.saturating_sub(row.len());
             rows.push(row);
         }
-        sheets.push(Sheet { name, rows });
+        sheets.push(Sheet {
+            name,
+            rows,
+            truncated,
+        });
     }
 
     let mut html = render_sheets(&sheets, caps);
-    if truncated_rows {
-        html.push_str(&truncation_notice("Sheet"));
-    }
     if dropped_sheets {
         html.push_str(&truncation_notice("Remaining sheets"));
     }
@@ -362,6 +375,7 @@ mod tests {
                 .iter()
                 .map(|r| r.iter().map(|c| Cell::Text(c.to_string())).collect())
                 .collect(),
+            truncated: false,
         }
     }
 
@@ -448,6 +462,7 @@ mod tests {
                     vec![Cell::Text("a".into())],
                     vec![Cell::Text("b".into()), Cell::Text("c".into())],
                 ],
+                truncated: false,
             }],
             &Caps::default(),
         );
@@ -532,6 +547,76 @@ mod tests {
             "C should never be read: {html}"
         );
         assert!(html.contains("sheet-truncated"), "{html}");
+    }
+
+    fn fixture_uneven_row_counts() -> Vec<u8> {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        let a = wb.add_worksheet();
+        a.set_name("A").unwrap();
+        for r in 0..5 {
+            a.write_string(r as u32, 0, format!("a{r}")).unwrap();
+        }
+        let b = wb.add_worksheet();
+        b.set_name("B").unwrap();
+        b.write_string(0, 0, "b0").unwrap();
+        let c = wb.add_worksheet();
+        c.set_name("C").unwrap();
+        c.write_string(0, 0, "c0").unwrap();
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn truncation_notice_lands_right_after_the_sheet_that_was_actually_truncated() {
+        // Only A has more rows than the cap; B and C do not. The notice must
+        // appear between A's table and B's heading, not once at the very end
+        // of the document (which would misattribute it to C).
+        let caps = Caps {
+            max_rows_per_sheet: 2,
+            ..Caps::default()
+        };
+        let html = render_workbook(&fixture_uneven_row_counts(), &caps).unwrap();
+        let a_pos = html.find("<h2>A</h2>").expect("A heading missing");
+        let b_pos = html.find("<h2>B</h2>").expect("B heading missing");
+        let c_pos = html.find("<h2>C</h2>").expect("C heading missing");
+        let notice_pos = html
+            .find("sheet-truncated")
+            .expect("must show a truncation notice");
+        assert!(
+            a_pos < notice_pos && notice_pos < b_pos,
+            "notice must land between A's table and B's heading: {html}"
+        );
+        assert!(notice_pos < c_pos, "{html}");
+        assert_eq!(
+            html.matches("sheet-truncated").count(),
+            1,
+            "B and C were not truncated, so exactly one notice: {html}"
+        );
+    }
+
+    fn fixture_with_a_blank_sheet() -> Vec<u8> {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        let a = wb.add_worksheet();
+        a.set_name("Data").unwrap();
+        a.write_string(0, 0, "x").unwrap();
+        wb.add_worksheet().set_name("Blank").unwrap();
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn a_zero_row_sheet_inside_a_non_empty_workbook_shows_as_empty_not_dropped() {
+        let html = render_workbook(&fixture_with_a_blank_sheet(), &Caps::default()).unwrap();
+        assert!(html.contains("<h2>Data</h2>"), "{html}");
+        assert!(html.contains("<h2>Blank</h2>"), "{html}");
+        assert!(
+            html.contains("sheet-empty"),
+            "the zero-row sheet must render the empty-sheet notice: {html}"
+        );
+        assert!(
+            !html.contains("sheet-truncated"),
+            "an empty sheet is not a truncated one: {html}"
+        );
     }
 
     fn fixture_long_cell(len: usize) -> Vec<u8> {
