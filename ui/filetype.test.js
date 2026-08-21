@@ -1,6 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isImagePath, isMarkdownPath, isCodeView } from "./filetype.js";
+import {
+  isImagePath,
+  isMarkdownPath,
+  isCodeView,
+  isPdfPath,
+  isSheetPath,
+  viewKind,
+  isEditable,
+  hasSplitPreview,
+  hasRawToggle,
+  isAnnotatable,
+  isRetainable,
+  isExportable,
+  rendersFromDisk,
+  bustsCacheOnChange,
+} from "./filetype.js";
 
 test("isImagePath matches common image extensions, case-insensitively", () => {
   for (const p of [
@@ -58,4 +73,70 @@ test("isCodeView is true only for non-markdown, non-image", () => {
   assert.equal(isCodeView("Makefile"), true);
   assert.equal(isCodeView("readme.md"), false);
   assert.equal(isCodeView("pic.png"), false);
+});
+
+test("viewKind resolves each family, case-insensitively", () => {
+  assert.equal(viewKind("notes.md"), "markdown");
+  assert.equal(viewKind("A.MARKDOWN"), "markdown");
+  assert.equal(viewKind("pic.PNG"), "image");
+  assert.equal(viewKind("/docs/report.pdf"), "pdf");
+  assert.equal(viewKind("C:\\books\\Manual.PDF"), "pdf");
+  assert.equal(viewKind("budget.xlsx"), "sheet");
+  assert.equal(viewKind("legacy.xls"), "sheet");
+  assert.equal(viewKind("macro.xlsm"), "sheet");
+  assert.equal(viewKind("binary.xlsb"), "sheet");
+  assert.equal(viewKind("open.ods"), "sheet");
+  assert.equal(viewKind("main.rs"), "code");
+});
+
+test("viewKind falls back to code for anything unrecognized", () => {
+  for (const p of ["Makefile", "a.pngx", "notes.pdf.txt", "archive.tar.gz", ""]) {
+    assert.equal(viewKind(p), "code", p);
+  }
+});
+
+test("viewKind handles nullish input without throwing", () => {
+  assert.equal(viewKind(null), "code");
+  assert.equal(viewKind(undefined), "code");
+});
+
+test("isPdfPath and isSheetPath match only their own families", () => {
+  assert.equal(isPdfPath("a.pdf"), true);
+  assert.equal(isPdfPath("a.pdfx"), false);
+  assert.equal(isPdfPath("notes.md"), false);
+  assert.equal(isSheetPath("a.xlsx"), true);
+  assert.equal(isSheetPath("a.xlsxx"), false);
+  assert.equal(isSheetPath("a.pdf"), false);
+});
+
+test("capability table: exact rows for all five kinds", () => {
+  const table = {
+    //          edit  split  raw   annot retain export disk  bust
+    markdown: [true, true, true, true, true, true, false, false],
+    code: [true, false, false, false, true, false, false, false],
+    image: [false, false, false, false, false, false, true, true],
+    pdf: [false, false, false, false, false, false, true, true],
+    sheet: [false, false, false, false, true, true, false, false],
+  };
+  const fns = [
+    isEditable,
+    hasSplitPreview,
+    hasRawToggle,
+    isAnnotatable,
+    isRetainable,
+    isExportable,
+    rendersFromDisk,
+    bustsCacheOnChange,
+  ];
+  for (const [kind, expected] of Object.entries(table)) {
+    expected.forEach((want, i) => {
+      assert.equal(fns[i](kind), want, `${fns[i].name}("${kind}")`);
+    });
+  }
+});
+
+test("predicates treat an unknown kind as code, not as a crash", () => {
+  assert.equal(isEditable("nonsense"), true);
+  assert.equal(isExportable("nonsense"), false);
+  assert.equal(rendersFromDisk(undefined), false);
 });
