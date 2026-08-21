@@ -272,6 +272,7 @@ async function init() {
   // instant the app becomes ready isn't missed.
   await listen("file-changed", async (ev) => {
     renderCache.deleteByPath(ev.payload);
+    domCache.delete(ev.payload);
     const tab = activeTab();
     if (tab && ev.payload === tab.path) {
       if (tab.editing) {
@@ -906,6 +907,7 @@ async function revealInTree(path) {
 /** After a rename, rewrite any open tab whose path is the renamed entry or
  *  nested under it (folder rename), and rewire the active tab's watcher. */
 function retargetTabsForRename(from, to) {
+  domCache.clear();
   let activeChanged = false;
   for (let i = 0; i < tabs.length; i++) {
     const p = tabs[i].path;
@@ -927,6 +929,7 @@ function retargetTabsForRename(from, to) {
 
 /** Close any tab pointing at `path` or nested under it (folder delete). */
 function closeTabsUnder(path) {
+  domCache.clear();
   for (let i = tabs.length - 1; i >= 0; i--) {
     const p = tabs[i].path;
     if (p === path || p.startsWith(path + "/")) {
@@ -1378,6 +1381,7 @@ function closeTab(idx) {
   }
   const displayed = activeTab();
   if (displayed) displayed.scrollTop = previewScroll.scrollTop;
+  domCache.delete(t.path);
   tabs.splice(idx, 1);
   if (tabs.length === 0) {
     activeIdx = -1;
@@ -1722,6 +1726,7 @@ function updateThemeButton() {
 
 async function applyTheme(theme) {
   currentTheme = theme;
+  domCache.clear();
   document.documentElement.dataset.theme = theme;
   initMermaid();
   updateThemeButton();
@@ -2258,6 +2263,7 @@ async function exportDocument(format, path, settings) {
     unwrapForPrint(headingWraps);
     unfitWideTables(fittedTables);
     await restoreViewState(t, snap);
+    domCache.delete(t.path);
   }
   return succeeded;
 }
