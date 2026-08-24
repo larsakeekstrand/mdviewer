@@ -351,9 +351,17 @@ const UNSAFE_OPEN_EXTS: &[&str] = &[
     "ksh",
     "fish",
     "py",
+    "pyw",
+    "pyz",
+    "pyzw",
     "rb",
     "pl",
     "php",
+    // Java: Jar Launcher runs a .jar's Main-Class, Web Start runs a .jnlp's
+    // remotely-hosted code. Both are registered handlers whenever a JDK/JRE
+    // is installed.
+    "jar",
+    "jnlp",
     // Location files that redirect `open` to an arbitrary URL/path
     "webloc",
     "fileloc",
@@ -362,6 +370,8 @@ const UNSAFE_OPEN_EXTS: &[&str] = &[
     // Installers and loadable code bundles
     "pkg",
     "mpkg",
+    // Signed archive; expanding one can run its embedded scripts.
+    "xip",
     "prefpane",
     "qlgenerator",
     "saver",
@@ -389,6 +399,7 @@ const UNSAFE_OPEN_EXTS: &[&str] = &[
     "jse",
     "wsf",
     "wsh",
+    "sct",
     "msh",
     "msh1",
     "msh2",
@@ -402,13 +413,20 @@ const UNSAFE_OPEN_EXTS: &[&str] = &[
     "cpl",
     "reg",
     "inf",
+    // Compiled help: renders HTML with scripting privileges.
+    "chm",
+    // Sidebar gadget package (HTML+script, runs unsandboxed).
+    "gadget",
     // Windows shortcut / link files (redirect `start` to an arbitrary target)
     "lnk",
     "scf",
     "appref-ms",
+    "website",
     // Windows app packages
     "appx",
     "appxbundle",
+    "msix",
+    "msixbundle",
     "hta",
 ];
 
@@ -457,13 +475,43 @@ pub fn path_within_dir(path: String, dir: String) -> bool {
     }
 }
 
+/// Whether `p` is a regular file with any execute bit set.
+///
+/// The extension denylist cannot see this class at all: a file with NO
+/// extension types as `public.unix-executable` on macOS, which LaunchServices
+/// binds to Terminal.app — so `open`ing it *runs* it. Git preserves mode 0755,
+/// so an untrusted repo can ship `docs/setup-guide` (chmod +x, no extension)
+/// and a ⌘-clicked link to it becomes local code execution.
+///
+/// `metadata` follows symlinks, which is what we want: `opener::open` follows
+/// them too, and `symlink_metadata` would be useless here because a symlink's
+/// own mode is always 0777. Directories are excluded — their execute bit means
+/// "traversable", and opening one just reveals it in Finder.
+#[cfg(unix)]
+fn is_executable_file(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+/// Windows has no execute bit; launchability there is decided entirely by the
+/// extension denylist.
+#[cfg(not(unix))]
+fn is_executable_file(_p: &Path) -> bool {
+    false
+}
+
 /// Whether the system opener must refuse `p`. Checks both the literal path and,
 /// because `opener::open` follows symlinks, the symlink-resolved target — so a
 /// link named `notes.txt` pointing at `/Applications/Evil.app` can't smuggle a
-/// launchable type past the extension denylist.
+/// launchable type past the extension denylist. The execute-bit check catches
+/// what the denylist structurally cannot: an extensionless executable.
 fn refuses_to_open(p: &Path) -> bool {
     let resolved = p.canonicalize();
-    is_unsafe_to_open(p) || resolved.as_deref().map(is_unsafe_to_open).unwrap_or(false)
+    is_unsafe_to_open(p)
+        || resolved.as_deref().map(is_unsafe_to_open).unwrap_or(false)
+        || is_executable_file(p)
 }
 
 #[tauri::command]
@@ -1151,6 +1199,121 @@ mod tests {
                 "{name} should be allowed"
             );
         }
+    }
+
+    #[test]
+    fn flags_launchable_types_the_denylist_gained() {
+        // Regression net for the second half of the ⌘-click RCE fix: each of
+        // these has a registered handler that *executes* the file's contents.
+        for name in [
+            "app.jar",
+            "launch.jnlp",
+            "quiet.pyw",
+            "bundle.pyz",
+            "bundle.pyzw",
+            "scriptlet.sct",
+            "shortcut.website",
+            "pkg.msix",
+            "pkg.msixbundle",
+            "help.chm",
+            "widget.gadget",
+            "archive.xip",
+        ] {
+            assert!(
+                is_unsafe_to_open(Path::new(name)),
+                "{name} should be refused"
+            );
+        }
+    }
+
+    /// Scratch directory for one test, removed on drop so a failed assertion
+    /// (which unwinds) still cleans up.
+    #[cfg(unix)]
+    struct TempDir(std::path::PathBuf);
+
+    #[cfg(unix)]
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let d = std::env::temp_dir().join(format!("mdviewer-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            TempDir(d)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, b"#!/bin/sh\necho pwned\n").unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn refuses_extensionless_executable() {
+        // The RCE this fix closes: an untrusted repo ships `docs/setup-guide`
+        // with mode 0755 and no extension. macOS types it
+        // `public.unix-executable`, whose handler is Terminal.app, so `open`
+        // runs it — but `Path::extension()` is None, so the denylist can never
+        // see it.
+        let dir = TempDir::new("exec-noext");
+        let bait = dir.path().join("setup-guide");
+        write_executable(&bait);
+
+        assert!(
+            !is_unsafe_to_open(&bait),
+            "no extension, so the denylist alone cannot flag it"
+        );
+        assert!(refuses_to_open(&bait), "the execute bit must refuse it");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn refuses_symlink_to_an_extensionless_executable() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new("exec-symlink");
+        let target = dir.path().join("payload");
+        write_executable(&target);
+        let link = dir.path().join("notes.txt"); // innocuous name and extension
+        symlink(&target, &link).unwrap();
+
+        // `metadata` follows the link, which is what `opener::open` does too.
+        assert!(refuses_to_open(&link));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn allows_extensionless_non_executable_files() {
+        // Refusing every extensionless file would break ordinary repo contents;
+        // without the execute bit `open` has no handler that runs them anyway.
+        let dir = TempDir::new("noexec-noext");
+        for name in ["LICENSE", "Makefile", "Dockerfile"] {
+            let f = dir.path().join(name);
+            std::fs::write(&f, b"text\n").unwrap();
+            assert!(!refuses_to_open(&f), "{name} should still open");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn allows_directories_despite_their_execute_bit() {
+        // A directory's execute bit means "traversable", not "runnable", and a
+        // link to a folder should still reveal it in Finder.
+        let dir = TempDir::new("execbit-dir");
+        let sub = dir.path().join("docs");
+        std::fs::create_dir(&sub).unwrap();
+        assert!(!refuses_to_open(&sub));
     }
 
     #[cfg(target_os = "macos")]
