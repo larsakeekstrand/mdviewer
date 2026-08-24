@@ -1,10 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  isImagePath,
-  isMarkdownPath,
-  isPdfPath,
-  isSheetPath,
   viewKind,
   isEditable,
   hasSplitPreview,
@@ -16,7 +12,7 @@ import {
   bustsCacheOnChange,
 } from "./filetype.js";
 
-test("isImagePath matches common image extensions, case-insensitively", () => {
+test("viewKind recognizes every image extension, case-insensitively", () => {
   for (const p of [
     "a.png",
     "a.jpg",
@@ -30,41 +26,25 @@ test("isImagePath matches common image extensions, case-insensitively", () => {
     "/some/dir/PHOTO.JPG",
     "C:\\pics\\Logo.SVG",
   ]) {
-    assert.equal(isImagePath(p), true, `${p} should be an image`);
+    assert.equal(viewKind(p), "image", `${p} should be an image`);
   }
 });
 
-test("isImagePath rejects non-image paths", () => {
-  for (const p of [
-    "a.md",
-    "a.markdown",
-    "a.txt",
-    "README",
-    "notes.png.md",
-    "png",
-    "a.pngx",
-    "archive.tar.gz",
-  ]) {
-    assert.equal(isImagePath(p), false, `${p} should not be an image`);
-  }
-});
-
-test("isImagePath handles empty/nullish input", () => {
-  assert.equal(isImagePath(""), false);
-  assert.equal(isImagePath(null), false);
-  assert.equal(isImagePath(undefined), false);
-});
-
-test("isMarkdownPath true for markdown extensions", () => {
+test("viewKind recognizes every markdown extension, case-insensitively", () => {
   for (const p of ["a.md", "A.MARKDOWN", "x.mdown", "y.mkd", "z.mkdn"]) {
-    assert.equal(isMarkdownPath(p), true, p);
+    assert.equal(viewKind(p), "markdown", p);
   }
 });
 
-test("isMarkdownPath false for non-markdown", () => {
-  for (const p of ["main.rs", "pic.png", "Makefile", ""]) {
-    assert.equal(isMarkdownPath(p), false, p);
-  }
+test("viewKind only matches a family at the end of the name", () => {
+  // A near-miss extension must degrade to code, and an image-looking stem with
+  // a markdown extension is markdown — the suffix decides, not the substring.
+  assert.equal(viewKind("notes.png.md"), "markdown");
+  assert.equal(viewKind("a.pngx"), "code");
+  assert.equal(viewKind("a.pdfx"), "code");
+  assert.equal(viewKind("a.xlsxx"), "code");
+  assert.equal(viewKind("png"), "code");
+  assert.equal(viewKind("README"), "code");
 });
 
 test("viewKind resolves each family, case-insensitively", () => {
@@ -90,15 +70,6 @@ test("viewKind falls back to code for anything unrecognized", () => {
 test("viewKind handles nullish input without throwing", () => {
   assert.equal(viewKind(null), "code");
   assert.equal(viewKind(undefined), "code");
-});
-
-test("isPdfPath and isSheetPath match only their own families", () => {
-  assert.equal(isPdfPath("a.pdf"), true);
-  assert.equal(isPdfPath("a.pdfx"), false);
-  assert.equal(isPdfPath("notes.md"), false);
-  assert.equal(isSheetPath("a.xlsx"), true);
-  assert.equal(isSheetPath("a.xlsxx"), false);
-  assert.equal(isSheetPath("a.pdf"), false);
 });
 
 test("capability table: exact rows for all five kinds", () => {

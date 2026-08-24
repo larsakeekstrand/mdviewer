@@ -198,7 +198,7 @@ fn ext_of(path: &str) -> Option<String> {
 }
 
 /// Allowlist of what `open_document` may open — mirrors the frontend's
-/// MD_EXT (app.js) and filetype.js's IMAGE_EXT/PDF_EXT/SHEET_EXT. Stricter
+/// MARKDOWN_EXT/IMAGE_EXT/PDF_EXT/SHEET_EXT in ui/filetype.js. Stricter
 /// than the UNSAFE_OPEN_EXTS denylist: paths from Claude are untrusted input.
 pub fn viewable_path(path: &str) -> bool {
     ext_of(path)
@@ -748,7 +748,7 @@ mod tests {
 
     #[test]
     fn viewable_path_allowlists_markdown_images_pdf_and_sheets() {
-        // Mirrors ui/app.js MD_EXT and ui/filetype.js IMAGE_EXT/PDF_EXT/SHEET_EXT.
+        // Mirrors MARKDOWN_EXT/IMAGE_EXT/PDF_EXT/SHEET_EXT in ui/filetype.js.
         for p in [
             "a.md",
             "B.MARKDOWN",

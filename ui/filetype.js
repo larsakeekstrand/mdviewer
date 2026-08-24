@@ -6,22 +6,6 @@ export const MARKDOWN_EXT = /\.(md|markdown|mdown|mkd|mkdn)$/i;
 export const PDF_EXT = /\.pdf$/i;
 export const SHEET_EXT = /\.(xlsx|xlsm|xlsb|xls|ods)$/i;
 
-export function isImagePath(path) {
-  return IMAGE_EXT.test(path || "");
-}
-
-export function isMarkdownPath(path) {
-  return MARKDOWN_EXT.test(path || "");
-}
-
-export function isPdfPath(path) {
-  return PDF_EXT.test(path || "");
-}
-
-export function isSheetPath(path) {
-  return SHEET_EXT.test(path || "");
-}
-
 /** How a file is shown. `code` is the fallback on purpose: an extension we
  *  don't recognize degrades to source view instead of failing to open. */
 export function viewKind(path) {

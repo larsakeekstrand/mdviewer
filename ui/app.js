@@ -28,6 +28,7 @@ import {
   themeButtonFace,
 } from "./theme.js";
 import {
+  MARKDOWN_EXT,
   viewKind,
   isEditable,
   hasSplitPreview,
@@ -86,7 +87,6 @@ async function detectPlatform() {
   }
 }
 
-const MD_EXT = /\.(md|markdown|mdown|mkd|mkdn)$/i;
 const DOUBLE_CLICK_MS = 280;
 
 const tree = document.getElementById("tree");
@@ -823,7 +823,7 @@ function makeNode(entry, depth) {
 
   const row = document.createElement("div");
   row.className = "row " + (entry.is_dir ? "dir" : "file");
-  if (!entry.is_dir && MD_EXT.test(entry.name)) row.classList.add("is-md");
+  if (!entry.is_dir && MARKDOWN_EXT.test(entry.name)) row.classList.add("is-md");
   row.style.setProperty("--row-indent", `${depth * 12 + 4}px`);
 
   const chev = document.createElement("span");
@@ -835,7 +835,7 @@ function makeNode(entry, depth) {
   icon.className = "icon";
   icon.textContent = entry.is_dir
     ? "\u{1F4C1}"
-    : MD_EXT.test(entry.name)
+    : MARKDOWN_EXT.test(entry.name)
       ? "\u{1F4C4}"
       : "·";
   row.appendChild(icon);
@@ -3416,7 +3416,7 @@ preview.addEventListener("click", async (ev) => {
   if (!tab) return;
   const resolved = resolveRelative(parentDir(tab.path), href);
 
-  if (MD_EXT.test(resolved)) {
+  if (MARKDOWN_EXT.test(resolved)) {
     if (ev.metaKey || ev.ctrlKey) {
       await openSticky(resolved);
     } else {

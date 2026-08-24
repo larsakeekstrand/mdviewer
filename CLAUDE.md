@@ -239,10 +239,11 @@ icon.svg          — source for icon regeneration
   `script-src 'self'` forbids an inline `<head>` bootstrap, so `data-theme` is
   set as the first statement of the deferred `app.js` module (sub-frame flash
   possible if a stored pref differs from the OS).
-- **Image files**: a frontend-only feature (no Rust). `isImagePath` (`ui/filetype.js`,
-  unit-tested) detects image extensions; `renderActive` short-circuits to
-  `renderImage` *before* the `render_file` IPC — which is essential because the
-  backend does `read_to_string` and would fail on binary data. `renderImage`
+- **Image files**: a frontend-only feature (no Rust). `viewKind` (`ui/filetype.js`,
+  unit-tested) classifies the path as `image` and `rendersFromDisk` is true for
+  that row, so `renderActive` short-circuits to `renderImage` *before* the
+  `render_file` IPC — which is essential because the backend does
+  `read_to_string` and would fail on binary data. `renderImage`
   builds an `<img>` at natural size via `convertFileSrc` (asset protocol; `#preview`
   takes the `image-view` class, not `markdown-body`, so the prose-width rules don't
   shrink it). Live reload bumps a per-path `assetVersions` counter → `?v=N`
@@ -591,7 +592,7 @@ Windows-specific gotchas:
   several different questions (editable? split preview? raw toggle?
   retainable? exportable? …), which `isImagePath`/`isCodeView` used to
   conflate. Adding a view type is a row in the capability table in
-  `ui/filetype.js`. If you find yourself writing `|| isPdfPath(...)` at a
+  `ui/filetype.js`. If you find yourself writing `|| PDF_EXT.test(...)` at a
   call site, the answer belongs in the table instead.
 - **The xlsx arm must precede `is_binary`** in `commands::render_file`. xlsx
   is a zip archive; put the check after and every workbook renders "Can't
