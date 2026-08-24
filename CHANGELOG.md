@@ -3,6 +3,36 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.24.0] - 2026-08-24
+
+Preview PDFs and spreadsheets alongside your markdown.
+
+### Added
+- **PDF preview.** `.pdf` files open in the PDF viewer built into the app's web
+  engine — the same one your browser uses — with its own page navigation and
+  zoom. Search inside a PDF using that viewer's own controls; MDViewer's ⌘F
+  cannot reach inside it.
+- **Spreadsheet preview.** `.xlsx`, `.xlsm`, `.xlsb`, `.xls` and `.ods` files
+  open as data tables, one per sheet, in workbook order. **This shows the data,
+  not the document.** You get cell values and cached formula results only — no
+  fonts, colors, cell borders, column widths, merged cells, charts or pivot
+  tables — so it will not resemble the original spreadsheet, and is meant for
+  reading what a workbook contains rather than reviewing how it looks. Dates and
+  numbers display as values (a date cell reads `2023-03-15`, not `45000`).
+  Very large workbooks are truncated for preview, and every place that happens
+  is marked in the output.
+- Both types open from the file tree like any other file and can be exported to
+  HTML and PDF. Neither supports Raw view, in-app editing, or Review Mode.
+
+### Known limitations
+- Spreadsheets saved in the older 1904 date system (Mac Excel 2008 and earlier)
+  show every date about four years early.
+- A formula cell shows whatever value the writing application cached with it; a
+  file produced by a tool that caches nothing shows `0`.
+
+### Changed
+- Building from source now requires Rust 1.88 or later, up from 1.80.
+
 ## [1.23.0] - 2026-08-21
 
 Instant tab switching, and tabs that remember where you were reading.
