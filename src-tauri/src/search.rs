@@ -1,11 +1,13 @@
 //! Folder content search engine.
 //!
 //! The walk and per-file scan live in [`search_in_folder`]; the pure helpers
-//! [`match_line`], [`is_binary`], and [`is_word_char`] are split out so they
-//! can be unit-tested without any filesystem. Semantics mirror
+//! [`match_line_prepared`], [`is_binary`], and [`is_word_char`] are split out
+//! so they can be unit-tested without any filesystem (via the `match_line`
+//! test wrapper, which folds the needle the way a real search does once). Semantics mirror
 //! `ui/search.js::findMatches` so the in-document find bar and the folder
 //! search behave identically on the same inputs.
 
+use std::io::Read;
 use std::path::Path;
 
 use serde::Serialize;
@@ -64,21 +66,42 @@ pub fn is_binary(sample: &[u8]) -> bool {
 /// Find every occurrence of `query` in `line`. Returns `[start, end)` byte
 /// offsets, in order, non-overlapping. Mirrors `findMatches` in
 /// `ui/search.js`.
+/// Test-facing wrapper: folds the needle and scans one line in a single call.
+/// Production goes through [`prepare_needle`] once per search and then
+/// [`match_line_prepared`] per line; this keeps the unit tests expressed in
+/// terms of a raw query, so they still cover the folding step.
+#[cfg(test)]
 pub fn match_line(line: &str, query: &str, opts: SearchOpts) -> Vec<(usize, usize)> {
-    if query.is_empty() {
+    match_line_prepared(line, &prepare_needle(query, opts), opts)
+}
+
+/// Case-fold `query` once per search rather than once per line. Folding it
+/// inside `match_line` made it loop-invariant work repeated for every line of
+/// every file, which is the bulk of what a case-insensitive scan costs.
+fn prepare_needle(query: &str, opts: SearchOpts) -> String {
+    if opts.case_sensitive {
+        query.to_string()
+    } else {
+        query.to_lowercase()
+    }
+}
+
+/// `match_line` with the needle already folded by [`prepare_needle`].
+fn match_line_prepared(line: &str, needle: &str, opts: SearchOpts) -> Vec<(usize, usize)> {
+    if needle.is_empty() {
         return Vec::new();
     }
-    let (hay, needle): (String, String) = if opts.case_sensitive {
-        (line.to_string(), query.to_string())
+    let hay: String = if opts.case_sensitive {
+        line.to_string()
     } else {
-        (line.to_lowercase(), query.to_lowercase())
+        line.to_lowercase()
     };
 
     let mut out = Vec::new();
     let mut from = 0usize;
     let mut last_end = 0usize;
     let mut first = true;
-    while let Some(i) = hay[from..].find(&needle) {
+    while let Some(i) = hay[from..].find(needle) {
         let start = from + i;
         let end = start + needle.len();
         let overlap = !first && start < last_end;
@@ -126,12 +149,20 @@ pub fn search_in_folder(
     }
 
     let mut results = SearchResults::default();
+    let needle = prepare_needle(query, opts);
 
     let mut builder = ignore::WalkBuilder::new(root);
     builder
         .standard_filters(false)
         .hidden(false)
-        .follow_links(false);
+        .follow_links(false)
+        // `.hidden(false)` keeps dotfiles searchable on purpose (.github
+        // workflows, .gitignore itself). That also opens `.git`, which is
+        // git's object database, not the user's content: on this repo it was
+        // 1497 of the 1806 files visited and contributed 12% of the hits, all
+        // from COMMIT_EDITMSG / config / hooks samples. Excluded regardless of
+        // `respect_gitignore` — that toggle is about ignored *user* files.
+        .filter_entry(|e| e.file_name() != std::ffi::OsStr::new(".git"));
     if opts.respect_gitignore {
         builder
             .git_ignore(true)
@@ -165,15 +196,31 @@ pub fn search_in_folder(
             results.files_skipped_too_large += 1;
             continue;
         }
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
+        // Read only the sniff window first. A binary is then rejected having
+        // touched 8 KB instead of its whole (up to 10 MB) length, which is the
+        // difference between skipping a file and paying to load it.
+        let mut file = match std::fs::File::open(path) {
+            Ok(f) => f,
             Err(_) => {
                 results.files_unreadable += 1;
                 continue;
             }
         };
-        if is_binary(&bytes[..bytes.len().min(BINARY_SNIFF_BYTES)]) {
+        let mut bytes = Vec::with_capacity(metadata.len().min(BINARY_SNIFF_BYTES as u64) as usize);
+        if (&mut file)
+            .take(BINARY_SNIFF_BYTES as u64)
+            .read_to_end(&mut bytes)
+            .is_err()
+        {
+            results.files_unreadable += 1;
+            continue;
+        }
+        if is_binary(&bytes) {
             results.files_skipped_binary += 1;
+            continue;
+        }
+        if file.read_to_end(&mut bytes).is_err() {
+            results.files_unreadable += 1;
             continue;
         }
         let contents = match String::from_utf8(bytes) {
@@ -192,7 +239,7 @@ pub fn search_in_folder(
             if per_file >= PER_FILE_MATCH_CAP {
                 break;
             }
-            let spans = match_line(line, query, opts);
+            let spans = match_line_prepared(line, &needle, opts);
             if spans.is_empty() {
                 continue;
             }
@@ -406,6 +453,47 @@ mod tests {
         assert!(!paths.iter().any(|p| p.ends_with("b.txt")));
         assert_eq!(res.matches.len(), 3);
         assert!(!res.truncated);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_never_descends_into_dot_git() {
+        // `.hidden(false)` keeps other dotfiles searchable, so `.git` has to be
+        // excluded explicitly. Its text files (COMMIT_EDITMSG, config, hook
+        // samples) otherwise dominate both the file count and the results.
+        let dir = unique_temp_dir();
+        fs::write(dir.join("notes.md"), "findme in real content\n").unwrap();
+        fs::create_dir(dir.join(".git")).unwrap();
+        fs::write(
+            dir.join(".git").join("COMMIT_EDITMSG"),
+            "findme in a commit message\n",
+        )
+        .unwrap();
+        fs::create_dir(dir.join(".git").join("hooks")).unwrap();
+        fs::write(
+            dir.join(".git").join("hooks").join("pre-commit.sample"),
+            "findme\n",
+        )
+        .unwrap();
+        // A sibling dotfile proves we excluded `.git` specifically, not dotfiles.
+        fs::create_dir(dir.join(".github")).unwrap();
+        fs::write(dir.join(".github").join("ci.yml"), "findme in ci\n").unwrap();
+
+        let res = search_in_folder(&dir, "findme", SearchOpts::default()).unwrap();
+
+        let paths: HashSet<String> = res.matches.iter().map(|m| m.path.clone()).collect();
+        assert!(paths.iter().any(|p| p.ends_with("notes.md")));
+        assert!(
+            paths.iter().any(|p| p.ends_with("ci.yml")),
+            "dotfiles stay searchable"
+        );
+        assert!(
+            !paths.iter().any(|p| p.contains("/.git/")),
+            "nothing under .git may be searched, got: {paths:?}"
+        );
+        assert_eq!(res.matches.len(), 2);
+        assert_eq!(res.files_scanned, 2);
 
         fs::remove_dir_all(&dir).unwrap();
     }
