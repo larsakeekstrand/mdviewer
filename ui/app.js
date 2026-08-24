@@ -3426,7 +3426,11 @@ preview.addEventListener("click", async (ev) => {
     try {
       await invoke("open_path", { path: resolved });
     } catch (e) {
+      // A refusal (missing file, or a launchable/executable type the backend
+      // declines to hand to the system opener) used to be console-only, so the
+      // ⌘-click just looked like a dead link. Say why.
       console.error("open_path failed", e);
+      showTransientError(`Can't open ${baseName(resolved)}: ${e}`);
     }
   }
   // Plain click on a non-markdown relative path: no-op (tooltip shows path).
