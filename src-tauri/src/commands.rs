@@ -1406,8 +1406,13 @@ mod tests {
     #[test]
     fn file_stamp_distinguishes_size_and_mtime() {
         use std::time::{Duration, UNIX_EPOCH};
-        let t = UNIX_EPOCH + Duration::new(1_700_000_000, 123);
-        let later = UNIX_EPOCH + Duration::new(1_700_000_000, 124);
+        // Sub-second apart, so this still proves the stamp is finer than
+        // whole-second granularity — but a whole millisecond apart, not the
+        // 1 ns these used to differ by. Windows `SystemTime` is a FILETIME,
+        // which ticks every 100 ns, so 123 ns and 124 ns both truncate to the
+        // same instant there and the two stamps came out identical.
+        let t = UNIX_EPOCH + Duration::new(1_700_000_000, 123_000_000);
+        let later = UNIX_EPOCH + Duration::new(1_700_000_000, 124_000_000);
 
         assert_eq!(file_stamp(t, 10), file_stamp(t, 10));
         assert_ne!(file_stamp(t, 10), file_stamp(t, 11));
