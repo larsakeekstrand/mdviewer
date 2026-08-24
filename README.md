@@ -28,7 +28,7 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Session restore** — the last folder you opened and your open tabs are reopened on the next launch
 - Per-tab raw / rendered toggle
 - **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
-- **PDF and spreadsheet preview** — open `.pdf` files in the built-in viewer, and `.xlsx` / `.xlsm` / `.xlsb` / `.xls` / `.ods` workbooks as browsable data tables (values and cached formula results, exportable to HTML/PDF like any other document)
+- **PDF and spreadsheet preview** — open `.pdf` files in the built-in viewer, and `.xlsx` / `.xlsm` / `.xlsb` / `.xls` / `.ods` workbooks as browsable data tables (cell values and cached formula results — the data, not the original document's appearance)
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
 - File menu with **Open File…**, **Open Folder…**, and **Open Recent** (persisted)
 - Custom right-click context menu — in the preview (Copy / Copy Source / Show Raw·Rendered) and on tree rows (Copy Relative / Absolute Path)
@@ -149,7 +149,9 @@ Each tab can be viewed rendered (default) or raw. Toggle with the **Raw** button
 
 ### PDF and spreadsheet files
 
-PDFs render in the same built-in viewer your browser uses, so search inside a PDF with its own controls rather than MDViewer's ⌘F. Spreadsheets show cell values and cached formula results as a plain data table — no fonts, colors, column widths, charts, or pivot tables, and a formula written by a tool that doesn't cache its result shows `0`. Neither file type supports Raw view, in-app editing, or Review Mode; both support Export as HTML/PDF.
+PDFs render in the same built-in viewer your browser uses, so search inside a PDF with its own controls rather than MDViewer's ⌘F. Spreadsheets show cell values and cached formula results as a plain data table — no fonts, colors, column widths, charts, or pivot tables, and a formula written by a tool that doesn't cache its result shows `0`. Neither file type supports Raw view, in-app editing, or Review Mode.
+
+Spreadsheets can be exported. **Export as PDF** reproduces the table as you see it on screen, scaling a wide sheet down so no columns are lost off the page edge. **Export as HTML** writes a standard document-style table — readable and correctly structured, but without the denser spreadsheet styling the app uses on screen. PDF tabs cannot be exported at all: the document is rendered by the system's PDF viewer, which MDViewer cannot read back.
 
 ### Review Mode
 
