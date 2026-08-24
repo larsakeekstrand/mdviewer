@@ -3,6 +3,31 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.24.1] - 2026-08-24
+
+A security fix for links in untrusted documents, and much faster folder search.
+
+### Fixed
+- **Cmd-clicking a link can no longer run a program.** A Markdown document can
+  come from anywhere — a cloned repository, a downloaded archive — and a
+  relative link in one could point at a file that the system *runs* instead of
+  opening. MDViewer already refused known-launchable types by extension, but a
+  file with **no extension** and the executable bit set slipped through: macOS
+  hands those to Terminal, which executes them. Such files are now refused, as
+  are `.jar`, `.jnlp`, `.pyw`, `.sct`, `.msix`, `.chm`, `.gadget` and `.xip`.
+  Ordinary extensionless files like `LICENSE` and `Makefile` still open
+  normally, and folders still reveal in Finder.
+- A link MDViewer refuses to open now says so in a banner. Previously the click
+  simply did nothing, which was indistinguishable from a broken link.
+
+### Changed
+- **Folder search is roughly three times faster** and no longer returns results
+  from a repository's own `.git` directory. Searching a git repository used to
+  wade through git's internal object database — on this project that was 1497
+  of the 1806 files visited — and surfaced hits from commit-message drafts,
+  config and hook samples, in files you cannot usefully open. Dotfiles such as
+  `.github/workflows` remain searchable.
+
 ## [1.24.0] - 2026-08-24
 
 Preview PDFs and spreadsheets alongside your markdown.
