@@ -27,7 +27,17 @@ import {
   nextTheme,
   themeButtonFace,
 } from "./theme.js";
-import { isImagePath, isMarkdownPath, isCodeView } from "./filetype.js";
+import {
+  viewKind,
+  isEditable,
+  hasSplitPreview,
+  hasRawToggle,
+  isAnnotatable,
+  isRetainable,
+  isExportable,
+  rendersFromDisk,
+  bustsCacheOnChange,
+} from "./filetype.js";
 import { modeForPath } from "./editor-modes.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
@@ -102,7 +112,7 @@ const EDITOR_PREVIEW_DEBOUNCE_MS = 150;
 
 let treeRoot = null;
 // path → reload counter; bumped on file-changed so the asset: URL cache-busts.
-const imageVersions = new Map();
+const assetVersions = new Map();
 let currentTheme = resolveTheme(localStorage.getItem(THEME_KEY), colorScheme());
 // Set as early as the CSP allows (no inline <head> script) to minimize the
 // first-paint flash before the rest of the module runs.
@@ -283,8 +293,8 @@ async function init() {
       if (tab.editing) {
         await onEditingFileChanged(tab);
       } else {
-        if (isImagePath(tab.path)) {
-          imageVersions.set(tab.path, (imageVersions.get(tab.path) || 0) + 1);
+        if (bustsCacheOnChange(viewKind(tab.path))) {
+          assetVersions.set(tab.path, (assetVersions.get(tab.path) || 0) + 1);
         }
         await renderActive({ scrollLock: true });
       }
@@ -447,6 +457,16 @@ async function init() {
   await listen("pdf-export-request-preview", (ev) => {
     const t = activeTab();
     if (t) emit("pdf-export-active-name", { name: exportFilename(t.path, "pdf") }).catch(() => {});
+    // The Export-to-PDF window is opened unconditionally from the menu (no
+    // gate on the active tab), so a PDF tab's own iframe #preview can be live
+    // underneath it — exportDocument/servePreview must not run against that.
+    if (!t || !isExportable(viewKind(t.path))) {
+      emit("pdf-export-preview-html", {
+        html: "",
+        error: "Export is only available for Markdown and spreadsheets.",
+      }).catch(() => {});
+      return;
+    }
     pendingPreviewSettings = ev.payload.settings;
     servePreview();
   });
@@ -456,6 +476,16 @@ async function init() {
     if (exportInProgress) {
       await emit("pdf-export-done", { ok: false, error: "an export is already in progress" });
       return;
+    }
+    {
+      const t = activeTab();
+      if (!t || !isExportable(viewKind(t.path))) {
+        await emit("pdf-export-done", {
+          ok: false,
+          error: "Export is only available for Markdown and spreadsheets.",
+        });
+        return;
+      }
     }
     // Compute dest before the previewRendering guard so no await sits between
     // the guard's exit and exportDocument setting exportInProgress = true.
@@ -1376,7 +1406,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
   revealInTree(tabs[idx].path);
   const t = tabs[idx];
   let restored = null;
-  if (!forceRender && !same && !t.editing && !isImagePath(t.path)) {
+  if (!forceRender && !same && !t.editing && isRetainable(viewKind(t.path))) {
     // Settle the chrome before painting: the outgoing tab may have been in the
     // split editor, and the restored document must not flash beside it.
     showEditorChrome(false);
@@ -1392,7 +1422,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     // restore; the editor owns #preview from here, and nothing revalidates it.
     if (restored) endRevalidation(t);
     ensureCm();
-    const inPlace = isCodeView(t.path);
+    const inPlace = !hasSplitPreview(viewKind(t.path));
     cm.setOption("mode", modeForPath(t.path));
     cm.setOption("lineWrapping", !inPlace);
     showEditorChrome(true, inPlace);
@@ -1480,20 +1510,19 @@ function renderTabBar() {
   }
   const t = activeTab();
   if (t) {
-    const image = isImagePath(t.path);
-    const code = isCodeView(t.path);
-    editBtn.hidden = image;
-    if (!image) {
+    const kind = viewKind(t.path);
+    editBtn.hidden = !isEditable(kind);
+    if (isEditable(kind)) {
       editBtn.textContent = t.editing ? "Done" : "Edit";
       editBtn.setAttribute("aria-pressed", t.editing ? "true" : "false");
     }
     saveBtn.hidden = !t.editing;
-    rawBtn.hidden = image || code || t.editing;
-    if (!image && !code) {
+    rawBtn.hidden = !hasRawToggle(kind) || t.editing;
+    if (hasRawToggle(kind)) {
       rawBtn.textContent = t.raw ? "Rendered" : "Raw";
       rawBtn.setAttribute("aria-pressed", t.raw ? "true" : "false");
     }
-    reviewBtn.hidden = image || code || t.editing || t.raw;
+    reviewBtn.hidden = !isAnnotatable(kind) || t.editing || t.raw;
     if (!reviewBtn.hidden) {
       reviewBtn.setAttribute("aria-pressed", t.reviewMode ? "true" : "false");
       reviewBtn.textContent = reviewButtonLabel(t.reviewMode, t.mcpRequestId);
@@ -1593,7 +1622,7 @@ function ensureCm() {
 
 async function onToggleEdit() {
   const t = activeTab();
-  if (!t || isImagePath(t.path)) return;
+  if (!t || !isEditable(viewKind(t.path))) return;
   if (t.editing) {
     await exitEditMode(t);
   } else {
@@ -1615,7 +1644,7 @@ async function enterEditMode(t) {
   t.dirty = false;
   t.editBuffer = src;
   ensureCm();
-  const inPlace = isCodeView(t.path);
+  const inPlace = !hasSplitPreview(viewKind(t.path));
   cm.setOption("mode", modeForPath(t.path));
   cm.setOption("lineWrapping", !inPlace);
   cm.setValue(src);
@@ -1659,7 +1688,7 @@ function onEditorChange() {
     t.dirty = dirty;
     renderTabBar();
   }
-  if (isCodeView(t.path)) return; // in-place editor has no live-preview pane
+  if (!hasSplitPreview(viewKind(t.path))) return; // in-place editor has no live-preview pane
   if (previewDebounce) clearTimeout(previewDebounce);
   const path = t.path;
   previewDebounce = setTimeout(() => {
@@ -1741,7 +1770,7 @@ async function reloadFromDisk(t) {
   t.dirty = false;
   hideConflict();
   renderTabBar();
-  if (!isCodeView(t.path)) await renderFromEditor(t, { scrollLock: false });
+  if (hasSplitPreview(viewKind(t.path))) await renderFromEditor(t, { scrollLock: false });
 }
 
 async function forceSave(t) {
@@ -1801,7 +1830,7 @@ async function applyTheme(theme) {
   updateThemeButton();
   const t = activeTab();
   if (t) {
-    if (t.editing && !isCodeView(t.path)) {
+    if (t.editing && hasSplitPreview(viewKind(t.path))) {
       await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
     } else {
       await renderActive({ scrollLock: false, forceMermaid: true });
@@ -1840,8 +1869,10 @@ async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo 
     showEmptyState();
     return;
   }
-  if (isImagePath(t.path)) {
-    renderImage(t, { scrollLock });
+  const kind = viewKind(t.path);
+  if (rendersFromDisk(kind)) {
+    if (kind === "image") renderImage(t, { scrollLock });
+    else renderPdf(t);
     return;
   }
   const cached = renderCache.get(t.path, currentTheme, t.raw);
@@ -1892,15 +1923,18 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
   const gen = ++paintSeq;
   previewEmpty.hidden = true;
   preview.hidden = false;
-  const code = isCodeView(t.path);
-  preview.classList.toggle("raw-body", raw && !code);
+  const kind = viewKind(t.path);
+  preview.classList.toggle("raw-body", raw && kind === "markdown");
 
   const anchor = scrollLock ? captureAnchor() : null;
 
   const incoming = document.createElement("article");
-  incoming.className = code
-    ? "code-body"
-    : "markdown-body" + (raw ? " raw-body" : "");
+  incoming.className =
+    kind === "code"
+      ? "code-body"
+      : kind === "sheet"
+        ? "sheet-body"
+        : "markdown-body" + (raw ? " raw-body" : "");
   incoming.id = "preview";
   incoming.innerHTML = html;
 
@@ -1983,7 +2017,7 @@ function renderImage(t, { scrollLock = true } = {}) {
 
   preview.className = "image-view";
 
-  const v = imageVersions.get(t.path) || 0;
+  const v = assetVersions.get(t.path) || 0;
   const img = document.createElement("img");
   img.alt = basename(t.path);
   img.onerror = () => {
@@ -1997,6 +2031,27 @@ function renderImage(t, { scrollLock = true } = {}) {
   preview.replaceChildren(img);
   previewScroll.scrollTop = top;
   previewScroll.scrollLeft = left;
+  liveRender = null;
+}
+
+/** Frame a PDF for the webview's own viewer. Unlike renderImage there is no
+ *  same-file scroll preservation: the iframe owns its scroll, zoom, and page,
+ *  and we cannot read them back across the boundary. */
+function renderPdf(t) {
+  previewEmpty.hidden = true;
+  preview.hidden = false;
+  if (findOpen()) closeFind();
+
+  preview.className = "pdf-view";
+
+  const v = assetVersions.get(t.path) || 0;
+  const frame = document.createElement("iframe");
+  frame.title = basename(t.path);
+  frame.src = convertFileSrc(t.path) + (v ? `?v=${v}` : "");
+
+  preview.replaceChildren(frame);
+  previewScroll.scrollTop = 0;
+  previewScroll.scrollLeft = 0;
   liveRender = null;
 }
 
@@ -2232,8 +2287,8 @@ async function onExport(format) {
     showTransientError("Open a document before exporting.");
     return;
   }
-  if (!isMarkdownPath(t.path)) {
-    showTransientError("Export is only available for Markdown documents.");
+  if (!isExportable(viewKind(t.path))) {
+    showTransientError("Export is only available for Markdown and spreadsheets.");
     return;
   }
   const ext = format === "pdf" ? "pdf" : "html";
@@ -2279,7 +2334,7 @@ async function restoreViewState(t, snap) {
   t.raw = snap.raw;
   t.reviewMode = snap.reviewMode;
   initMermaid();
-  if (t.editing && !isCodeView(t.path)) {
+  if (t.editing && hasSplitPreview(viewKind(t.path))) {
     await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
   } else {
     await renderActive({ scrollLock: false, forceMermaid: true });
@@ -2333,8 +2388,11 @@ async function exportDocument(format, path, settings) {
       // undone in the finally block.
       // Fit mode scales wide tables down as a unit; Wrap mode skips the scaler
       // and injects wrap CSS (PDF-only — appended to the export style element,
-      // never into the shared settingsToCss / HTML output).
-      if (settings.tableFit === "fit") {
+      // never into the shared settingsToCss / HTML output). Sheet cells are
+      // `white-space: nowrap` (ui/styles.css), so Wrap's CSS-only reflow can't
+      // shrink a spreadsheet table — force the scaler regardless of the
+      // chosen preset for sheet tabs.
+      if (settings.tableFit === "fit" || viewKind(t.path) === "sheet") {
         fittedTables = fitWideTablesForPrint(printContentWidthPx(settings));
       } else {
         styleEl.textContent += "\n" + tableFitCss(settings);
@@ -2386,7 +2444,7 @@ async function renderExportPreviewHtml(settings) {
     await swapMermaidForPrint();
     const boundary = treeRoot || parentDir(t.path);
     await neutralizeOutsideWorkspaceImages(preview, boundary);
-    if (settings.tableFit === "fit") {
+    if (settings.tableFit === "fit" || viewKind(t.path) === "sheet") {
       fitted = fitWideTablesForPrint(printContentWidthPx(settings));
     }
     const body = await buildExportHtml(t, boundary, settings);
@@ -3448,16 +3506,18 @@ async function actionCopySource() {
 
 async function runEditAction(name) {
   const t = activeTab();
+  const kind = t ? viewKind(t.path) : "code";
+  const labels = { image: "images", pdf: "PDFs", sheet: "spreadsheets" };
   if (
     t &&
-    isImagePath(t.path) &&
+    !isEditable(kind) &&
     (name === "copy-source" || name === "toggle-raw" || name === "toggle-edit")
   ) {
-    showTransientError("Not available for images.");
+    showTransientError(`Not available for ${labels[kind] || "this file type"}.`);
     return;
   }
-  if (t && isCodeView(t.path) && name === "toggle-raw") {
-    showTransientError("Raw view isn't available for code files.");
+  if (t && !hasRawToggle(kind) && name === "toggle-raw") {
+    showTransientError("Raw view isn't available for this file type.");
     return;
   }
   switch (name) {
@@ -3743,15 +3803,21 @@ document.addEventListener("contextmenu", (ev) => {
   }
 
   if (tab) {
-    items.push({
-      label: "Copy Source",
-      action: actionCopySource,
-    });
-    if (items.length) items.push("---");
-    items.push({
-      label: tab.raw ? "Show Rendered" : "Show Raw",
-      action: onToggleRaw,
-    });
+    const kind = viewKind(tab.path);
+    const menuLenBefore = items.length;
+    if (isEditable(kind)) {
+      items.push({
+        label: "Copy Source",
+        action: actionCopySource,
+      });
+    }
+    if (hasRawToggle(kind)) {
+      if (items.length > menuLenBefore) items.push("---");
+      items.push({
+        label: tab.raw ? "Show Rendered" : "Show Raw",
+        action: onToggleRaw,
+      });
+    }
   }
 
   if (items.length === 0) return;
@@ -3844,7 +3910,12 @@ function findOpen() {
 }
 
 function openFind() {
-  if (!activeTab()) return;
+  const t = activeTab();
+  if (!t) return;
+  if (viewKind(t.path) === "pdf") {
+    showTransientError("Use the PDF viewer's own search for PDF files.");
+    return;
+  }
   const sel = selectedText();
   if (sel && sel.length <= 200 && !sel.includes("\n")) {
     findInput.value = sel;

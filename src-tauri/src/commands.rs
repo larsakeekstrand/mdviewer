@@ -177,6 +177,8 @@ pub fn render_file(
         } else {
             markdown::render_markdown(&contents, theme)
         }
+    } else if crate::xlsx::is_spreadsheet_path(&p) {
+        crate::xlsx::render_workbook(&bytes, &crate::xlsx::Caps::default())?
     } else if crate::code::is_binary(&bytes) {
         crate::code::unsupported_html()
     } else {
@@ -1374,6 +1376,29 @@ mod tests {
 
         assert!(second.html.unwrap().contains("Different heading"));
         assert_ne!(second.stamp, first.stamp);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn render_file_renders_a_spreadsheet_as_a_table() {
+        use rust_xlsxwriter::Workbook;
+        let dir = std::env::temp_dir().join(format!("mdv-xlsx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("book.xlsx");
+
+        let mut wb = Workbook::new();
+        let s = wb.add_worksheet();
+        s.set_name("Data").unwrap();
+        s.write_string(0, 0, "Item").unwrap();
+        s.write_string(1, 0, "Bolt").unwrap();
+        std::fs::write(&f, wb.save_to_buffer().unwrap()).unwrap();
+
+        let out = render_file(f.to_string_lossy().into_owned(), None, None, None).unwrap();
+        let html = out.html.unwrap();
+        assert!(html.contains("<h2>Data</h2>"), "{html}");
+        assert!(html.contains("<th>Item</th>"), "{html}");
+        assert!(!html.contains("Can't preview"), "{html}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

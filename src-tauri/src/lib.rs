@@ -17,6 +17,7 @@ mod search;
 mod tasklist;
 mod tree;
 mod watcher;
+pub mod xlsx;
 
 use std::path::PathBuf;
 use std::sync::Mutex;

@@ -95,11 +95,11 @@ pub fn tool_defs() -> Value {
     json!([
         {
             "name": "open_document",
-            "description": "Open a markdown or image file in the MDViewer window so the user can see it. Optionally scroll to a 1-based source line.",
+            "description": "Open a markdown, image, PDF, or spreadsheet file in the MDViewer window so the user can see it. Optionally scroll to a 1-based source line (markdown only).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Path to a markdown or image file. Relative paths resolve against this MCP server's working directory (the project root)." },
+                    "path": { "type": "string", "description": "Path to a markdown, image, PDF, or spreadsheet (.xlsx/.xlsm/.xlsb/.xls/.ods) file. Relative paths resolve against this MCP server's working directory (the project root)." },
                     "line": { "type": "integer", "description": "Optional 1-based line in the markdown source to scroll to and highlight." }
                 },
                 "required": ["path"]
@@ -187,6 +187,8 @@ const MD_EXTS: [&str; 5] = ["md", "markdown", "mdown", "mkd", "mkdn"];
 const IMAGE_EXTS: [&str; 9] = [
     "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg",
 ];
+const PDF_EXTS: [&str; 1] = ["pdf"];
+const SHEET_EXTS: [&str; 5] = ["xlsx", "xlsm", "xlsb", "xls", "ods"];
 
 fn ext_of(path: &str) -> Option<String> {
     std::path::Path::new(path)
@@ -196,11 +198,16 @@ fn ext_of(path: &str) -> Option<String> {
 }
 
 /// Allowlist of what `open_document` may open — mirrors the frontend's
-/// MD_EXT (app.js) and IMAGE_EXT (filetype.js). Stricter than the
-/// UNSAFE_OPEN_EXTS denylist: paths from Claude are untrusted input.
+/// MD_EXT (app.js) and filetype.js's IMAGE_EXT/PDF_EXT/SHEET_EXT. Stricter
+/// than the UNSAFE_OPEN_EXTS denylist: paths from Claude are untrusted input.
 pub fn viewable_path(path: &str) -> bool {
     ext_of(path)
-        .map(|e| MD_EXTS.contains(&e.as_str()) || IMAGE_EXTS.contains(&e.as_str()))
+        .map(|e| {
+            MD_EXTS.contains(&e.as_str())
+                || IMAGE_EXTS.contains(&e.as_str())
+                || PDF_EXTS.contains(&e.as_str())
+                || SHEET_EXTS.contains(&e.as_str())
+        })
         .unwrap_or(false)
 }
 
@@ -740,8 +747,8 @@ mod tests {
     }
 
     #[test]
-    fn viewable_path_allowlists_markdown_and_images() {
-        // Mirrors ui/app.js MD_EXT and ui/filetype.js IMAGE_EXT.
+    fn viewable_path_allowlists_markdown_images_pdf_and_sheets() {
+        // Mirrors ui/app.js MD_EXT and ui/filetype.js IMAGE_EXT/PDF_EXT/SHEET_EXT.
         for p in [
             "a.md",
             "B.MARKDOWN",
@@ -757,10 +764,26 @@ mod tests {
             "i.bmp",
             "i.ico",
             "i.svg",
+            "d.pdf",
+            "d.PDF",
+            "s.xlsx",
+            "s.xlsm",
+            "s.xlsb",
+            "s.xls",
+            "s.ods",
         ] {
             assert!(viewable_path(p), "{p} should be viewable");
         }
-        for p in ["x.txt", "x.rs", "x.app", "x", "x.md.exe", "plan.md.sh"] {
+        for p in [
+            "x.txt",
+            "x.rs",
+            "x.app",
+            "x",
+            "x.md.exe",
+            "plan.md.sh",
+            "a.pdfx",
+            "a.xlsxx",
+        ] {
             assert!(!viewable_path(p), "{p} should be rejected");
         }
     }
