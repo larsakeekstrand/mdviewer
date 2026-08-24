@@ -919,9 +919,19 @@ rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon_1024.png
   existing local path via the macOS `open` command, but **refuses launchable /
   executable types** (`UNSAFE_OPEN_EXTS` in `commands.rs`: `.app`, `.command`,
   `.webloc`/`.inetloc` redirect files, `.pkg`, AppleScript, shells, loadable
-  bundles, …). Markdown is untrusted, and a Cmd-clicked relative link to a
-  co-located payload would otherwise be local code execution. Keep the denylist
-  if you add new open targets.
+  bundles, Java `.jar`/`.jnlp`, …). Markdown is untrusted, and a Cmd-clicked
+  relative link to a co-located payload would otherwise be local code
+  execution. Keep the denylist if you add new open targets.
+  The denylist is only half the gate: `refuses_to_open` ALSO refuses any
+  regular file carrying an execute bit (`is_executable_file`, Unix only —
+  Windows has no exec bit and rides on the extension list). An extensionless
+  file with mode 0755 types as `public.unix-executable` on macOS, whose
+  LaunchServices handler is Terminal.app — so `open` *runs* it, while
+  `Path::extension()` returns `None` and the denylist structurally cannot see
+  it. Git preserves mode 0755, so an untrusted repo can ship
+  `docs/setup-guide` and turn a Cmd-click into RCE. Directories are exempt
+  (their exec bit means traversable) and non-executable extensionless files
+  (`LICENSE`, `Makefile`) still open.
 
 ## When in doubt
 
