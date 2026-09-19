@@ -135,7 +135,8 @@ icon.svg          — source for icon regeneration
   from Finder, a second CLI launch, or an MCP tool call — goes to the
   *longest* registered root that contains it (`route`), ties broken by most-
   recently-focused (`FocusOrder`); no containing root opens a **new** window
-  at the path's git toplevel (`fallback_root`) or, if `"main"`'s root is still
+  at the path's git toplevel (`fallback_root`; never `$HOME` or a filesystem
+  root, which fall back to the file's own folder via `project_root`) or, if `"main"`'s root is still
   the bare-cwd placeholder from a rootless launch, repoints `"main"` there
   instead of adding a second window (`retarget_placeholder_main`) — a first-
   ever Finder launch would otherwise show a useless window at "/" alongside
@@ -146,7 +147,12 @@ icon.svg          — source for icon regeneration
   index, LRU-capped at 30) alongside a `windows` snapshot (root + bounds per
   label, built from the registry, never by querying live windows — see the
   Destroyed-ordering note below); both restore on launch and save on
-  `RunEvent::Exit`, `ExitRequested`, and when the last window closes. Helper
+  `RunEvent::Exit`, `ExitRequested`, and when the last window closes. Bounds
+  aren't recorded while a window is minimized or fullscreen, and a saved
+  position that overlaps no current monitor by 50×50 logical px
+  (`windows::rect_visible`) is dropped on restore (size kept) — Tauri doesn't
+  clamp. `init` restores a root's saved tabs *before* opening files delivered
+  to it, so an open never overwrites that project's session. Helper
   windows (PDF-export, Claude Code Integration) aren't project windows
   themselves — `windows::Registry::project_label_for` resolves the owning
   project window recorded when the helper was opened, so its commands (and its
@@ -258,18 +264,24 @@ icon.svg          — source for icon regeneration
 - **File associations / open from Finder**: `tauri.conf.json`
   `bundle.fileAssociations` declares the markdown extensions
   (`CFBundleDocumentTypes`, Viewer role) so MDViewer is selectable as the
-  default `.md` app. Finder opens arrive as `RunEvent::Opened` (not argv);
-  `open_files::handle_opened` emits `open-file` + focuses the window when the UI
-  is ready, else buffers into `AppState.opens`. On startup the frontend calls
-  the `frontend_ready` command, which drains the buffer under the same lock:
-  cold double-click opens the file (sidebar → its folder); warm opens add a tab
-  and keep the current folder.
+  default `.md` app. Finder opens arrive as `RunEvent::Opened` (not argv).
+  `open_files::handle_opened` routes each path through `windows::deliver_path`
+  (the window whose root contains it, a retargeted placeholder `"main"`, or a
+  new window at `fallback_root`). Opens that arrive before setup has registered
+  any window are buffered in `AppState.early_opens` and routed the same way at
+  the end of setup. `deliver_files` hands a path to its window: `open-file` if
+  that window's frontend is ready, else its registry entry's `pending_files`,
+  which that window's `frontend_ready` drains under the same registry lock.
+  `frontend_ready` also returns the window's *current* root, since a cold
+  Finder launch may have repointed a placeholder `"main"` in between.
 - **Last directory restore**: `recent.json` carries a `last_folder` alongside
   the recent list. The frontend calls the `remember_folder` command whenever it
-  sets the sidebar root (`setTreeRoot`, and the cold-Finder branch of `init`).
-  On a plain launch (`Startup.tree_root == None`), `get_initial_state` resolves
-  the root as explicit argv → `last_folder` (if still a dir) → cwd, persisting
-  all but the bare cwd fallback. `recent::clear` keeps `last_folder`.
+  sets the sidebar root (`setTreeRoot`). `"main"`'s root is chosen in setup:
+  explicit argv folder → the first saved window → `commands::resolve_initial_root`
+  (`last_folder` if still a dir → cwd, a placeholder), persisting all but the
+  bare cwd fallback. An argv *file* with saved windows to restore is routed
+  like a Finder open instead of rooting `"main"` at its folder.
+  `recent::clear` keeps `last_folder`.
 - **Theme (light/dark)**: JS is the single source of truth. `app.js` resolves
   the effective theme (`resolveTheme(localStorage["mdviewer.theme"], OS)`) and
   writes it to `document.documentElement.dataset.theme`; all CSS is
@@ -480,8 +492,9 @@ icon.svg          — source for icon regeneration
 - **Claude Code hook install**: reached only via the **Claude Code
   Integration** window's hook-row button (`ui/claude-integration.js` →
   `invoke("install_claude_hook")`; there is no standalone menu item) →
-  `commands::install_claude_hook`. The command resolves the open root via
-  `current_root`, builds the hook command with `claude_hook::hook_command()`
+  `commands::install_claude_hook`. The command resolves the root of the project
+  window that owns the integration window (`owner_root` →
+  `Registry::project_label_for`), builds the hook command with `claude_hook::hook_command()`
   (POSIX single-quote / Windows double-quote escaping of `current_exe()`), and
   merges a `Write` `PostToolUse` hook into `<root>/.claude/settings.local.json`
   via the pure `claude_hook::merge_hook` (idempotent: updates an existing
@@ -836,10 +849,12 @@ Windows-specific gotchas:
   - Finder opens a file via an Apple Event, surfaced as `RunEvent::Opened`
     (macOS-gated), NOT `argv` — so `lib.rs` uses `.build()? + app.run(cb)` to
     catch it. `main.rs`'s `argv` path still works for the CLI.
-  - The cold double-click fires `Opened` before the webview is ready, so files
-    are buffered in `Mutex<PendingOpens>` and drained by the `frontend_ready`
-    command. Set `ready` and drain under the SAME lock `handle_opened` takes,
-    or a file can be lost between the ready-check and the push.
+  - The cold double-click fires `Opened` before the webview is ready (possibly
+    before setup), so files wait in `AppState.early_opens` until setup routes
+    them, then in the target window's `pending_files` until its
+    `frontend_ready` drains them. Set `ready` and drain under the SAME registry
+    lock `deliver_files` takes, or a file can be lost between the ready-check
+    and the push.
   - Testing needs the built `.app` + Launch Services: copy to `/Applications`,
     `lsregister -f …/MDViewer.app`, then set the default via Finder Get Info →
     Open With → Change All. A locally-built `.app` is NOT quarantined
@@ -993,6 +1008,10 @@ rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon_1024.png
 
 ## Update check internals
 
+- With several windows, **Check for Updates…** is emitted to the front window
+  only, and the silent startup/hourly check first calls `claim_update_check`
+  (an `AtomicU64` last-claim time; one winner per 50 min) so exactly one window
+  checks per interval — one banner, one install.
 - Update detection is `tauri-plugin-updater`'s `check()` (frontend
   `window.__TAURI__.updater.check()`), which fetches the `latest.json` manifest
   from `releases/latest/download/latest.json`, compares against

@@ -30,7 +30,7 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
 - **PDF and spreadsheet preview** — open `.pdf` files in the built-in viewer, and `.xlsx` / `.xlsm` / `.xlsb` / `.xls` / `.ods` workbooks as browsable data tables (cell values and cached formula results — the data, not the original document's appearance)
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
-- **Multiple windows** — open several projects side by side, one per window (**File ▸ New Window**, ⌘⇧N, or **Open Folder…** on a folder that isn't already open in another window). Each window has its own tree, tabs, editor buffers, and Review Mode. Files opened from Finder, the command line, or a Claude Code session (the hook and the MCP tools) land in the window whose project already contains them, opening a new window when none does. Quitting (⌘Q) and relaunching restores every window, with its tabs and screen position.
+- **Multiple windows** — open several projects side by side, one per window (**File ▸ New Window**, ⌘⇧N; **Open Folder…** re-roots the focused window instead). Each window has its own tree, tabs, editor buffers, and Review Mode. Files opened from Finder, the command line, or a Claude Code session (the hook and the MCP tools) land in the window whose project already contains them, opening a new window when none does. Quitting (⌘Q) and relaunching restores every window, with its tabs and screen position.
 - File menu with **Open File…**, **Open Folder…**, **New Window**, and **Open Recent** (persisted)
 - Custom right-click context menu — in the preview (Copy / Copy Source / Show Raw·Rendered) and on tree rows (Copy Relative / Absolute Path)
 - **Light / dark theme toggle** — a toolbar button (next to **Raw**) switches the whole app between light and dark; the app follows the macOS appearance until you choose, then remembers your choice across launches
@@ -192,7 +192,7 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
   - the **MCP server** is merged into the project's `.mcp.json` so Claude Code can open documents and request reviews in the viewer.
 
   Both require a folder to be open, and re-running updates the MDViewer path in place (no duplicate).
-- **File ▸ Open File…** (⌘O) — opens any markdown file. The tree stays where it is; the file opens as a sticky tab.
+- **File ▸ Open File…** (⌘O) — opens any markdown file as a sticky tab in the window whose project already contains it, or in a new window rooted at the file's project when none does.
 - **File ▸ Open Folder…** (⇧⌘O) — re-roots the *focused* window's tree at the chosen folder, unless another window already has that folder open, in which case that window is focused instead of opening a duplicate.
 - **File ▸ New Window** (⇧⌘N) — opens a folder picker and creates a new window rooted at the chosen folder.
 - **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches, shared by every window). The bottom **Clear Recent** entry wipes the list.

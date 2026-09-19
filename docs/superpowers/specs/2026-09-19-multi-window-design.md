@@ -272,19 +272,25 @@ Changes:
 
 - `save_session` writes into `sessions[window root]`. Root swap, window close
   and quit all save first.
-- `windows` is written on `RunEvent::ExitRequested` (⌘Q: snapshot every
-  project window) and on the last project window's `Destroyed`. Closing a
+- `windows` is written on `RunEvent::Exit` (on macOS ⌘Q raises only `Exit`),
+  on `ExitRequested` (last window closed, `app.exit()`), and on the last
+  project window's `Destroyed`, snapshotting every project window. Closing a
   non-last window does not rewrite it, so relaunch restores what was open at
   quit.
 - **Restore on launch** (`recent::restore_windows`, pure): drop entries whose
   root is no longer a directory; the first survivor reuses `main`, the rest
-  become `project-*`; bounds are clamped onscreen by Tauri. If none survive,
+  become `project-*`. Tauri does not clamp bounds, so a saved position that
+  overlaps no current monitor (≥ 50×50 logical px) is dropped, keeping the
+  size; minimized/fullscreen geometry is never recorded. If none survive,
   fall back to today's argv → `last_folder` → cwd.
-- **Argv plus saved windows:** restore the saved windows, then deliver the argv
-  path through routing (so `mdviewer ~/repoB/plan.md` with repoB already
-  restored lands in repoB's window).
+- **Argv plus saved windows:** an argv *file*: restore the saved windows (main =
+  the first), then deliver the file through routing (so `mdviewer ~/repoB/plan.md` with repoB already
+  restored lands in repoB's window). An argv *folder* becomes main's root, with
+  the saved windows restored alongside (a saved window on the same root is
+  skipped).
 - **Migration:** a legacy store with `last_folder` + top-level `tabs`/`active`
-  becomes `sessions[last_folder]` + `windows: [{root: last_folder}]`. Serde
+  becomes `sessions[last_folder]`; no `windows` entry is synthesized — the
+  `last_folder` fallback already yields the same single window. Serde
   defaults keep old files loading; covered by `deserializes_legacy_store_*`
   style tests.
 
