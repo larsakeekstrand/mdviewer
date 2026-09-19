@@ -121,7 +121,28 @@ pub fn fallback_root(path: &Path) -> PathBuf {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| path.to_path_buf())
     };
-    crate::git::git_toplevel(&dir).unwrap_or(dir)
+    let home = home_dir().map(|h| h.canonicalize().unwrap_or(h));
+    let toplevel = crate::git::git_toplevel(&dir);
+    project_root(dir, toplevel, home.as_deref())
+}
+
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let var = std::env::var_os("USERPROFILE");
+    #[cfg(not(windows))]
+    let var = std::env::var_os("HOME");
+    var.map(PathBuf::from)
+}
+
+/// The git toplevel above `dir`, unless it is the home directory or a
+/// filesystem root (a dotfiles repo in $HOME would otherwise make every file
+/// under it open with the whole home folder as its tree). `dir` itself is
+/// always acceptable: it is the file's own folder.
+pub fn project_root(dir: PathBuf, toplevel: Option<PathBuf>, home: Option<&Path>) -> PathBuf {
+    match toplevel {
+        Some(t) if t.parent().is_some() && Some(t.as_path()) != home => t,
+        _ => dir,
+    }
 }
 
 #[cfg(test)]
@@ -237,6 +258,37 @@ mod tests {
         assert_eq!(
             plan_delivery(Path::new("/z/y/x.md"), &r, &mru(&[]), true, fb),
             Delivery::NewWindow(PathBuf::from("/z/y"))
+        );
+    }
+
+    #[test]
+    fn project_root_rejects_home_and_filesystem_root() {
+        let home = Some(Path::new("/Users/me"));
+        let dir = PathBuf::from("/Users/me/notes");
+        assert_eq!(
+            project_root(dir.clone(), Some(PathBuf::from("/Users/me/repo")), home),
+            PathBuf::from("/Users/me/repo")
+        );
+        assert_eq!(
+            project_root(dir.clone(), Some(PathBuf::from("/Users/me")), home),
+            dir
+        );
+        assert_eq!(
+            project_root(dir.clone(), Some(PathBuf::from("/")), home),
+            dir
+        );
+        assert_eq!(project_root(dir.clone(), None, home), dir);
+        assert_eq!(
+            project_root(
+                PathBuf::from("/Users/me"),
+                Some(PathBuf::from("/Users/me")),
+                home
+            ),
+            PathBuf::from("/Users/me")
+        );
+        assert_eq!(
+            project_root(dir.clone(), Some(PathBuf::from("/Users/me")), None),
+            PathBuf::from("/Users/me")
         );
     }
 
