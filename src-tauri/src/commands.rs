@@ -100,8 +100,8 @@ pub fn get_initial_state(
     window: tauri::WebviewWindow,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> InitialState {
-    let tree_root = window_root(&state, &window).unwrap_or_else(|_| PathBuf::from("/"));
+) -> Result<InitialState, String> {
+    let tree_root = window_root(&state, &window)?;
     let initial_file = if window.label() == "main" {
         state.initial_file.as_ref()
     } else {
@@ -109,7 +109,7 @@ pub fn get_initial_state(
     };
     let (saved_tabs, saved_active) = recent::load_session(&app, &tree_root);
     let (tabs, active_tab) = recent::restore_session(saved_tabs, saved_active, |p| p.is_file());
-    InitialState {
+    Ok(InitialState {
         tree_root: tree_root.to_string_lossy().into_owned(),
         initial_file: initial_file.map(|p| p.to_string_lossy().into_owned()),
         restore_tabs: tabs
@@ -117,7 +117,7 @@ pub fn get_initial_state(
             .map(|p| p.to_string_lossy().into_owned())
             .collect(),
         active_tab,
-    }
+    })
 }
 
 #[tauri::command]

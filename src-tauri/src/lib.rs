@@ -141,6 +141,21 @@ pub fn run(startup: Startup) {
             mcp_server::start(handle.clone());
             Ok(())
         })
+        .on_window_event(|window, event| {
+            let label = window.label().to_string();
+            let app = window.app_handle();
+            match event {
+                tauri::WindowEvent::Focused(true) => {
+                    let state = app.state::<AppState>();
+                    let is_project = state.windows.lock().unwrap().get(&label).is_some();
+                    if is_project {
+                        state.focus.lock().unwrap().touch(&label);
+                    }
+                }
+                tauri::WindowEvent::Destroyed => windows::on_destroyed(app, &label),
+                _ => {}
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building mdviewer");
 

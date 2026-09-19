@@ -16,14 +16,15 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     app.on_menu_event(move |app, event| {
         let id = event.id().as_ref().to_string();
         match id.as_str() {
+            "new-window" => prompt_new_window(app.clone()),
             "open-file" => prompt_open_file(app.clone()),
             "open-folder" => prompt_open_folder(app.clone()),
             "export-html" => {
-                let _ = app.emit("export", "html");
+                crate::windows::emit_to_front(app, "export", "html");
             }
             #[cfg(target_os = "macos")]
             "export-pdf" => {
-                if let Some(o) = front_project(app) {
+                if let Some(o) = crate::windows::front_label(app) {
                     open_pdf_export_window(app, &o);
                 }
             }
@@ -32,10 +33,10 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             }
             "settings" => open_settings(app),
             "install-cli" => {
-                let _ = app.emit("menu-install-cli", ());
+                crate::windows::emit_to_front(app, "menu-install-cli", ());
             }
             "claude-integration" => {
-                if let Some(o) = front_project(app) {
+                if let Some(o) = crate::windows::front_label(app) {
                     open_integration_window(app, &o);
                 }
             }
@@ -43,22 +44,22 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
                 let _ = crate::commands::open_url(SOURCE_URL.to_string());
             }
             "edit-find" => {
-                let _ = app.emit("edit-action", "find");
+                crate::windows::emit_to_front(app, "edit-action", "find");
             }
             "edit-search-files" => {
-                let _ = app.emit("edit-action", "search-files");
+                crate::windows::emit_to_front(app, "edit-action", "search-files");
             }
             "edit-copy-source" => {
-                let _ = app.emit("edit-action", "copy-source");
+                crate::windows::emit_to_front(app, "edit-action", "copy-source");
             }
             "edit-toggle-raw" => {
-                let _ = app.emit("edit-action", "toggle-raw");
+                crate::windows::emit_to_front(app, "edit-action", "toggle-raw");
             }
             "edit-toggle-edit" => {
-                let _ = app.emit("edit-action", "toggle-edit");
+                crate::windows::emit_to_front(app, "edit-action", "toggle-edit");
             }
             "edit-save" => {
-                let _ = app.emit("edit-action", "save");
+                crate::windows::emit_to_front(app, "edit-action", "save");
             }
             "clear-recent" => {
                 recent::clear(app);
@@ -84,6 +85,9 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
 /// Builds a fresh menu (reflecting the current recent-folders list) and
 /// applies it. Called on startup and after any change to the recent list.
 fn rebuild(app: &AppHandle) -> tauri::Result<()> {
+    let new_window = MenuItemBuilder::with_id("new-window", "New Window")
+        .accelerator("CmdOrCtrl+Shift+N")
+        .build(app)?;
     let open_file = MenuItemBuilder::with_id("open-file", "Open File…")
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
@@ -129,6 +133,8 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         .build()?;
 
     let file_menu_builder = SubmenuBuilder::new(app, "File")
+        .item(&new_window)
+        .separator()
         .item(&open_file)
         .item(&open_folder)
         .item(&recent_submenu)
@@ -223,14 +229,6 @@ fn build_recent_submenu(app: &AppHandle) -> tauri::Result<tauri::menu::Submenu<W
     builder.build()
 }
 
-/// The project window a menu-opened helper window should act for: the
-/// most-recently-focused one, falling back to any registered project window.
-fn front_project(app: &AppHandle) -> Option<String> {
-    let state = app.state::<crate::AppState>();
-    let front = state.focus.lock().ok()?.front().map(str::to_string);
-    front.or_else(|| state.windows.lock().ok()?.labels().into_iter().next())
-}
-
 fn open_settings(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("preferences") {
         let _ = win.set_focus();
@@ -289,6 +287,16 @@ pub fn open_integration_window(app: &AppHandle, owner: &str) {
     .build();
 }
 
+fn prompt_new_window(app: AppHandle) {
+    app.dialog().file().pick_folder(move |chosen| {
+        if let Some(p) = chosen.and_then(|f| f.as_path().map(PathBuf::from)) {
+            recent::push(&app, &p);
+            let _ = rebuild(&app);
+            crate::windows::open_folder_in_new_window(&app, p);
+        }
+    });
+}
+
 fn prompt_open_file(app: AppHandle) {
     app.dialog()
         .file()
@@ -297,7 +305,11 @@ fn prompt_open_file(app: AppHandle) {
         .pick_file(move |chosen| {
             if let Some(file_path) = chosen {
                 if let Some(p) = file_path.as_path() {
-                    let _ = app.emit("open-file", p.to_string_lossy().to_string());
+                    crate::windows::emit_to_front(
+                        &app,
+                        "open-file",
+                        p.to_string_lossy().to_string(),
+                    );
                 }
             }
         });
@@ -310,7 +322,11 @@ fn prompt_open_folder(app: AppHandle) {
                 let pb = PathBuf::from(p);
                 recent::push(&app, &pb);
                 let _ = rebuild(&app);
-                let _ = app.emit("open-folder", pb.to_string_lossy().to_string());
+                crate::windows::emit_to_front(
+                    &app,
+                    "open-folder",
+                    pb.to_string_lossy().to_string(),
+                );
             }
         }
     });
@@ -330,5 +346,5 @@ fn choose_recent_folder(app: AppHandle, path: PathBuf) {
     }
     recent::push(&app, &path);
     let _ = rebuild(&app);
-    let _ = app.emit("open-folder", path.to_string_lossy().to_string());
+    crate::windows::emit_to_front(&app, "open-folder", path.to_string_lossy().to_string());
 }

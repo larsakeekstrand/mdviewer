@@ -100,7 +100,6 @@ impl McpPending {
     /// proxy blocked forever. A pending review counts as declined (a
     /// success, so Claude proceeds gracefully — same outcome as the user
     /// closing the review tab); every other tool gets an error.
-    #[allow(dead_code)] // called from windows::on_destroyed in Task 6
     pub fn abandon_window(&self, label: &str) {
         let gone: Vec<Entry> = {
             let mut waiting = self.waiting.lock().unwrap();

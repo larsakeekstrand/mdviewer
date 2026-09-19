@@ -157,6 +157,121 @@ pub fn deliver_files(app: &tauri::AppHandle, label: &str, paths: Vec<PathBuf>) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Bounds {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+pub fn cascade(from: Option<(f64, f64)>) -> Option<(f64, f64)> {
+    from.map(|(x, y)| (x + 24.0, y + 24.0))
+}
+
+pub fn front_label(app: &tauri::AppHandle) -> Option<String> {
+    use tauri::Manager;
+    let state = app.state::<crate::AppState>();
+    let labels = state.windows.lock().ok()?.labels();
+    let front = state.focus.lock().ok()?.front().map(str::to_string);
+    front
+        .filter(|l| labels.contains(l))
+        .or_else(|| labels.into_iter().next())
+}
+
+pub fn emit_to_front<S: serde::Serialize + Clone>(app: &tauri::AppHandle, event: &str, payload: S) {
+    use tauri::Emitter;
+    if let Some(label) = front_label(app) {
+        let _ = app.emit_to(label.as_str(), event, payload);
+    }
+}
+
+/// Registers state BEFORE building so the new webview's first
+/// get_initial_state finds its entry; removes it again if the build fails.
+pub fn create_project_window(
+    app: &tauri::AppHandle,
+    root: PathBuf,
+    bounds: Option<Bounds>,
+) -> Result<String, String> {
+    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+    let state = app.state::<crate::AppState>();
+    let from = front_label(app)
+        .and_then(|l| app.get_webview_window(&l))
+        .and_then(|w| Some((w.outer_position().ok()?, w.scale_factor().ok()?)))
+        .map(|(p, s)| (p.x as f64 / s, p.y as f64 / s));
+    let label = {
+        let mut reg = state
+            .windows
+            .lock()
+            .map_err(|_| "window registry poisoned".to_string())?;
+        let label = reg.next_label();
+        reg.insert(&label, root.clone());
+        label
+    };
+    let mut b = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+        .title(window_title(&root))
+        .min_inner_size(600.0, 400.0)
+        .resizable(true);
+    b = match bounds {
+        Some(bb) => b.inner_size(bb.w, bb.h).position(bb.x, bb.y),
+        None => {
+            let b = b.inner_size(1200.0, 800.0);
+            match cascade(from) {
+                Some((x, y)) => b.position(x, y),
+                None => b,
+            }
+        }
+    };
+    if let Err(e) = b.build() {
+        if let Ok(mut reg) = state.windows.lock() {
+            reg.remove(&label);
+        }
+        return Err(format!("cannot create window: {e}"));
+    }
+    Ok(label)
+}
+
+/// Focus the window already showing `root`, or open a new one for it.
+pub fn open_folder_in_new_window(app: &tauri::AppHandle, root: PathBuf) {
+    use tauri::Manager;
+    let root = root.canonicalize().unwrap_or(root);
+    let existing = app
+        .state::<crate::AppState>()
+        .windows
+        .lock()
+        .unwrap()
+        .label_with_root(&root);
+    match existing {
+        Some(label) => {
+            if let Some(w) = app.get_webview_window(&label) {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+        None => {
+            if let Err(e) = create_project_window(app, root, None) {
+                eprintln!("mdviewer: {e}");
+            }
+        }
+    }
+}
+
+/// Drops a closed project window's state; dropping its WatcherSlot and
+/// TreeWatcherSlot stops their watchers. Helper windows are ignored.
+pub fn on_destroyed(app: &tauri::AppHandle, label: &str) {
+    use tauri::Manager;
+    let state = app.state::<crate::AppState>();
+    let removed = state.windows.lock().unwrap().remove(label);
+    if removed.is_none() {
+        return;
+    }
+    state.focus.lock().unwrap().remove(label);
+    app.state::<crate::mcp_server::McpPending>()
+        .abandon_window(label);
+    drop(removed);
+}
+
 pub fn window_title(root: &Path) -> String {
     let name = root
         .file_name()
@@ -244,6 +359,12 @@ mod tests {
             Some(vec![PathBuf::from("/c.md")])
         );
         assert_eq!(drained, None);
+    }
+
+    #[test]
+    fn cascade_offsets_from_focused_window() {
+        assert_eq!(cascade(Some((100.0, 50.0))), Some((124.0, 74.0)));
+        assert_eq!(cascade(None), None);
     }
 
     #[test]
