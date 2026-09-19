@@ -71,7 +71,11 @@ import {
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
-const { listen, emit } = window.__TAURI__.event;
+const { emit } = window.__TAURI__.event;
+// Window-scoped: the global event.listen() defaults to target Any and would
+// also receive events the backend emit_to's at OTHER windows.
+const currentWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+const listen = (event, handler) => currentWindow.listen(event, handler);
 const dialogApi = window.__TAURI__.dialog;
 
 let IS_MAC = false;

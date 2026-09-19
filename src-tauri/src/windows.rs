@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-// Wired up in Task 2.
-
 //! Per-window state for project windows, keyed by Tauri window label. The
 //! registry is pure (unit-tested); the IO helpers below it touch the AppHandle.
 
@@ -117,6 +114,32 @@ impl Registry {
             .filter(|owner| self.windows.contains_key(owner.as_str()))
             .cloned()
             .ok_or_else(|| NO_PROJECT_WINDOW.to_string())
+    }
+}
+
+/// Hand files to a project window: emit `open-file` if its frontend is ready,
+/// else buffer them for its `frontend_ready`. The ready check and the push
+/// happen under one lock, so nothing is lost between them.
+pub fn deliver_files(app: &tauri::AppHandle, label: &str, paths: Vec<PathBuf>) {
+    use tauri::{Emitter, Manager};
+    let state = app.state::<crate::AppState>();
+    let ready = {
+        let mut reg = state.windows.lock().unwrap();
+        let Some(w) = reg.get_mut(label) else { return };
+        if !w.ready {
+            w.pending_files.extend(paths.iter().cloned());
+        }
+        w.ready
+    };
+    if ready {
+        for p in &paths {
+            let _ = app.emit_to(label, "open-file", p.to_string_lossy().into_owned());
+        }
+    }
+    if let Some(w) = app.get_webview_window(label) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
     }
 }
 

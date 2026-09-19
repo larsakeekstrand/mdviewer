@@ -38,35 +38,60 @@ pub struct InitialState {
     pub active_tab: Option<usize>,
 }
 
-#[tauri::command]
-pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialState {
-    let tree_root = match &state.tree_root {
-        Some(p) => {
-            recent::save_last(&app, p);
-            p.clone()
-        }
-        // A restored folder is already stored as last_folder; only fall back to
-        // cwd (unpersisted) when there's nothing valid to restore.
-        None => recent::load_last(&app)
-            .filter(|p| p.is_dir())
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
-    };
-    // Seed the containment root for file operations so a plain launch (no CLI
-    // arg, AppState.current_root starts None) still permits create/rename/etc.
-    // in the folder the sidebar actually shows. A later sidebar-root change
-    // (remember_folder) overrides this — including the cold-Finder case, where
-    // the frontend shows the opened file's folder rather than this resolved root.
-    if let Ok(mut slot) = state.current_root.lock() {
-        *slot = Some(tree_root.clone());
+fn pick_initial_root(
+    explicit: Option<&Path>,
+    last: Option<PathBuf>,
+    cwd: PathBuf,
+    is_dir: impl Fn(&Path) -> bool,
+) -> (PathBuf, bool) {
+    if let Some(p) = explicit {
+        return (p.to_path_buf(), true);
     }
+    match last.filter(|p| is_dir(p)) {
+        Some(p) => (p, false),
+        None => (cwd, false),
+    }
+}
+
+/// The root the first window opens on: explicit argv → last_folder (if still a
+/// directory) → cwd. Only an explicit root is persisted; the bare cwd never is.
+pub fn resolve_initial_root(app: &AppHandle, explicit: Option<&Path>) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    let (root, persist) = pick_initial_root(explicit, recent::load_last(app), cwd, |p| p.is_dir());
+    if persist {
+        recent::save_last(app, &root);
+    }
+    root
+}
+
+fn window_root(
+    state: &State<'_, AppState>,
+    window: &tauri::WebviewWindow,
+) -> Result<PathBuf, String> {
+    state
+        .windows
+        .lock()
+        .map_err(|_| "window registry poisoned".to_string())?
+        .root(window.label())
+}
+
+#[tauri::command]
+pub fn get_initial_state(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> InitialState {
+    let tree_root = window_root(&state, &window).unwrap_or_else(|_| PathBuf::from("/"));
+    let initial_file = if window.label() == "main" {
+        state.initial_file.as_ref()
+    } else {
+        None
+    };
     let (saved_tabs, saved_active) = recent::load_session(&app);
     let (tabs, active_tab) = recent::restore_session(saved_tabs, saved_active, |p| p.is_file());
     InitialState {
         tree_root: tree_root.to_string_lossy().into_owned(),
-        initial_file: state
-            .initial_file
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned()),
+        initial_file: initial_file.map(|p| p.to_string_lossy().into_owned()),
         restore_tabs: tabs
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
@@ -92,15 +117,19 @@ pub fn git_status(path: String) -> Result<git::GitStatusReport, String> {
 #[tauri::command]
 pub fn watch_tree(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     dirs: Vec<String>,
 ) -> Result<(), String> {
     let paths: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
-    let mut slot = state
-        .tree_watcher
+    let mut reg = state
+        .windows
         .lock()
-        .map_err(|_| "tree watcher mutex poisoned".to_string())?;
-    slot.watch_dirs(&app, paths)
+        .map_err(|_| "window registry poisoned".to_string())?;
+    let w = reg
+        .get_mut(window.label())
+        .ok_or_else(|| crate::windows::NO_PROJECT_WINDOW.to_string())?;
+    w.tree_watcher.watch_dirs(&app, window.label(), paths)
 }
 
 #[derive(Serialize)]
@@ -515,16 +544,24 @@ fn refuses_to_open(p: &Path) -> bool {
 }
 
 #[tauri::command]
-pub fn open_file(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+pub fn open_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
         return Err(format!("not a file: {path}"));
     }
-    let mut slot = state
-        .watcher
+    let mut reg = state
+        .windows
         .lock()
-        .map_err(|_| "watcher mutex poisoned".to_string())?;
-    slot.watch_file(&app, &p)
+        .map_err(|_| "window registry poisoned".to_string())?;
+    let w = reg
+        .get_mut(window.label())
+        .ok_or_else(|| crate::windows::NO_PROJECT_WINDOW.to_string())?;
+    w.watcher.watch_file(&app, window.label(), &p)
 }
 
 /// Writes export data (SVG text or base64-encoded PNG bytes) to a user-picked
@@ -666,27 +703,43 @@ fn write_atomically(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 #[tauri::command]
-pub fn frontend_ready(state: State<'_, AppState>) -> Vec<String> {
-    let mut guard = state.opens.lock().unwrap();
-    guard.ready = true;
-    guard
-        .files
+pub fn frontend_ready(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    // Set ready and drain under the same lock deliver_files takes, or a file
+    // can be lost between its ready check and its push.
+    let mut reg = state
+        .windows
+        .lock()
+        .map_err(|_| "window registry poisoned".to_string())?;
+    let w = reg
+        .get_mut(window.label())
+        .ok_or_else(|| crate::windows::NO_PROJECT_WINDOW.to_string())?;
+    w.ready = true;
+    Ok(w.pending_files
         .drain(..)
         .map(|p| p.to_string_lossy().into_owned())
-        .collect()
+        .collect())
 }
 
 /// Records the folder the sidebar is currently showing so the next plain
 /// launch can restore it. Best-effort: a non-directory or vanished path is a
 /// no-op, and persistence errors are swallowed (UI state, never user-facing).
 #[tauri::command]
-pub fn remember_folder(app: AppHandle, state: State<'_, AppState>, path: String) {
+pub fn remember_folder(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) {
     let p = PathBuf::from(path);
     if p.is_dir() {
         recent::save_last(&app, &p);
-        if let Ok(mut slot) = state.current_root.lock() {
-            *slot = Some(p);
+        if let Ok(mut reg) = state.windows.lock() {
+            let _ = reg.set_root(window.label(), p.clone());
         }
+        let _ = window.set_title(&crate::windows::window_title(&p));
     }
 }
 
@@ -851,9 +904,10 @@ pub fn install_cli() -> Result<InstallOutcome, String> {
 #[tauri::command]
 pub fn install_claude_hook(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<crate::claude_hook::HookOutcome, String> {
-    let root = current_root(&state)?;
+    let root = window_root(&state, &window)?;
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve app binary path: {e}"))?;
     let command = crate::claude_hook::hook_command(&exe.to_string_lossy());
@@ -888,9 +942,10 @@ pub fn install_claude_hook(
 #[tauri::command]
 pub fn install_mcp_server(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<crate::claude_hook::HookOutcome, String> {
-    let root = current_root(&state)?;
+    let root = window_root(&state, &window)?;
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve app binary path: {e}"))?;
     let config_path = root.join(".mcp.json");
@@ -925,9 +980,11 @@ pub struct IntegrationStatus {
 }
 
 #[tauri::command]
-pub fn integration_status(state: State<'_, AppState>) -> IntegrationStatus {
-    let root = state.current_root.lock().ok().and_then(|g| g.clone());
-    let Some(root) = root else {
+pub fn integration_status(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> IntegrationStatus {
+    let Ok(root) = window_root(&state, &window) else {
         return IntegrationStatus {
             hook: false,
             mcp: false,
@@ -1002,24 +1059,14 @@ pub fn search_in_folder(
     )
 }
 
-/// The current sidebar root, or an error if no folder is open. File-op commands
-/// confine their targets within it.
-fn current_root(state: &State<'_, AppState>) -> Result<PathBuf, String> {
-    state
-        .current_root
-        .lock()
-        .map_err(|_| "current_root mutex poisoned".to_string())?
-        .clone()
-        .ok_or_else(|| "no folder is open".to_string())
-}
-
 #[tauri::command]
 pub fn create_file(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     dir: String,
     name: String,
 ) -> Result<String, String> {
-    let root = current_root(&state)?;
+    let root = window_root(&state, &window)?;
     let dir = PathBuf::from(dir);
     if !fs_ops::within_root(&dir, &root) {
         return Err("target is outside the open folder".to_string());
@@ -1030,11 +1077,12 @@ pub fn create_file(
 
 #[tauri::command]
 pub fn create_folder(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     dir: String,
     name: String,
 ) -> Result<String, String> {
-    let root = current_root(&state)?;
+    let root = window_root(&state, &window)?;
     let dir = PathBuf::from(dir);
     if !fs_ops::within_root(&dir, &root) {
         return Err("target is outside the open folder".to_string());
@@ -1044,8 +1092,13 @@ pub fn create_folder(
 }
 
 #[tauri::command]
-pub fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Result<(), String> {
-    let root = current_root(&state)?;
+pub fn rename_path(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    let root = window_root(&state, &window)?;
     let from = PathBuf::from(from);
     let to = PathBuf::from(to);
     if let Some(name) = to.file_name().and_then(|s| s.to_str()) {
@@ -1060,8 +1113,12 @@ pub fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Resu
 }
 
 #[tauri::command]
-pub fn duplicate_file(state: State<'_, AppState>, path: String) -> Result<String, String> {
-    let root = current_root(&state)?;
+pub fn duplicate_file(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let root = window_root(&state, &window)?;
     let path = PathBuf::from(path);
     if !fs_ops::within_root(&path, &root) {
         return Err("target is outside the open folder".to_string());
@@ -1071,8 +1128,12 @@ pub fn duplicate_file(state: State<'_, AppState>, path: String) -> Result<String
 }
 
 #[tauri::command]
-pub fn delete_to_trash(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    let root = current_root(&state)?;
+pub fn delete_to_trash(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    let root = window_root(&state, &window)?;
     let p = PathBuf::from(&path);
     if !p.exists() {
         return Err(format!("not found: {path}"));
@@ -1086,6 +1147,38 @@ pub fn delete_to_trash(state: State<'_, AppState>, path: String) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initial_root_prefers_explicit_then_existing_last_then_cwd() {
+        let is_dir = |p: &Path| p == Path::new("/last");
+        assert_eq!(
+            pick_initial_root(
+                Some(Path::new("/arg")),
+                Some(PathBuf::from("/last")),
+                PathBuf::from("/cwd"),
+                is_dir
+            ),
+            (PathBuf::from("/arg"), true)
+        );
+        assert_eq!(
+            pick_initial_root(
+                None,
+                Some(PathBuf::from("/last")),
+                PathBuf::from("/cwd"),
+                is_dir
+            ),
+            (PathBuf::from("/last"), false)
+        );
+        assert_eq!(
+            pick_initial_root(
+                None,
+                Some(PathBuf::from("/gone")),
+                PathBuf::from("/cwd"),
+                is_dir
+            ),
+            (PathBuf::from("/cwd"), false)
+        );
+    }
 
     #[test]
     #[cfg(unix)]

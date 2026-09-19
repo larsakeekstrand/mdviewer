@@ -193,15 +193,18 @@ fn prepare_request(
     app: &AppHandle,
     req: &GuiRequest,
 ) -> Result<std::sync::mpsc::Receiver<Handoff>, String> {
-    if !app.state::<crate::AppState>().opens.lock().unwrap().ready {
+    let label = "main";
+    let (ready, root) = {
+        let state = app.state::<crate::AppState>();
+        let reg = state.windows.lock().unwrap();
+        match reg.get(label) {
+            Some(w) => (w.ready, Some(w.root.clone())),
+            None => (false, None),
+        }
+    };
+    if !ready {
         return Err(mcp::STARTING_ERR.to_string());
     }
-    let root = app
-        .state::<crate::AppState>()
-        .current_root
-        .lock()
-        .unwrap()
-        .clone();
     validate(req, root.as_deref())?;
     let event = mcp::event_name(&req.tool).ok_or_else(|| format!("unknown tool '{}'", req.tool))?;
 
@@ -215,7 +218,7 @@ fn prepare_request(
         let out = req.args.get("output").and_then(Value::as_str);
         payload["output"] = serde_json::json!(mcp::pdf_output_path(source, out));
     }
-    if app.emit(event, payload).is_err() {
+    if app.emit_to(label, event, payload).is_err() {
         pending.forget(gui_id);
         return Err("cannot reach the MDViewer window".to_string());
     }

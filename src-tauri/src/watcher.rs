@@ -17,7 +17,7 @@ impl WatcherSlot {
     /// Replaces any active watcher with one watching the parent directory of `file`.
     /// Editor save patterns (atomic write-and-rename) can orphan path-level watchers,
     /// so we watch the directory and filter events down to the file we care about.
-    pub fn watch_file(&mut self, app: &AppHandle, file: &Path) -> Result<(), String> {
+    pub fn watch_file(&mut self, app: &AppHandle, label: &str, file: &Path) -> Result<(), String> {
         // Drop any existing watcher first; some platforms refuse to re-watch.
         self.debouncer.take();
         self.watched_file = None;
@@ -39,6 +39,7 @@ impl WatcherSlot {
         // /tmp → /private/tmp, iCloud/synced or symlinked project folders).
         let payload = file.to_string_lossy().into_owned();
         let app_handle = app.clone();
+        let target = label.to_string();
 
         let mut debouncer = new_debouncer(
             Duration::from_millis(200),
@@ -53,7 +54,7 @@ impl WatcherSlot {
                     .flat_map(|ev| ev.paths.iter())
                     .any(|p| paths_match(p, &watched_file));
                 if touches_target {
-                    let _ = app_handle.emit("file-changed", payload.clone());
+                    let _ = app_handle.emit_to(target.as_str(), "file-changed", payload.clone());
                 }
             },
         )
@@ -81,7 +82,12 @@ impl TreeWatcherSlot {
     /// listings. Watching is best-effort per directory — a vanished or
     /// unreadable directory is skipped rather than failing the whole call, so a
     /// folder deleted out from under us doesn't break refresh for the rest.
-    pub fn watch_dirs(&mut self, app: &AppHandle, dirs: Vec<PathBuf>) -> Result<(), String> {
+    pub fn watch_dirs(
+        &mut self,
+        app: &AppHandle,
+        label: &str,
+        dirs: Vec<PathBuf>,
+    ) -> Result<(), String> {
         // Drop the old watcher first; some platforms refuse to re-watch.
         self.debouncer.take();
         if dirs.is_empty() {
@@ -89,13 +95,14 @@ impl TreeWatcherSlot {
         }
 
         let app_handle = app.clone();
+        let target = label.to_string();
         let mut debouncer = new_debouncer(
             Duration::from_millis(200),
             None,
             move |result: DebounceEventResult| {
                 if let Ok(events) = result {
                     if !events.is_empty() {
-                        let _ = app_handle.emit("tree-changed", ());
+                        let _ = app_handle.emit_to(target.as_str(), "tree-changed", ());
                     }
                 }
             },

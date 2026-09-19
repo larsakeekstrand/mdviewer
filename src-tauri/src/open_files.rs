@@ -16,26 +16,11 @@ pub fn markdown_paths(urls: &[tauri::Url]) -> Vec<std::path::PathBuf> {
 
 #[cfg(target_os = "macos")]
 pub fn handle_opened(handle: &tauri::AppHandle, urls: Vec<tauri::Url>) {
-    use tauri::{Emitter, Manager};
     let paths = markdown_paths(&urls);
     if paths.is_empty() {
         return;
     }
-    let state = handle.state::<crate::AppState>();
-    let mut guard = state.opens.lock().unwrap();
-    if guard.ready {
-        drop(guard);
-        for p in &paths {
-            let _ = handle.emit("open-file", p.to_string_lossy().into_owned());
-        }
-        if let Some(w) = handle.get_webview_window("main") {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-    } else {
-        guard.files.extend(paths);
-    }
+    crate::windows::deliver_files(handle, "main", paths);
 }
 
 #[cfg(test)]

@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-// Wired up in Task 2.
-
 //! Which window an incoming path belongs to. `route` and `FocusOrder` are pure
 //! and unit-tested; `fallback_root` is the only IO.
 

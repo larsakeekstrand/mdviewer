@@ -31,24 +31,14 @@ pub struct Startup {
     pub initial_file: Option<PathBuf>,
 }
 
-#[derive(Default)]
-pub struct PendingOpens {
-    pub ready: bool,
-    pub files: Vec<PathBuf>,
-}
-
 pub struct AppState {
     pub tree_root: Option<PathBuf>,
     pub initial_file: Option<PathBuf>,
-    pub watcher: Mutex<watcher::WatcherSlot>,
-    pub tree_watcher: Mutex<watcher::TreeWatcherSlot>,
-    pub opens: Mutex<PendingOpens>,
+    pub windows: Mutex<windows::Registry>,
+    pub focus: Mutex<routing::FocusOrder>,
     /// Serializes task-list write-backs. Held only for the read-verify-write
     /// critical section so two rapid clicks can't interleave reads.
     pub tasklist_lock: Mutex<()>,
-    /// The folder the sidebar is currently showing. File operations are confined
-    /// within it. Set by the frontend on every sidebar-root change.
-    pub current_root: Mutex<Option<PathBuf>>,
 }
 
 /// Run the `--claude-hook` PostToolUse handler and return (never launches the GUI).
@@ -64,12 +54,10 @@ pub fn run_mcp_proxy() {
 
 pub fn run(startup: Startup) {
     let state = AppState {
-        current_root: Mutex::new(startup.tree_root.clone()),
         tree_root: startup.tree_root,
         initial_file: startup.initial_file,
-        watcher: Mutex::new(watcher::WatcherSlot::default()),
-        tree_watcher: Mutex::new(watcher::TreeWatcherSlot::default()),
-        opens: Mutex::new(PendingOpens::default()),
+        windows: Mutex::new(windows::Registry::default()),
+        focus: Mutex::new(routing::FocusOrder::default()),
         tasklist_lock: Mutex::new(()),
     };
 
@@ -129,11 +117,15 @@ pub fn run(startup: Startup) {
             if let Some(root) = &state.tree_root {
                 recent::push(&handle, root);
             }
-            menu::install(&handle)?;
-            mcp_server::start(handle.clone());
+            let root = commands::resolve_initial_root(&handle, state.tree_root.as_deref());
+            state.windows.lock().unwrap().insert("main", root.clone());
+            state.focus.lock().unwrap().touch("main");
             if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&windows::window_title(&root));
                 let _ = window.show();
             }
+            menu::install(&handle)?;
+            mcp_server::start(handle.clone());
             Ok(())
         })
         .build(tauri::generate_context!())
