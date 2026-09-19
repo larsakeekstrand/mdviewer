@@ -182,7 +182,7 @@ pub fn deliver_files(app: &tauri::AppHandle, label: &str, paths: Vec<PathBuf>) {
 /// emits or window calls.
 pub fn deliver_path(app: &tauri::AppHandle, path: PathBuf) {
     use std::sync::atomic::Ordering;
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     let path = path.canonicalize().unwrap_or(path);
     let state = app.state::<crate::AppState>();
     let roots = state.windows.lock().unwrap().roots();
@@ -198,21 +198,7 @@ pub fn deliver_path(app: &tauri::AppHandle, path: PathBuf) {
     let label = match plan {
         crate::routing::Delivery::Existing(l) => l,
         crate::routing::Delivery::RetargetMain(root) => {
-            let ready = {
-                let mut reg = state.windows.lock().unwrap();
-                let _ = reg.set_root("main", root.clone());
-                reg.get("main").map(|w| (w.ready, w.root.clone()))
-            };
-            state.main_placeholder.store(false, Ordering::SeqCst);
-            if let Some((ready, root)) = ready {
-                crate::recent::save_last(app, &root);
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.set_title(&window_title(&root));
-                }
-                if ready {
-                    let _ = app.emit_to("main", "open-folder", root.to_string_lossy().into_owned());
-                }
-            }
+            retarget_placeholder_main(app, root);
             "main".to_string()
         }
         crate::routing::Delivery::NewWindow(root) => match create_project_window(app, root, None) {
@@ -224,6 +210,33 @@ pub fn deliver_path(app: &tauri::AppHandle, path: PathBuf) {
         },
     };
     deliver_files(app, &label, vec![path]);
+}
+
+/// Repoint a placeholder "main" (bare-cwd root) at `root` and clear the
+/// placeholder flag. Returns whether main's frontend is ready; a ready main is
+/// told to adopt the folder, an unready one picks it up from
+/// get_initial_state. The registry lock is released before any window call.
+pub fn retarget_placeholder_main(app: &tauri::AppHandle, root: PathBuf) -> bool {
+    use std::sync::atomic::Ordering;
+    use tauri::{Emitter, Manager};
+    let state = app.state::<crate::AppState>();
+    let ready = {
+        let mut reg = state.windows.lock().unwrap();
+        let _ = reg.set_root("main", root);
+        reg.get("main").map(|w| (w.ready, w.root.clone()))
+    };
+    state.main_placeholder.store(false, Ordering::SeqCst);
+    let Some((ready, root)) = ready else {
+        return false;
+    };
+    crate::recent::save_last(app, &root);
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_title(&window_title(&root));
+    }
+    if ready {
+        let _ = app.emit_to("main", "open-folder", root.to_string_lossy().into_owned());
+    }
+    ready
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]

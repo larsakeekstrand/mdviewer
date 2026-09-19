@@ -168,6 +168,10 @@ pub struct GuiRequest {
     pub id: u64,
     pub tool: String,
     pub args: Value,
+    /// The proxy's working directory (Claude's project root). Used only to
+    /// pick a window for path-less tools, never as a trust boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 /// One reply, GUI → proxy. Exactly one of result/error is set.
@@ -457,6 +461,9 @@ fn forward_call(
             id: *next_gui_id,
             tool: tool.to_string(),
             args: args.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .map(|d| d.to_string_lossy().into_owned()),
         };
         let stream = conn.as_mut().expect("ensure_connection populated conn");
         let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
@@ -797,11 +804,19 @@ mod tests {
     }
 
     #[test]
+    fn gui_request_without_cwd_still_parses() {
+        let r: GuiRequest =
+            serde_json::from_str(r#"{"id":1,"tool":"get_viewer_state","args":{}}"#).unwrap();
+        assert_eq!(r.cwd, None);
+    }
+
+    #[test]
     fn gui_codec_round_trips() {
         let req = GuiRequest {
             id: 5,
             tool: "open_document".into(),
             args: json!({"path": "a.md"}),
+            cwd: None,
         };
         let line = serde_json::to_string(&req).unwrap();
         let back: GuiRequest = serde_json::from_str(&line).unwrap();
@@ -845,12 +860,14 @@ mod tests {
             id: 1,
             tool: "request_review".into(),
             args: json!({"path": "p.md", "instructions": "focus", "evil": "x"}),
+            cwd: Some("/secret".into()),
         };
         let p = event_payload(42, &req);
         assert_eq!(p["requestId"], 42);
         assert_eq!(p["path"], "p.md");
         assert_eq!(p["instructions"], "focus");
         assert!(p.get("evil").is_none());
+        assert!(p.get("cwd").is_none());
     }
 
     #[test]

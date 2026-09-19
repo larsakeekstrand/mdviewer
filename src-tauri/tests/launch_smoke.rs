@@ -85,6 +85,7 @@ fn try_once(name: &interprocess::local_socket::Name<'static>) -> Result<bool, St
         id: 1,
         tool: "get_viewer_state".into(),
         args: json!({}),
+        cwd: None,
     };
     let mut line = serde_json::to_string(&req).map_err(|e| format!("encode: {e}"))?;
     line.push('\n');

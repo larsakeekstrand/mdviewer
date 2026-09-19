@@ -148,6 +148,7 @@ fn request(tool: &str, args: Value) -> Option<String> {
         id: 1,
         tool: tool.into(),
         args,
+        cwd: None,
     };
     let mut line = serde_json::to_string(&req).ok()?;
     line.push('\n');

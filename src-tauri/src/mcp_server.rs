@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
@@ -15,6 +16,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::mcp::{self, GuiReply, GuiRequest};
+use crate::routing::{route, Route};
 
 /// The webview's answer for one tool call: Ok(text) or Err(message).
 pub type Reply = Result<String, String>;
@@ -243,17 +245,154 @@ fn write_line(mut stream: &Stream, reply: &GuiReply) -> std::io::Result<()> {
     stream.write_all(line.as_bytes())
 }
 
-/// Validate and forward one tool call to the webview. The returned receiver
-/// resolves when an mcp_respond / mcp_review_result command answers it.
+/// Which window a tool call goes to.
+#[derive(Debug, PartialEq)]
+pub enum Target {
+    Window(String),
+    NewWindow(PathBuf),
+    NoWindow,
+}
+
+/// Pure routing for one tool call. Path tools go to the window whose root
+/// contains the path (or a new window at the path's parent — the IO caller
+/// substitutes the real git-aware root). `get_viewer_state` goes to the window
+/// containing the proxy's cwd, else the most recently focused window; it never
+/// opens a window.
+pub fn pick_target(req: &GuiRequest, roots: &[(String, PathBuf)], mru: &[String]) -> Target {
+    if req.tool == "get_viewer_state" {
+        return viewer_target(req, roots, roots, mru);
+    }
+    path_target(req, roots, mru)
+}
+
+/// `pick_target` with a placeholder "main" (bare-cwd root, often "/") treated
+/// as containing nothing: it never claims a path or a cwd, but is still a
+/// fallback for `get_viewer_state`.
+pub fn pick_target_for(
+    req: &GuiRequest,
+    roots: &[(String, PathBuf)],
+    mru: &[String],
+    placeholder_main: bool,
+) -> Target {
+    let routable: Vec<(String, PathBuf)> = roots
+        .iter()
+        .filter(|(l, _)| !(placeholder_main && l == "main"))
+        .cloned()
+        .collect();
+    if req.tool == "get_viewer_state" {
+        return viewer_target(req, &routable, roots, mru);
+    }
+    pick_target(req, &routable, mru)
+}
+
+fn parent_of(p: &Path) -> PathBuf {
+    p.parent().map(Path::to_path_buf).unwrap_or_default()
+}
+
+fn viewer_target(
+    req: &GuiRequest,
+    cwd_roots: &[(String, PathBuf)],
+    all_roots: &[(String, PathBuf)],
+    mru: &[String],
+) -> Target {
+    let by_cwd =
+        req.cwd
+            .as_deref()
+            .and_then(|c| match route(Path::new(c), cwd_roots, mru, parent_of) {
+                Route::Window(l) => Some(l),
+                Route::NewWindow(_) => None,
+            });
+    let fallback = || {
+        mru.iter()
+            .find(|l| all_roots.iter().any(|(r, _)| r == *l))
+            .cloned()
+            .or_else(|| all_roots.iter().map(|(l, _)| l).min().cloned())
+    };
+    by_cwd
+        .or_else(fallback)
+        .map(Target::Window)
+        .unwrap_or(Target::NoWindow)
+}
+
+fn path_target(req: &GuiRequest, roots: &[(String, PathBuf)], mru: &[String]) -> Target {
+    let Some(p) = req.args.get("path").and_then(Value::as_str) else {
+        return Target::NoWindow;
+    };
+    match route(Path::new(p), roots, mru, parent_of) {
+        Route::Window(l) => Target::Window(l),
+        Route::NewWindow(r) => Target::NewWindow(r),
+    }
+}
+
+/// A copy of `req` with `args.path` canonicalized when it resolves, so routing
+/// compares it against the registry's canonical roots. An unresolvable path is
+/// left as-is for `validate` to report.
+fn canonicalize_path_arg(req: &GuiRequest) -> GuiRequest {
+    let mut args = req.args.clone();
+    if let Some(c) = args
+        .get("path")
+        .and_then(Value::as_str)
+        .and_then(|p| std::fs::canonicalize(p).ok())
+    {
+        args["path"] = Value::String(c.to_string_lossy().into_owned());
+    }
+    GuiRequest {
+        id: req.id,
+        tool: req.tool.clone(),
+        args,
+        cwd: req.cwd.clone(),
+    }
+}
+
+/// Validate and forward one tool call to the window it routes to. The
+/// returned receiver resolves when an mcp_respond / mcp_review_result command
+/// answers it. Locks are taken one at a time (windows, then focus) and never
+/// held across window creation, emits, or focusing.
 fn prepare_request(
     app: &AppHandle,
     req: &GuiRequest,
 ) -> Result<std::sync::mpsc::Receiver<Handoff>, String> {
-    let label = "main";
+    let event = mcp::event_name(&req.tool).ok_or_else(|| format!("unknown tool '{}'", req.tool))?;
+    let state = app.state::<crate::AppState>();
+    let req = &canonicalize_path_arg(req);
+    let roots = state.windows.lock().unwrap().roots();
+    let mru = state.focus.lock().unwrap().as_slice().to_vec();
+    let placeholder =
+        state.main_placeholder.load(Ordering::SeqCst) && roots.iter().any(|(l, _)| l == "main");
+    let label = match pick_target_for(req, &roots, &mru, placeholder) {
+        Target::Window(l) => l,
+        Target::NoWindow => {
+            // A path tool lands here only without a usable path: report that
+            // instead of "starting", which the proxy would retry for 15 s.
+            if req.tool != "get_viewer_state" {
+                validate(req, None)?;
+            }
+            return Err(mcp::STARTING_ERR.to_string());
+        }
+        Target::NewWindow(_) => {
+            // Validate against the would-be root BEFORE touching any window,
+            // so a bad path never opens one. That root is also generate_pdf's
+            // containment boundary.
+            let p = req.args["path"].as_str().unwrap_or("");
+            let root = crate::routing::fallback_root(Path::new(p));
+            validate(req, Some(&root))?;
+            if placeholder {
+                if !crate::windows::retarget_placeholder_main(app, root) {
+                    return Err(mcp::STARTING_ERR.to_string());
+                }
+                "main".to_string()
+            } else {
+                crate::windows::create_project_window(app, root, None)?;
+                // The new window isn't ready yet; the proxy retries on
+                // STARTING_ERR and the retry routes into it (its root now
+                // contains the path), so no second window is created.
+                return Err(mcp::STARTING_ERR.to_string());
+            }
+        }
+    };
     let (ready, root) = {
-        let state = app.state::<crate::AppState>();
         let reg = state.windows.lock().unwrap();
-        match reg.get(label) {
+        match reg.get(&label) {
             Some(w) => (w.ready, Some(w.root.clone())),
             None => (false, None),
         }
@@ -262,10 +401,9 @@ fn prepare_request(
         return Err(mcp::STARTING_ERR.to_string());
     }
     validate(req, root.as_deref())?;
-    let event = mcp::event_name(&req.tool).ok_or_else(|| format!("unknown tool '{}'", req.tool))?;
 
     let pending = app.state::<McpPending>();
-    let (gui_id, rx) = pending.register(label, &req.tool);
+    let (gui_id, rx) = pending.register(&label, &req.tool);
     let mut payload = mcp::event_payload(gui_id, req);
     if req.tool == "generate_pdf" {
         // Send the resolved output path the GUI side validated, so the frontend
@@ -274,12 +412,12 @@ fn prepare_request(
         let out = req.args.get("output").and_then(Value::as_str);
         payload["output"] = serde_json::json!(mcp::pdf_output_path(source, out));
     }
-    if app.emit_to(label, event, payload).is_err() {
+    if app.emit_to(label.as_str(), event, payload).is_err() {
         pending.forget(gui_id);
         return Err("cannot reach the MDViewer window".to_string());
     }
     if req.tool == "request_review" {
-        if let Some(w) = app.get_webview_window("main") {
+        if let Some(w) = app.get_webview_window(&label) {
             let _ = w.set_focus();
         }
     }
@@ -351,6 +489,143 @@ fn validate(req: &GuiRequest, root: Option<&std::path::Path>) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn req(tool: &str, path: Option<&str>, cwd: Option<&str>) -> GuiRequest {
+        GuiRequest {
+            id: 1,
+            tool: tool.into(),
+            args: match path {
+                Some(p) => serde_json::json!({"path": p}),
+                None => serde_json::json!({}),
+            },
+            cwd: cwd.map(str::to_string),
+        }
+    }
+
+    fn r2() -> Vec<(String, std::path::PathBuf)> {
+        vec![
+            ("main".into(), "/a".into()),
+            ("project-1".into(), "/b".into()),
+        ]
+    }
+
+    #[test]
+    fn path_tools_route_by_path() {
+        let t = pick_target(
+            &req("open_document", Some("/b/x.md"), Some("/a")),
+            &r2(),
+            &["main".into()],
+        );
+        assert_eq!(t, Target::Window("project-1".into()));
+    }
+
+    #[test]
+    fn path_tool_outside_every_root_opens_new_window() {
+        let t = pick_target(&req("request_review", Some("/c/p.md"), None), &r2(), &[]);
+        assert!(matches!(t, Target::NewWindow(_)));
+    }
+
+    #[test]
+    fn viewer_state_routes_by_cwd_then_mru_never_new_window() {
+        assert_eq!(
+            pick_target(
+                &req("get_viewer_state", None, Some("/b/sub")),
+                &r2(),
+                &["main".into()]
+            ),
+            Target::Window("project-1".into())
+        );
+        assert_eq!(
+            pick_target(
+                &req("get_viewer_state", None, Some("/elsewhere")),
+                &r2(),
+                &["main".into()]
+            ),
+            Target::Window("main".into())
+        );
+        assert_eq!(
+            pick_target(&req("get_viewer_state", None, None), &[], &[]),
+            Target::NoWindow
+        );
+    }
+
+    #[test]
+    fn path_tool_without_path_is_no_window() {
+        assert_eq!(
+            pick_target(&req("open_document", None, Some("/b")), &r2(), &[]),
+            Target::NoWindow
+        );
+    }
+
+    #[test]
+    fn placeholder_main_does_not_contain_every_path() {
+        let roots = vec![("main".to_string(), std::path::PathBuf::from("/"))];
+        let mru = ["main".to_string()];
+        assert_eq!(
+            pick_target_for(
+                &req("open_document", Some("/z/y/x.md"), None),
+                &roots,
+                &mru,
+                true
+            ),
+            Target::NewWindow("/z/y".into())
+        );
+        assert_eq!(
+            pick_target_for(
+                &req("open_document", Some("/z/y/x.md"), None),
+                &roots,
+                &mru,
+                false
+            ),
+            Target::Window("main".into())
+        );
+    }
+
+    #[test]
+    fn placeholder_main_defers_to_a_containing_window() {
+        let roots = vec![
+            ("main".to_string(), std::path::PathBuf::from("/")),
+            ("project-1".to_string(), std::path::PathBuf::from("/z")),
+        ];
+        let mru = ["main".to_string()];
+        assert_eq!(
+            pick_target_for(
+                &req("open_document", Some("/z/y/x.md"), None),
+                &roots,
+                &mru,
+                true
+            ),
+            Target::Window("project-1".into())
+        );
+    }
+
+    #[test]
+    fn viewer_state_with_placeholder_main_uses_mru_not_the_slash_root() {
+        let roots = vec![
+            ("main".to_string(), std::path::PathBuf::from("/")),
+            ("project-1".to_string(), std::path::PathBuf::from("/b")),
+        ];
+        let mru = ["project-1".to_string(), "main".to_string()];
+        assert_eq!(
+            pick_target_for(
+                &req("get_viewer_state", None, Some("/elsewhere")),
+                &roots,
+                &mru,
+                true
+            ),
+            Target::Window("project-1".into())
+        );
+        let only_main = vec![("main".to_string(), std::path::PathBuf::from("/"))];
+        assert_eq!(
+            pick_target_for(
+                &req("get_viewer_state", None, Some("/elsewhere")),
+                &only_main,
+                &[],
+                true
+            ),
+            Target::Window("main".into())
+        );
+    }
 
     #[test]
     fn register_assigns_unique_ids() {
