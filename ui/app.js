@@ -27,6 +27,7 @@ import {
   nextTheme,
   themeButtonFace,
 } from "./theme.js";
+import { anyDirty, themeFromStorageEvent } from "./windowscope.js";
 import {
   MARKDOWN_EXT,
   viewKind,
@@ -535,6 +536,25 @@ async function init() {
   saveBtn.addEventListener("click", () => saveActive());
   themeBtn.addEventListener("click", onToggleTheme);
   updateThemeButton();
+
+  window.addEventListener("storage", (e) => {
+    const theme = themeFromStorageEvent(e, THEME_KEY, isValidTheme);
+    if (theme && theme !== currentTheme) applyTheme(theme);
+  });
+
+  await currentWindow.onCloseRequested(async (event) => {
+    if (anyDirty(tabs)) {
+      const discard = await dialogApi.ask(
+        "This window has unsaved changes. Close it and discard them?",
+        { title: "MDViewer", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" },
+      );
+      if (!discard) {
+        event.preventDefault();
+        return;
+      }
+    }
+    persistSession();
+  });
 
   // Drain files Finder buffered during a cold launch; afterwards, files opened
   // while running arrive live via the "open-file" listener above.
