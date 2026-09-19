@@ -816,15 +816,21 @@ function rememberFolder(path) {
 }
 
 async function setTreeRoot(path) {
+  await persistSession(); // saved under the outgoing root, before the backend switches
+  let focusedElsewhere = null;
+  try {
+    focusedElsewhere = await invoke("remember_folder", { path });
+  } catch (e) {
+    console.error("remember_folder failed", e);
+  }
+  if (focusedElsewhere) return;
   if (isSearchModeOpen()) exitSearchMode();
-  persistSession();
   treeRoot = path;
   treeTitle.textContent = basename(path) || path;
   treeTitle.title = path;
   childCache.clear();
   await renderRoot();
   refreshGitStatus();
-  rememberFolder(path);
   const tab = activeTab();
   if (tab) revealInTree(tab.path);
 }
@@ -1254,8 +1260,8 @@ async function openTabAtLine(path, line) {
 }
 
 function persistSession() {
-  if (restoring) return;
-  invoke("save_session", {
+  if (restoring) return Promise.resolve();
+  return invoke("save_session", {
     tabs: tabs.map((t) => t.path),
     active: activeIdx >= 0 ? activeIdx : null,
   }).catch((e) => console.error("save_session failed", e));

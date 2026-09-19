@@ -1,6 +1,26 @@
 //! Which window an incoming path belongs to. `route` and `FocusOrder` are pure
 //! and unit-tested; `fallback_root` is the only IO.
 
+use std::path::{Path, PathBuf};
+
+/// Where an Open Folder request should land: adopt the root into the calling
+/// window, or focus the window that already shows it.
+#[derive(Debug, PartialEq)]
+pub enum FolderTarget {
+    Adopt,
+    Focus(String),
+}
+
+/// Decide whether `caller` should adopt `root`, or defer to another window
+/// that already has it open.
+pub fn open_folder_target(caller: &str, root: &Path, roots: &[(String, PathBuf)]) -> FolderTarget {
+    roots
+        .iter()
+        .find(|(l, r)| l != caller && r == root)
+        .map(|(l, _)| FolderTarget::Focus(l.clone()))
+        .unwrap_or(FolderTarget::Adopt)
+}
+
 /// Most-recently-focused project windows, front = most recent.
 #[derive(Default)]
 pub struct FocusOrder {
@@ -29,6 +49,32 @@ impl FocusOrder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn open_folder_adopts_when_no_other_window_has_it() {
+        let roots = vec![("main".to_string(), PathBuf::from("/a"))];
+        assert_eq!(
+            open_folder_target("main", Path::new("/b"), &roots),
+            FolderTarget::Adopt
+        );
+        assert_eq!(
+            open_folder_target("main", Path::new("/a"), &roots),
+            FolderTarget::Adopt
+        );
+    }
+
+    #[test]
+    fn open_folder_focuses_other_window_with_same_root() {
+        let roots = vec![
+            ("main".to_string(), PathBuf::from("/a")),
+            ("project-1".to_string(), PathBuf::from("/b")),
+        ];
+        assert_eq!(
+            open_folder_target("main", Path::new("/b"), &roots),
+            FolderTarget::Focus("project-1".into())
+        );
+    }
 
     #[test]
     fn touch_moves_label_to_front_without_duplicates() {

@@ -746,20 +746,50 @@ pub fn frontend_ready(
 /// Records the folder the sidebar is currently showing so the next plain
 /// launch can restore it. Best-effort: a non-directory or vanished path is a
 /// no-op, and persistence errors are swallowed (UI state, never user-facing).
+///
+/// If another window already has this folder open, that window is focused
+/// instead and this window's root is left unchanged (`Ok(Some(label))`).
+/// Otherwise this window adopts the folder as its root (`Ok(None)`).
 #[tauri::command]
 pub fn remember_folder(
     app: AppHandle,
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     path: String,
-) {
+) -> Result<Option<String>, String> {
+    use tauri::Manager;
+
     let p = PathBuf::from(path);
-    if p.is_dir() {
-        recent::save_last(&app, &p);
-        if let Ok(mut reg) = state.windows.lock() {
-            let _ = reg.set_root(window.label(), p.clone());
+    if !p.is_dir() {
+        return Ok(None);
+    }
+    let p = p.canonicalize().unwrap_or(p);
+
+    let target = {
+        let reg = state
+            .windows
+            .lock()
+            .map_err(|_| "window registry poisoned".to_string())?;
+        crate::routing::open_folder_target(window.label(), &p, &reg.roots())
+    };
+
+    match target {
+        crate::routing::FolderTarget::Focus(label) => {
+            if let Some(w) = app.get_webview_window(&label) {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            Ok(Some(label))
         }
-        let _ = window.set_title(&crate::windows::window_title(&p));
+        crate::routing::FolderTarget::Adopt => {
+            recent::save_last(&app, &p);
+            if let Ok(mut reg) = state.windows.lock() {
+                let _ = reg.set_root(window.label(), p.clone());
+            }
+            let _ = window.set_title(&crate::windows::window_title(&p));
+            Ok(None)
+        }
     }
 }
 

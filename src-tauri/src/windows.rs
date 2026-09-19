@@ -38,6 +38,7 @@ pub struct Registry {
 
 impl Registry {
     pub fn insert(&mut self, label: &str, root: PathBuf) {
+        let root = root.canonicalize().unwrap_or(root);
         self.windows
             .insert(label.to_string(), WindowState::new(root));
     }
@@ -63,6 +64,7 @@ impl Registry {
     }
 
     pub fn set_root(&mut self, label: &str, root: PathBuf) -> Result<(), String> {
+        let root = root.canonicalize().unwrap_or(root);
         let w = self
             .windows
             .get_mut(label)
@@ -307,6 +309,31 @@ mod tests {
         r.insert("project-1", PathBuf::from("/x"));
         assert_eq!(r.next_label(), "project-2");
         assert_eq!(r.next_label(), "project-3");
+    }
+
+    #[test]
+    fn insert_and_set_root_canonicalize_a_real_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "mdviewer-windows-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let canonical = dir.canonicalize().unwrap();
+        let messy = sub.join("..");
+
+        let mut r = Registry::default();
+        r.insert("main", messy.clone());
+        assert_eq!(r.root("main").unwrap(), canonical);
+
+        r.set_root("main", messy).unwrap();
+        assert_eq!(r.root("main").unwrap(), canonical);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
