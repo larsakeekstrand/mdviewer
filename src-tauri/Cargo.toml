@@ -93,7 +93,9 @@ objc2-core-text = { version = "0.3", features = [
 
 # Second launches forward their argv to the running instance.
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
-tauri-plugin-single-instance = "2"
+# Pinned to 2.4.x: lib.rs SINGLE_INSTANCE_SOCKET mirrors this version's macOS
+# socket-path naming. Re-check that const before widening.
+tauri-plugin-single-instance = "~2.4"
 
 [dev-dependencies]
 # Builds xlsx fixtures in-test so no binary blobs live in the repo.

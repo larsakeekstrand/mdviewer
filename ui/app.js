@@ -553,7 +553,7 @@ async function init() {
         return;
       }
     }
-    persistSession();
+    await persistSession();
   });
 
   // Drain files Finder buffered during a cold launch; afterwards, files opened
@@ -574,13 +574,15 @@ async function init() {
   await renderRoot();
   refreshGitStatus();
 
-  const plainLaunch = !initial.initial_file && ready.files.length === 0;
-  if (plainLaunch) {
+  // Restore the root's saved tabs first and open incoming files on top, so a
+  // launch that opens a file doesn't overwrite the project's session with just
+  // that file. A retargeted placeholder main's restore_tabs belong to the old
+  // (never-persisted) root, so they're skipped.
+  if (ready.root === initial.tree_root) {
     await restoreSession(initial.restore_tabs, initial.active_tab);
-  } else {
-    if (initial.initial_file) await openSticky(initial.initial_file);
-    for (const p of ready.files) await openSticky(p);
   }
+  if (initial.initial_file) await openSticky(initial.initial_file);
+  for (const p of ready.files) await openSticky(p);
 
   restoring = false;
   persistSession();
@@ -4249,6 +4251,18 @@ notesDialog.addEventListener("click", (ev) => {
   }
 });
 
+/** The silent startup/hourly check runs in every window; the backend lets one
+ *  window per interval win the claim, so there's one banner and one install. */
+async function claimedUpdateCheck() {
+  let claimed = false;
+  try {
+    claimed = await invoke("claim_update_check");
+  } catch (e) {
+    console.debug("claim_update_check failed:", e);
+  }
+  if (claimed) await checkForUpdates({ silent: true });
+}
+
 async function checkForUpdates({ silent = true } = {}) {
   if (updateInProgress) return;
   let update;
@@ -4387,8 +4401,8 @@ init()
   .then(() => {
     // Fire-and-forget — the check runs in the background and won't block
     // anything in init. Silent if no update or if the network call fails.
-    checkForUpdates();
-    setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+    claimedUpdateCheck();
+    setInterval(claimedUpdateCheck, UPDATE_CHECK_INTERVAL_MS);
   })
   .catch((e) => {
     console.error("init failed", e);

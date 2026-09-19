@@ -23,7 +23,7 @@ mod windows;
 pub mod xlsx;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -35,11 +35,13 @@ pub struct Startup {
 
 pub struct AppState {
     pub tree_root: Option<PathBuf>,
-    pub initial_file: Option<PathBuf>,
+    /// argv's file, for main's first get_initial_state. Taken (None) when
+    /// setup routes it through deliver_path instead, so it isn't opened twice.
+    pub initial_file: Mutex<Option<PathBuf>>,
     pub windows: Mutex<windows::Registry>,
     pub focus: Mutex<routing::FocusOrder>,
-    /// Files opened (Finder) before setup registered any window; drained into
-    /// "main" at the end of setup. None once drained.
+    /// Files opened (Finder) before setup registered any window; routed through
+    /// `windows::deliver_path` at the end of setup. None once drained.
     pub early_opens: Mutex<Option<Vec<PathBuf>>>,
     /// Serializes task-list write-backs. Held only for the read-verify-write
     /// critical section so two rapid clicks can't interleave reads.
@@ -53,6 +55,8 @@ pub struct AppState {
     /// Paths forwarded by a second launch before setup finished; dispatched at
     /// the end of setup. None once drained.
     pub startup_queue: Mutex<Option<Vec<launch::LaunchTarget>>>,
+    /// UNIX seconds of the last won `claim_update_check` (0 = never).
+    pub last_update_claim: AtomicU64,
 }
 
 /// Marks the app as quitting and saves the window snapshot. An empty snapshot
@@ -87,6 +91,8 @@ fn single_instance_open(app: &tauri::AppHandle, argv: Vec<String>, cwd: String) 
     let Some(raw) = argv.get(1) else {
         // Bare relaunch: bring the most recent window forward.
         if let Some(w) = windows::front_label(app).and_then(|l| app.get_webview_window(&l)) {
+            let _ = w.unminimize();
+            let _ = w.show();
             let _ = w.set_focus();
         }
         return;
@@ -112,7 +118,8 @@ fn dispatch_launch(app: &tauri::AppHandle, target: launch::LaunchTarget) {
 
 /// The single-instance plugin's macOS socket. Must match the plugin's
 /// `/tmp/<identifier with . and - → _>_si.sock` naming (2.4.x, no `semver`
-/// feature) for bundle id `com.mdviewer.app`.
+/// feature) for bundle id `com.mdviewer.app`; Cargo.toml pins the plugin to
+/// `~2.4` so a minor bump can't silently change it.
 #[cfg(target_os = "macos")]
 const SINGLE_INSTANCE_SOCKET: &str = "/tmp/com_mdviewer_app_si.sock";
 
@@ -145,7 +152,7 @@ fn single_instance_allowed() -> bool {
 pub fn run(startup: Startup) {
     let state = AppState {
         tree_root: startup.tree_root,
-        initial_file: startup.initial_file,
+        initial_file: Mutex::new(startup.initial_file),
         windows: Mutex::new(windows::Registry::default()),
         focus: Mutex::new(routing::FocusOrder::default()),
         early_opens: Mutex::new(Some(Vec::new())),
@@ -153,11 +160,17 @@ pub fn run(startup: Startup) {
         quitting: AtomicBool::new(false),
         main_placeholder: AtomicBool::new(false),
         startup_queue: Mutex::new(Some(Vec::new())),
+        last_update_claim: AtomicU64::new(0),
     };
 
     let builder = tauri::Builder::default();
     #[cfg(any(target_os = "macos", windows))]
-    let builder = if single_instance_allowed() {
+    // MDVIEWER_MCP_SOCKET is the smoke tests' isolation signal: their child
+    // must run as its own instance, not forward its argv to an MDViewer the
+    // developer already has open and exit.
+    let builder = if std::env::var_os("MDVIEWER_MCP_SOCKET").is_some() {
+        builder
+    } else if single_instance_allowed() {
         builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             single_instance_open(app, argv, cwd);
         }))
@@ -211,6 +224,7 @@ pub fn run(startup: Startup) {
             commands::platform,
             commands::search_in_folder,
             commands::helper_owner,
+            commands::claim_update_check,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.
@@ -219,26 +233,38 @@ pub fn run(startup: Startup) {
             });
             let handle = app.handle().clone();
             let state = handle.state::<AppState>();
-            if let Some(root) = &state.tree_root {
+            let saved = recent::restore_windows(recent::load_windows(&handle), |p| p.is_dir());
+            // argv named a file (main.rs sets initial_file, with tree_root = its
+            // folder) and there are windows to restore: restore them as a plain
+            // launch would and route the file like any other open, instead of
+            // adding a window rooted at the file's folder.
+            let routed_file = if saved.is_empty() {
+                None
+            } else {
+                state.initial_file.lock().unwrap().take()
+            };
+            let explicit_root = state.tree_root.as_deref().filter(|_| routed_file.is_none());
+            if let Some(root) = explicit_root {
                 recent::push(&handle, root);
             }
-            let saved = recent::restore_windows(recent::load_windows(&handle), |p| p.is_dir());
-            let from_saved = state.tree_root.is_none() && !saved.is_empty();
-            let placeholder = state.tree_root.is_none()
+            let from_saved = explicit_root.is_none() && !saved.is_empty();
+            let placeholder = explicit_root.is_none()
                 && saved.is_empty()
                 && !recent::load_last(&handle).is_some_and(|p| p.is_dir());
             state.main_placeholder.store(placeholder, Ordering::SeqCst);
             let root = if from_saved {
                 saved[0].root.clone()
             } else {
-                commands::resolve_initial_root(&handle, state.tree_root.as_deref())
+                commands::resolve_initial_root(&handle, explicit_root)
             };
             state.windows.lock().unwrap().insert("main", root.clone());
             state.focus.lock().unwrap().touch("main");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&windows::window_title(&root));
                 if let Some(b) = saved.first().filter(|_| from_saved).and_then(|w| w.bounds) {
-                    let _ = window.set_position(tauri::LogicalPosition::new(b.x, b.y));
+                    if windows::on_screen(&handle, &b) {
+                        let _ = window.set_position(tauri::LogicalPosition::new(b.x, b.y));
+                    }
                     let _ = window.set_size(tauri::LogicalSize::new(b.w, b.h));
                 }
                 let _ = window.show();
@@ -261,11 +287,11 @@ pub fn run(startup: Startup) {
                 }
             }
             // AppKit can deliver a cold launch-to-open before setup runs. Route
-            // those like any other open, now that restored windows are
-            // registered: a placeholder main is repointed at the first file's
+            // those (and a routed argv file) like any other open, now that
+            // restored windows are registered: a placeholder main is repointed at the first file's
             // root, and windows not yet ready buffer them for frontend_ready.
             let early = state.early_opens.lock().unwrap().take();
-            for p in early.unwrap_or_default() {
+            for p in routed_file.into_iter().chain(early.unwrap_or_default()) {
                 windows::deliver_path(&handle, p);
             }
             menu::install(&handle)?;

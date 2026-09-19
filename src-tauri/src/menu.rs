@@ -29,7 +29,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "check-updates" => {
-                let _ = app.emit("menu-check-updates", ());
+                crate::windows::emit_to_front(app, "menu-check-updates", ());
             }
             "settings" => open_settings(app),
             "install-cli" => {

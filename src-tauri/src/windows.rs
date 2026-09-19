@@ -247,6 +247,20 @@ pub struct Bounds {
     pub h: f64,
 }
 
+/// Minimum logical overlap (each axis) a saved window needs with some monitor
+/// to be restored where it was; less and it could not be grabbed and dragged.
+const MIN_VISIBLE: f64 = 50.0;
+
+/// Whether `b` overlaps at least one monitor (all in logical coordinates) by
+/// MIN_VISIBLE on both axes.
+pub fn rect_visible(b: &Bounds, monitors: &[Bounds]) -> bool {
+    monitors.iter().any(|m| {
+        let w = (b.x + b.w).min(m.x + m.w) - b.x.max(m.x);
+        let h = (b.y + b.h).min(m.y + m.h) - b.y.max(m.y);
+        w >= MIN_VISIBLE && h >= MIN_VISIBLE
+    })
+}
+
 pub fn cascade(from: Option<(f64, f64)>) -> Option<(f64, f64)> {
     from.map(|(x, y)| (x + 24.0, y + 24.0))
 }
@@ -294,16 +308,15 @@ pub fn create_project_window(
         .title(window_title(&root))
         .min_inner_size(600.0, 400.0)
         .resizable(true);
-    b = match bounds {
-        Some(bb) => b.inner_size(bb.w, bb.h).position(bb.x, bb.y),
-        None => {
-            let b = b.inner_size(1200.0, 800.0);
-            match cascade(from) {
-                Some((x, y)) => b.position(x, y),
-                None => b,
-            }
-        }
+    let (size, pos) = match bounds {
+        Some(bb) if on_screen(app, &bb) => ((bb.w, bb.h), Some((bb.x, bb.y))),
+        Some(bb) => ((bb.w, bb.h), cascade(from)),
+        None => ((1200.0, 800.0), cascade(from)),
     };
+    b = b.inner_size(size.0, size.1);
+    if let Some((x, y)) = pos {
+        b = b.position(x, y);
+    }
     match b.build() {
         Ok(w) => {
             if let Some(bb) = read_bounds(&w) {
@@ -386,11 +399,43 @@ pub fn read_bounds(w: &tauri::WebviewWindow) -> Option<Bounds> {
     })
 }
 
+/// Whether saved bounds would put the window where the user can reach it.
+/// Tauri doesn't clamp a restored position, so a window saved on a monitor
+/// that is gone would reopen off-screen. If the monitors can't be read, trust
+/// the saved position.
+pub fn on_screen(app: &tauri::AppHandle, b: &Bounds) -> bool {
+    let monitors: Vec<Bounds> = app
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|m| {
+            let s = m.scale_factor();
+            let p = m.position();
+            let z = m.size();
+            Bounds {
+                x: f64::from(p.x) / s,
+                y: f64::from(p.y) / s,
+                w: f64::from(z.width) / s,
+                h: f64::from(z.height) / s,
+            }
+        })
+        .collect();
+    monitors.is_empty() || rect_visible(b, &monitors)
+}
+
 /// Reads `label`'s current bounds and stores them; the window call happens
-/// before the registry lock is taken.
+/// before the registry lock is taken. A minimized or fullscreen window's
+/// geometry isn't a place to restore to (Windows reports a minimized window
+/// at -32000,-32000), so those keep the last normal bounds.
 pub fn record_bounds(app: &tauri::AppHandle, label: &str) {
     use tauri::Manager;
-    let Some(b) = app.get_webview_window(label).and_then(|w| read_bounds(&w)) else {
+    let Some(w) = app.get_webview_window(label) else {
+        return;
+    };
+    if w.is_minimized().unwrap_or(true) || w.is_fullscreen().unwrap_or(true) {
+        return;
+    }
+    let Some(b) = read_bounds(&w) else {
         return;
     };
     if let Ok(mut reg) = app.state::<crate::AppState>().windows.lock() {
@@ -586,6 +631,22 @@ mod tests {
         );
         assert_eq!(got[1].bounds, Some(b));
         assert_eq!(got[0].bounds, None);
+    }
+
+    fn bx(x: f64, y: f64, w: f64, h: f64) -> Bounds {
+        Bounds { x, y, w, h }
+    }
+
+    #[test]
+    fn rect_visible_requires_minimum_overlap_with_some_monitor() {
+        let mons = [bx(0.0, 0.0, 1440.0, 900.0), bx(1440.0, 0.0, 1920.0, 1080.0)];
+        assert!(rect_visible(&bx(100.0, 100.0, 800.0, 600.0), &mons));
+        assert!(rect_visible(&bx(3000.0, 500.0, 800.0, 600.0), &mons));
+        assert!(rect_visible(&bx(-750.0, 100.0, 800.0, 600.0), &mons));
+        assert!(!rect_visible(&bx(-780.0, 100.0, 800.0, 600.0), &mons));
+        assert!(!rect_visible(&bx(-32000.0, -32000.0, 160.0, 28.0), &mons));
+        assert!(!rect_visible(&bx(5000.0, 100.0, 800.0, 600.0), &mons));
+        assert!(!rect_visible(&bx(100.0, 100.0, 800.0, 600.0), &[]));
     }
 
     #[test]

@@ -64,6 +64,34 @@ pub fn resolve_initial_root(app: &AppHandle, explicit: Option<&Path>) -> PathBuf
     root
 }
 
+/// Whether an update-check claim made at `now` wins, given the last winning
+/// claim at `last` (0 = never). A clock that went backwards also wins, so a
+/// wall-clock change can't suppress checks until it catches up.
+fn should_claim(now: u64, last: u64, min_gap: u64) -> bool {
+    last == 0 || now < last || now - last >= min_gap
+}
+
+const UPDATE_CLAIM_GAP_SECS: u64 = 50 * 60;
+
+/// Every window runs the silent startup/hourly update check; exactly one per
+/// interval wins this claim and actually checks, so there is one banner and
+/// one install at a time.
+#[tauri::command]
+pub fn claim_update_check(state: State<'_, AppState>) -> bool {
+    use std::sync::atomic::Ordering;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(1)
+        .max(1);
+    let last = state.last_update_claim.load(Ordering::SeqCst);
+    should_claim(now, last, UPDATE_CLAIM_GAP_SECS)
+        && state
+            .last_update_claim
+            .compare_exchange(last, now, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+}
+
 fn window_root(
     state: &State<'_, AppState>,
     window: &tauri::WebviewWindow,
@@ -103,7 +131,7 @@ pub fn get_initial_state(
 ) -> Result<InitialState, String> {
     let tree_root = window_root(&state, &window)?;
     let initial_file = if window.label() == "main" {
-        state.initial_file.as_ref()
+        state.initial_file.lock().unwrap().clone()
     } else {
         None
     };
@@ -1246,6 +1274,15 @@ pub fn delete_to_trash(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn should_claim_first_call_and_after_gap_only() {
+        assert!(should_claim(1_000, 0, 3000));
+        assert!(!should_claim(1_000, 1_000, 3000));
+        assert!(!should_claim(3_999, 1_000, 3000));
+        assert!(should_claim(4_000, 1_000, 3000));
+        assert!(should_claim(500, 1_000, 3000));
+    }
+
     use super::*;
 
     #[test]
