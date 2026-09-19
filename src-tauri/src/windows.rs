@@ -489,11 +489,15 @@ mod tests {
 
     #[test]
     fn insert_then_root_and_set_root() {
+        // Roots are canonicalized on insert, so these must not exist on any
+        // machine: on the Windows CI runner "/a" resolves to the real D:\a.
+        let a = PathBuf::from("/mdviewer-test-missing-a");
+        let b = PathBuf::from("/mdviewer-test-missing-b");
         let mut r = Registry::default();
-        r.insert("main", PathBuf::from("/a"));
-        assert_eq!(r.root("main").unwrap(), PathBuf::from("/a"));
-        r.set_root("main", PathBuf::from("/b")).unwrap();
-        assert_eq!(r.root("main").unwrap(), PathBuf::from("/b"));
+        r.insert("main", a.clone());
+        assert_eq!(r.root("main").unwrap(), a);
+        r.set_root("main", b.clone()).unwrap();
+        assert_eq!(r.root("main").unwrap(), b);
         assert!(r.set_root("nope", PathBuf::from("/c")).is_err());
     }
 
