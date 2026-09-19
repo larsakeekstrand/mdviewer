@@ -117,6 +117,20 @@ impl Registry {
     }
 }
 
+/// Buffer Finder opens that arrive before setup has registered any window.
+/// Returns `None` when buffered, or `Some(paths)` when the buffer has already
+/// been drained and the caller must deliver them itself.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn buffer_early(slot: &mut Option<Vec<PathBuf>>, paths: Vec<PathBuf>) -> Option<Vec<PathBuf>> {
+    match slot {
+        Some(buf) => {
+            buf.extend(paths);
+            None
+        }
+        None => Some(paths),
+    }
+}
+
 /// Hand files to a project window: emit `open-file` if its frontend is ready,
 /// else buffer them for its `frontend_ready`. The ready check and the push
 /// happen under one lock, so nothing is lost between them.
@@ -214,6 +228,22 @@ mod tests {
             r.project_label_for("claude-integration").unwrap_err(),
             NO_PROJECT_WINDOW
         );
+    }
+
+    #[test]
+    fn buffer_early_buffers_until_drained_then_hands_back() {
+        let mut slot = Some(vec![PathBuf::from("/a.md")]);
+        assert_eq!(buffer_early(&mut slot, vec![PathBuf::from("/b.md")]), None);
+        assert_eq!(
+            slot,
+            Some(vec![PathBuf::from("/a.md"), PathBuf::from("/b.md")])
+        );
+        let mut drained: Option<Vec<PathBuf>> = None;
+        assert_eq!(
+            buffer_early(&mut drained, vec![PathBuf::from("/c.md")]),
+            Some(vec![PathBuf::from("/c.md")])
+        );
+        assert_eq!(drained, None);
     }
 
     #[test]

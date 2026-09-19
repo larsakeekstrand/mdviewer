@@ -36,6 +36,9 @@ pub struct AppState {
     pub initial_file: Option<PathBuf>,
     pub windows: Mutex<windows::Registry>,
     pub focus: Mutex<routing::FocusOrder>,
+    /// Files opened (Finder) before setup registered any window; drained into
+    /// "main" at the end of setup. None once drained.
+    pub early_opens: Mutex<Option<Vec<PathBuf>>>,
     /// Serializes task-list write-backs. Held only for the read-verify-write
     /// critical section so two rapid clicks can't interleave reads.
     pub tasklist_lock: Mutex<()>,
@@ -58,6 +61,7 @@ pub fn run(startup: Startup) {
         initial_file: startup.initial_file,
         windows: Mutex::new(windows::Registry::default()),
         focus: Mutex::new(routing::FocusOrder::default()),
+        early_opens: Mutex::new(Some(Vec::new())),
         tasklist_lock: Mutex::new(()),
     };
 
@@ -119,6 +123,14 @@ pub fn run(startup: Startup) {
             }
             let root = commands::resolve_initial_root(&handle, state.tree_root.as_deref());
             state.windows.lock().unwrap().insert("main", root.clone());
+            // AppKit can deliver a cold launch-to-open before setup runs. Those
+            // files wait for main's frontend_ready drain like any other early open.
+            let early = state.early_opens.lock().unwrap().take();
+            if let Some(files) = early.filter(|f| !f.is_empty()) {
+                if let Some(w) = state.windows.lock().unwrap().get_mut("main") {
+                    w.pending_files.extend(files);
+                }
+            }
             state.focus.lock().unwrap().touch("main");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&windows::window_title(&root));

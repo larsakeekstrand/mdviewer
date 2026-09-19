@@ -20,7 +20,12 @@ pub fn handle_opened(handle: &tauri::AppHandle, urls: Vec<tauri::Url>) {
     if paths.is_empty() {
         return;
     }
-    crate::windows::deliver_files(handle, "main", paths);
+    use tauri::Manager;
+    let state = handle.state::<crate::AppState>();
+    let remaining = crate::windows::buffer_early(&mut state.early_opens.lock().unwrap(), paths);
+    if let Some(paths) = remaining {
+        crate::windows::deliver_files(handle, "main", paths);
+    }
 }
 
 #[cfg(test)]
