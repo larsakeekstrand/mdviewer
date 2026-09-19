@@ -23,8 +23,8 @@ pub fn handle_opened(handle: &tauri::AppHandle, urls: Vec<tauri::Url>) {
     use tauri::Manager;
     let state = handle.state::<crate::AppState>();
     let remaining = crate::windows::buffer_early(&mut state.early_opens.lock().unwrap(), paths);
-    if let Some(paths) = remaining {
-        crate::windows::deliver_files(handle, "main", paths);
+    for p in remaining.into_iter().flatten() {
+        crate::windows::deliver_path(handle, p);
     }
 }
 

@@ -59,7 +59,6 @@ impl FocusOrder {
 /// equal roots go to the most recently focused. Paths are compared component-
 /// wise (Path::starts_with), so /repo does not contain /repo2. Callers pass
 /// canonical paths.
-#[allow(dead_code)] // used from Task 11
 pub fn route(
     path: &Path,
     roots: &[(String, PathBuf)],
@@ -81,7 +80,39 @@ pub fn route(
         .unwrap_or_else(|| Route::NewWindow(fallback_root(path)))
 }
 
-#[allow(dead_code)] // used from Task 13
+/// How an incoming file is delivered: to a window that already contains it,
+/// by repointing a placeholder "main", or to a new project window.
+#[derive(Debug, PartialEq)]
+pub enum Delivery {
+    Existing(String),
+    RetargetMain(PathBuf),
+    NewWindow(PathBuf),
+}
+
+/// Route `path`, treating a placeholder "main" (bare-cwd root, often "/") as
+/// containing nothing: it is left out of the candidates and, when no other
+/// window takes the file, repointed at the file's root instead of opening a
+/// second window.
+pub fn plan_delivery(
+    path: &Path,
+    roots: &[(String, PathBuf)],
+    mru: &[String],
+    placeholder_main: bool,
+    fallback_root: impl Fn(&Path) -> PathBuf,
+) -> Delivery {
+    let retarget = placeholder_main && roots.iter().any(|(l, _)| l == "main");
+    let candidates: Vec<(String, PathBuf)> = roots
+        .iter()
+        .filter(|(l, _)| !(retarget && l == "main"))
+        .cloned()
+        .collect();
+    match route(path, &candidates, mru, fallback_root) {
+        Route::Window(l) => Delivery::Existing(l),
+        Route::NewWindow(root) if retarget => Delivery::RetargetMain(root),
+        Route::NewWindow(root) => Delivery::NewWindow(root),
+    }
+}
+
 pub fn fallback_root(path: &Path) -> PathBuf {
     let dir = if path.is_dir() {
         path.to_path_buf()
@@ -161,6 +192,51 @@ mod tests {
         assert_eq!(
             route(Path::new("/z/y/x.md"), &[], &mru(&[]), fb),
             Route::NewWindow(PathBuf::from("/z/y"))
+        );
+    }
+
+    #[test]
+    fn placeholder_main_is_excluded_and_retargeted() {
+        let r = roots(&[("main", "/")]);
+        assert_eq!(
+            plan_delivery(Path::new("/z/y/x.md"), &r, &mru(&["main"]), true, fb),
+            Delivery::RetargetMain(PathBuf::from("/z/y"))
+        );
+    }
+
+    #[test]
+    fn non_placeholder_main_with_containing_root_is_existing() {
+        let r = roots(&[("main", "/")]);
+        assert_eq!(
+            plan_delivery(Path::new("/z/y/x.md"), &r, &mru(&["main"]), false, fb),
+            Delivery::Existing("main".into())
+        );
+    }
+
+    #[test]
+    fn no_match_without_placeholder_opens_new_window() {
+        let r = roots(&[("main", "/a")]);
+        assert_eq!(
+            plan_delivery(Path::new("/z/y/x.md"), &r, &mru(&["main"]), false, fb),
+            Delivery::NewWindow(PathBuf::from("/z/y"))
+        );
+    }
+
+    #[test]
+    fn placeholder_main_defers_to_another_containing_window() {
+        let r = roots(&[("main", "/"), ("project-1", "/z")]);
+        assert_eq!(
+            plan_delivery(Path::new("/z/y/x.md"), &r, &mru(&["main"]), true, fb),
+            Delivery::Existing("project-1".into())
+        );
+    }
+
+    #[test]
+    fn placeholder_flag_without_registered_main_opens_new_window() {
+        let r = roots(&[("project-1", "/a")]);
+        assert_eq!(
+            plan_delivery(Path::new("/z/y/x.md"), &r, &mru(&[]), true, fb),
+            Delivery::NewWindow(PathBuf::from("/z/y"))
         );
     }
 

@@ -157,14 +157,6 @@ pub fn run(startup: Startup) {
                 commands::resolve_initial_root(&handle, state.tree_root.as_deref())
             };
             state.windows.lock().unwrap().insert("main", root.clone());
-            // AppKit can deliver a cold launch-to-open before setup runs. Those
-            // files wait for main's frontend_ready drain like any other early open.
-            let early = state.early_opens.lock().unwrap().take();
-            if let Some(files) = early.filter(|f| !f.is_empty()) {
-                if let Some(w) = state.windows.lock().unwrap().get_mut("main") {
-                    w.pending_files.extend(files);
-                }
-            }
             state.focus.lock().unwrap().touch("main");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&windows::window_title(&root));
@@ -190,6 +182,14 @@ pub fn run(startup: Startup) {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_focus();
                 }
+            }
+            // AppKit can deliver a cold launch-to-open before setup runs. Route
+            // those like any other open, now that restored windows are
+            // registered: a placeholder main is repointed at the first file's
+            // root, and windows not yet ready buffer them for frontend_ready.
+            let early = state.early_opens.lock().unwrap().take();
+            for p in early.unwrap_or_default() {
+                windows::deliver_path(&handle, p);
             }
             menu::install(&handle)?;
             mcp_server::start(handle.clone());

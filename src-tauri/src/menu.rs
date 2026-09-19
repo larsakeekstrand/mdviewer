@@ -305,11 +305,7 @@ fn prompt_open_file(app: AppHandle) {
         .pick_file(move |chosen| {
             if let Some(file_path) = chosen {
                 if let Some(p) = file_path.as_path() {
-                    crate::windows::emit_to_front(
-                        &app,
-                        "open-file",
-                        p.to_string_lossy().to_string(),
-                    );
+                    crate::windows::deliver_path(&app, PathBuf::from(p));
                 }
             }
         });

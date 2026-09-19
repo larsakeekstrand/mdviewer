@@ -722,11 +722,20 @@ fn write_atomically(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, target)
 }
 
+/// A window's root at the moment its frontend became ready, plus the files
+/// buffered for it. `root` may differ from `get_initial_state`'s if a Finder
+/// open repointed a placeholder main in between.
+#[derive(Serialize)]
+pub struct ReadyState {
+    root: String,
+    files: Vec<String>,
+}
+
 #[tauri::command]
 pub fn frontend_ready(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+) -> Result<ReadyState, String> {
     // Set ready and drain under the same lock deliver_files takes, or a file
     // can be lost between its ready check and its push.
     let mut reg = state
@@ -737,10 +746,14 @@ pub fn frontend_ready(
         .get_mut(window.label())
         .ok_or_else(|| crate::windows::NO_PROJECT_WINDOW.to_string())?;
     w.ready = true;
-    Ok(w.pending_files
-        .drain(..)
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect())
+    Ok(ReadyState {
+        root: w.root.to_string_lossy().into_owned(),
+        files: w
+            .pending_files
+            .drain(..)
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+    })
 }
 
 /// Records the folder the sidebar is currently showing so the next plain
@@ -786,6 +799,11 @@ pub fn remember_folder(
             recent::save_last(&app, &p);
             if let Ok(mut reg) = state.windows.lock() {
                 let _ = reg.set_root(window.label(), p.clone());
+            }
+            if window.label() == "main" {
+                state
+                    .main_placeholder
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
             }
             let _ = window.set_title(&crate::windows::window_title(&p));
             Ok(None)

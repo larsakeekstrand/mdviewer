@@ -176,6 +176,56 @@ pub fn deliver_files(app: &tauri::AppHandle, label: &str, paths: Vec<PathBuf>) {
     }
 }
 
+/// Open `path` in the project window that contains it: an existing window, a
+/// placeholder "main" repointed at the file's root, or a new project window.
+/// Locks are taken one at a time (windows, then focus) and never held across
+/// emits or window calls.
+pub fn deliver_path(app: &tauri::AppHandle, path: PathBuf) {
+    use std::sync::atomic::Ordering;
+    use tauri::{Emitter, Manager};
+    let path = path.canonicalize().unwrap_or(path);
+    let state = app.state::<crate::AppState>();
+    let roots = state.windows.lock().unwrap().roots();
+    let mru = state.focus.lock().unwrap().as_slice().to_vec();
+    let placeholder = state.main_placeholder.load(Ordering::SeqCst);
+    let plan = crate::routing::plan_delivery(
+        &path,
+        &roots,
+        &mru,
+        placeholder,
+        crate::routing::fallback_root,
+    );
+    let label = match plan {
+        crate::routing::Delivery::Existing(l) => l,
+        crate::routing::Delivery::RetargetMain(root) => {
+            let ready = {
+                let mut reg = state.windows.lock().unwrap();
+                let _ = reg.set_root("main", root.clone());
+                reg.get("main").map(|w| (w.ready, w.root.clone()))
+            };
+            state.main_placeholder.store(false, Ordering::SeqCst);
+            if let Some((ready, root)) = ready {
+                crate::recent::save_last(app, &root);
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.set_title(&window_title(&root));
+                }
+                if ready {
+                    let _ = app.emit_to("main", "open-folder", root.to_string_lossy().into_owned());
+                }
+            }
+            "main".to_string()
+        }
+        crate::routing::Delivery::NewWindow(root) => match create_project_window(app, root, None) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("mdviewer: {e}");
+                return;
+            }
+        },
+    };
+    deliver_files(app, &label, vec![path]);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Bounds {
     pub x: f64,

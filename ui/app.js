@@ -557,33 +557,29 @@ async function init() {
   });
 
   // Drain files Finder buffered during a cold launch; afterwards, files opened
-  // while running arrive live via the "open-file" listener above.
-  let pending = [];
+  // while running arrive live via the "open-file" listener above. The backend
+  // reports the window's current root: a Finder open during a cold launch may
+  // have repointed a placeholder main at the file's repo.
+  let ready = { root: initial.tree_root, files: [] };
   try {
-    pending = await invoke("frontend_ready");
+    ready = await invoke("frontend_ready");
   } catch (e) {
     console.error("frontend_ready failed", e);
   }
 
-  // A cold Finder launch (no argv file) starts the sidebar at the file's folder.
-  const coldFinder = !initial.initial_file && pending.length > 0;
-  treeRoot = coldFinder ? parentDir(pending[0]) : initial.tree_root;
+  treeRoot = ready.root;
   treeTitle.textContent = basename(treeRoot) || treeRoot;
   treeTitle.title = treeRoot;
-  // Explicit-arg and restored roots are already persisted by get_initial_state;
-  // only the cold-Finder folder needs persisting here. The bare cwd default is
-  // intentionally not persisted.
-  if (coldFinder) rememberFolder(treeRoot);
 
   await renderRoot();
   refreshGitStatus();
 
-  const plainLaunch = !initial.initial_file && pending.length === 0;
+  const plainLaunch = !initial.initial_file && ready.files.length === 0;
   if (plainLaunch) {
     await restoreSession(initial.restore_tabs, initial.active_tab);
   } else {
     if (initial.initial_file) await openSticky(initial.initial_file);
-    for (const p of pending) await openSticky(p);
+    for (const p of ready.files) await openSticky(p);
   }
 
   restoring = false;
@@ -807,12 +803,6 @@ function reconcileChildren(container, entries, depth) {
   for (const [path, li] of existing) {
     if (!seen.has(path)) li.remove();
   }
-}
-
-function rememberFolder(path) {
-  invoke("remember_folder", { path }).catch((e) =>
-    console.error("remember_folder failed", e),
-  );
 }
 
 async function setTreeRoot(path) {
