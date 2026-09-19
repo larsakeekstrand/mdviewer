@@ -41,12 +41,16 @@ async function runInstall(command, btn) {
     btn.disabled = false;
     return;
   }
-  // The Rust command emits integration-changed (the main window listens);
-  // here we just refresh this window's own status + labels.
+  // The Rust command also emits integration-changed (the owning project
+  // window listens, for the first-run nudge); here we just refresh this
+  // window's own status + labels.
   await load();
 }
 
 hookBtn.addEventListener("click", () => runInstall("install_claude_hook", hookBtn));
 mcpBtn.addEventListener("click", () => runInstall("install_mcp_server", mcpBtn));
+
+const currentWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+currentWindow.listen("integration-changed", () => load());
 
 load().catch((e) => console.error("integration status load failed", e));

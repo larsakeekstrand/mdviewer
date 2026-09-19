@@ -22,7 +22,11 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
                 let _ = app.emit("export", "html");
             }
             #[cfg(target_os = "macos")]
-            "export-pdf" => open_pdf_export_window(app),
+            "export-pdf" => {
+                if let Some(o) = front_project(app) {
+                    open_pdf_export_window(app, &o);
+                }
+            }
             "check-updates" => {
                 let _ = app.emit("menu-check-updates", ());
             }
@@ -30,7 +34,11 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             "install-cli" => {
                 let _ = app.emit("menu-install-cli", ());
             }
-            "claude-integration" => open_integration_window(app),
+            "claude-integration" => {
+                if let Some(o) = front_project(app) {
+                    open_integration_window(app, &o);
+                }
+            }
             "github-source" => {
                 let _ = crate::commands::open_url(SOURCE_URL.to_string());
             }
@@ -215,6 +223,14 @@ fn build_recent_submenu(app: &AppHandle) -> tauri::Result<tauri::menu::Submenu<W
     builder.build()
 }
 
+/// The project window a menu-opened helper window should act for: the
+/// most-recently-focused one, falling back to any registered project window.
+fn front_project(app: &AppHandle) -> Option<String> {
+    let state = app.state::<crate::AppState>();
+    let front = state.focus.lock().ok()?.front().map(str::to_string);
+    front.or_else(|| state.windows.lock().ok()?.labels().into_iter().next())
+}
+
 fn open_settings(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("preferences") {
         let _ = win.set_focus();
@@ -232,8 +248,14 @@ fn open_settings(app: &AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
-pub fn open_pdf_export_window(app: &AppHandle) {
+pub fn open_pdf_export_window(app: &AppHandle, owner: &str) {
+    app.state::<crate::AppState>()
+        .windows
+        .lock()
+        .unwrap()
+        .set_owner("pdf-export", owner);
     if let Some(win) = app.get_webview_window("pdf-export") {
+        let _ = app.emit_to("pdf-export", "pdf-export-owner", owner.to_string());
         let _ = win.set_focus();
         return;
     }
@@ -245,8 +267,14 @@ pub fn open_pdf_export_window(app: &AppHandle) {
         .build();
 }
 
-pub fn open_integration_window(app: &AppHandle) {
+pub fn open_integration_window(app: &AppHandle, owner: &str) {
+    app.state::<crate::AppState>()
+        .windows
+        .lock()
+        .unwrap()
+        .set_owner("claude-integration", owner);
     if let Some(win) = app.get_webview_window("claude-integration") {
+        let _ = app.emit_to("claude-integration", "integration-changed", ());
         let _ = win.set_focus();
         return;
     }

@@ -75,6 +75,26 @@ fn window_root(
         .root(window.label())
 }
 
+/// Root for a helper window's caller: the project window itself if `caller`
+/// is one, else the owner recorded when the helper window was opened.
+fn owner_root(reg: &crate::windows::Registry, caller: &str) -> Result<PathBuf, String> {
+    let label = reg.project_label_for(caller)?;
+    reg.root(&label)
+}
+
+/// The project window label a helper window (or project window) acts for.
+#[tauri::command]
+pub fn helper_owner(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state
+        .windows
+        .lock()
+        .map_err(|_| "window registry poisoned".to_string())?
+        .project_label_for(window.label())
+}
+
 #[tauri::command]
 pub fn get_initial_state(
     window: tauri::WebviewWindow,
@@ -907,7 +927,12 @@ pub fn install_claude_hook(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<crate::claude_hook::HookOutcome, String> {
-    let root = window_root(&state, &window)?;
+    let reg = state
+        .windows
+        .lock()
+        .map_err(|_| "window registry poisoned".to_string())?;
+    let root = owner_root(&reg, window.label())?;
+    drop(reg);
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve app binary path: {e}"))?;
     let command = crate::claude_hook::hook_command(&exe.to_string_lossy());
@@ -945,7 +970,12 @@ pub fn install_mcp_server(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<crate::claude_hook::HookOutcome, String> {
-    let root = window_root(&state, &window)?;
+    let reg = state
+        .windows
+        .lock()
+        .map_err(|_| "window registry poisoned".to_string())?;
+    let root = owner_root(&reg, window.label())?;
+    drop(reg);
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve app binary path: {e}"))?;
     let config_path = root.join(".mcp.json");
@@ -984,13 +1014,21 @@ pub fn integration_status(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> IntegrationStatus {
-    let Ok(root) = window_root(&state, &window) else {
+    let Ok(reg) = state.windows.lock() else {
         return IntegrationStatus {
             hook: false,
             mcp: false,
             root: None,
         };
     };
+    let Ok(root) = owner_root(&reg, window.label()) else {
+        return IntegrationStatus {
+            hook: false,
+            mcp: false,
+            root: None,
+        };
+    };
+    drop(reg);
     let hook = read_json_file(&root.join(".claude").join("settings.local.json"))
         .map(|v| crate::claude_hook::hook_installed(&v))
         .unwrap_or(false);
@@ -1147,6 +1185,18 @@ pub fn delete_to_trash(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owner_root_resolves_helper_to_owner_root() {
+        let mut reg = crate::windows::Registry::default();
+        reg.insert("project-1", PathBuf::from("/b"));
+        reg.set_owner("claude-integration", "project-1");
+        assert_eq!(
+            owner_root(&reg, "claude-integration").unwrap(),
+            PathBuf::from("/b")
+        );
+        assert!(owner_root(&reg, "preferences").is_err());
+    }
 
     #[test]
     fn initial_root_prefers_explicit_then_existing_last_then_cwd() {
@@ -1709,6 +1759,6 @@ mod tests {
 /// Open (or focus) the Claude Code Integration window. Invoked by the nudge's
 /// "Set up" button; the menu opens the same window directly.
 #[tauri::command]
-pub fn show_integration_window(app: AppHandle) {
-    crate::menu::open_integration_window(&app);
+pub fn show_integration_window(app: AppHandle, window: tauri::WebviewWindow) {
+    crate::menu::open_integration_window(&app, window.label());
 }

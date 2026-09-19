@@ -110,6 +110,7 @@ pub fn run(startup: Startup) {
             commands::mcp_review_result,
             commands::platform,
             commands::search_in_folder,
+            commands::helper_owner,
         ])
         .setup(|app| {
             // Pre-warm the markdown engine so the first render isn't laggy.

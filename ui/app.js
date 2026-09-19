@@ -71,7 +71,7 @@ import {
 // Uses Tauri v2 IPC; window.__TAURI__ is injected because tauri.conf.json sets withGlobalTauri.
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
-const { emit } = window.__TAURI__.event;
+const { emitTo } = window.__TAURI__.event;
 // Window-scoped: the global event.listen() defaults to target Any and would
 // also receive events the backend emit_to's at OTHER windows.
 const currentWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
@@ -460,12 +460,12 @@ async function init() {
 
   await listen("pdf-export-request-preview", (ev) => {
     const t = activeTab();
-    if (t) emit("pdf-export-active-name", { name: exportFilename(t.path, "pdf") }).catch(() => {});
+    if (t) emitTo("pdf-export", "pdf-export-active-name", { name: exportFilename(t.path, "pdf") }).catch(() => {});
     // The Export-to-PDF window is opened unconditionally from the menu (no
     // gate on the active tab), so a PDF tab's own iframe #preview can be live
     // underneath it — exportDocument/servePreview must not run against that.
     if (!t || !isExportable(viewKind(t.path))) {
-      emit("pdf-export-preview-html", {
+      emitTo("pdf-export", "pdf-export-preview-html", {
         html: "",
         error: "Export is only available for Markdown and spreadsheets.",
       }).catch(() => {});
@@ -478,13 +478,13 @@ async function init() {
   await listen("pdf-export-run", async (ev) => {
     const { settings, mode, path } = ev.payload;
     if (exportInProgress) {
-      await emit("pdf-export-done", { ok: false, error: "an export is already in progress" });
+      await emitTo("pdf-export", "pdf-export-done", { ok: false, error: "an export is already in progress" });
       return;
     }
     {
       const t = activeTab();
       if (!t || !isExportable(viewKind(t.path))) {
-        await emit("pdf-export-done", {
+        await emitTo("pdf-export", "pdf-export-done", {
           ok: false,
           error: "Export is only available for Markdown and spreadsheets.",
         });
@@ -507,7 +507,7 @@ async function init() {
         await new Promise((r) => setTimeout(r, 50));
       }
       if (previewRendering) {
-        await emit("pdf-export-done", { ok: false, error: "a preview render is still in progress" });
+        await emitTo("pdf-export", "pdf-export-done", { ok: false, error: "a preview render is still in progress" });
         return;
       }
       const ok = await exportDocument("pdf", dest, settings);
@@ -515,9 +515,9 @@ async function init() {
         await invoke("save_pdf_settings", { settings }).catch(() => {});
       }
       const url = ok && mode === "exact" ? convertFileSrc(dest) + "?v=" + Date.now() : undefined;
-      await emit("pdf-export-done", { ok, url, error: ok ? undefined : "PDF export failed" });
+      await emitTo("pdf-export", "pdf-export-done", { ok, url, error: ok ? undefined : "PDF export failed" });
     } catch (e) {
-      await emit("pdf-export-done", { ok: false, error: String(e) });
+      await emitTo("pdf-export", "pdf-export-done", { ok: false, error: String(e) });
     }
   });
 
@@ -2258,10 +2258,10 @@ async function servePreview() {
       pendingPreviewSettings = null;
       try {
         const html = await renderExportPreviewHtml(s);
-        await emit("pdf-export-preview-html", { html });
+        await emitTo("pdf-export", "pdf-export-preview-html", { html });
       } catch (e) {
         console.error("preview build failed", e);
-        await emit("pdf-export-preview-html", { html: "", error: String(e) });
+        await emitTo("pdf-export", "pdf-export-preview-html", { html: "", error: String(e) });
       }
     }
   } finally {

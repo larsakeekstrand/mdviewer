@@ -5,8 +5,11 @@ import {
 import { THEME_KEY, resolveTheme } from "./theme.js";
 
 const { invoke } = window.__TAURI__.core;
-const { emit, listen } = window.__TAURI__.event;
+const { emitTo } = window.__TAURI__.event;
+const currentWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+const listen = (event, handler) => currentWindow.listen(event, handler);
 const { save } = window.__TAURI__.dialog;
+let owner = null;
 
 const el = (id) => document.getElementById(id);
 
@@ -66,7 +69,7 @@ function update(overrides) {
 function schedulePreview() {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(() => {
-    emit("pdf-export-request-preview", { settings }).catch(() => {});
+    if (owner) emitTo(owner, "pdf-export-request-preview", { settings }).catch(() => {});
   }, 120);
 }
 
@@ -104,11 +107,13 @@ function showLiveTab() {
 }
 el("tab-live").addEventListener("click", showLiveTab);
 el("tab-exact").addEventListener("click", () => {
+  if (!owner) return;
   pending = "exact";
   el("status").textContent = "Rendering exact PDF…";
-  emit("pdf-export-run", { settings, mode: "exact" }).catch(() => {});
+  emitTo(owner, "pdf-export-run", { settings, mode: "exact" }).catch(() => {});
 });
 el("export").addEventListener("click", async () => {
+  if (!owner) return;
   const path = await save({
     defaultPath: activeName,
     filters: [{ name: "PDF document", extensions: ["pdf"] }],
@@ -116,10 +121,15 @@ el("export").addEventListener("click", async () => {
   if (!path) return;
   pending = "save";
   el("status").textContent = "Exporting…";
-  await emit("pdf-export-run", { settings, mode: "save", path });
+  await emitTo(owner, "pdf-export-run", { settings, mode: "save", path });
 });
 
 async function init() {
+  owner = await invoke("helper_owner").catch(() => null);
+  await listen("pdf-export-owner", (ev) => {
+    owner = ev.payload;
+    schedulePreview();
+  });
   await listen("pdf-export-preview-html", (ev) => {
     const { html, error } = ev.payload;
     if (error) {
