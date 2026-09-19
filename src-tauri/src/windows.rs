@@ -14,6 +14,9 @@ pub struct WindowState {
     pub tree_watcher: TreeWatcherSlot,
     pub ready: bool,
     pub pending_files: Vec<PathBuf>,
+    /// Last known logical bounds, kept current from Moved/Resized so a snapshot
+    /// never has to query a window (which may already be gone at Destroyed/Exit).
+    pub bounds: Option<Bounds>,
 }
 
 impl WindowState {
@@ -24,6 +27,7 @@ impl WindowState {
             tree_watcher: TreeWatcherSlot::default(),
             ready: false,
             pending_files: Vec::new(),
+            bounds: None,
         }
     }
 }
@@ -77,6 +81,19 @@ impl Registry {
         self.windows
             .iter()
             .map(|(l, w)| (l.clone(), w.root.clone()))
+            .collect()
+    }
+
+    pub fn set_bounds(&mut self, label: &str, b: Bounds) {
+        if let Some(w) = self.windows.get_mut(label) {
+            w.bounds = Some(b);
+        }
+    }
+
+    pub fn entries(&self) -> Vec<(String, PathBuf, Option<Bounds>)> {
+        self.windows
+            .iter()
+            .map(|(l, w)| (l.clone(), w.root.clone(), w.bounds))
             .collect()
     }
 
@@ -224,11 +241,20 @@ pub fn create_project_window(
             }
         }
     };
-    if let Err(e) = b.build() {
-        if let Ok(mut reg) = state.windows.lock() {
-            reg.remove(&label);
+    match b.build() {
+        Ok(w) => {
+            if let Some(bb) = read_bounds(&w) {
+                if let Ok(mut reg) = state.windows.lock() {
+                    reg.set_bounds(&label, bb);
+                }
+            }
         }
-        return Err(format!("cannot create window: {e}"));
+        Err(e) => {
+            if let Ok(mut reg) = state.windows.lock() {
+                reg.remove(&label);
+            }
+            return Err(format!("cannot create window: {e}"));
+        }
     }
     Ok(label)
 }
@@ -269,7 +295,10 @@ pub fn on_destroyed(app: &tauri::AppHandle, label: &str) {
         reg.get(label).is_some() && reg.labels().len() == 1
     };
     if is_last && !state.quitting.load(std::sync::atomic::Ordering::SeqCst) {
-        crate::recent::save_windows(app, &snapshot(app));
+        let snap = snapshot(app);
+        if !snap.is_empty() {
+            crate::recent::save_windows(app, &snap);
+        }
     }
     let removed = state.windows.lock().unwrap().remove(label);
     if removed.is_none() {
@@ -281,37 +310,54 @@ pub fn on_destroyed(app: &tauri::AppHandle, label: &str) {
     drop(removed);
 }
 
+/// A window's logical outer position + logical inner size, if readable.
+pub fn read_bounds(w: &tauri::WebviewWindow) -> Option<Bounds> {
+    let s = w.scale_factor().ok()?;
+    let p = w.outer_position().ok()?.to_logical::<f64>(s);
+    let z = w.inner_size().ok()?.to_logical::<f64>(s);
+    Some(Bounds {
+        x: p.x,
+        y: p.y,
+        w: z.width,
+        h: z.height,
+    })
+}
+
+/// Reads `label`'s current bounds and stores them; the window call happens
+/// before the registry lock is taken.
+pub fn record_bounds(app: &tauri::AppHandle, label: &str) {
+    use tauri::Manager;
+    let Some(b) = app.get_webview_window(label).and_then(|w| read_bounds(&w)) else {
+        return;
+    };
+    if let Ok(mut reg) = app.state::<crate::AppState>().windows.lock() {
+        reg.set_bounds(label, b);
+    }
+}
+
+/// Focus order first (unknown labels skipped), then the rest sorted by label.
+pub fn snapshot_from(
+    mut entries: Vec<(String, PathBuf, Option<Bounds>)>,
+    mru: &[String],
+) -> Vec<crate::recent::SavedWindow> {
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let rank = |l: &str| mru.iter().position(|m| m == l).unwrap_or(usize::MAX);
+    entries.sort_by_key(|e| rank(&e.0));
+    entries
+        .into_iter()
+        .map(|(_, root, bounds)| crate::recent::SavedWindow { root, bounds })
+        .collect()
+}
+
 /// The open project windows, most recently focused first, so the front window
-/// becomes `main` on relaunch. Locks the registry then focus, never nested.
+/// becomes `main` on relaunch. Reads only the registry, then focus (never
+/// nested) — no window calls, so it works while windows are being torn down.
 pub fn snapshot(app: &tauri::AppHandle) -> Vec<crate::recent::SavedWindow> {
     use tauri::Manager;
     let state = app.state::<crate::AppState>();
-    let roots: HashMap<String, PathBuf> =
-        state.windows.lock().unwrap().roots().into_iter().collect();
-    let mut order: Vec<String> = state.focus.lock().unwrap().as_slice().to_vec();
-    for l in roots.keys() {
-        if !order.contains(l) {
-            order.push(l.clone());
-        }
-    }
-    order
-        .into_iter()
-        .filter_map(|l| {
-            let root = roots.get(&l)?.clone();
-            let bounds = app.get_webview_window(&l).and_then(|w| {
-                let s = w.scale_factor().ok()?;
-                let p = w.outer_position().ok()?.to_logical::<f64>(s);
-                let z = w.inner_size().ok()?.to_logical::<f64>(s);
-                Some(Bounds {
-                    x: p.x,
-                    y: p.y,
-                    w: z.width,
-                    h: z.height,
-                })
-            });
-            Some(crate::recent::SavedWindow { root, bounds })
-        })
-        .collect()
+    let entries = state.windows.lock().unwrap().entries();
+    let mru: Vec<String> = state.focus.lock().unwrap().as_slice().to_vec();
+    snapshot_from(entries, &mru)
 }
 
 pub fn window_title(root: &Path) -> String {
@@ -426,6 +472,57 @@ mod tests {
             Some(vec![PathBuf::from("/c.md")])
         );
         assert_eq!(drained, None);
+    }
+
+    #[test]
+    fn set_bounds_stores_for_known_label_and_ignores_unknown() {
+        let mut r = Registry::default();
+        r.insert("main", PathBuf::from("/a"));
+        assert_eq!(r.get("main").unwrap().bounds, None);
+        let b = Bounds {
+            x: 1.0,
+            y: 2.0,
+            w: 3.0,
+            h: 4.0,
+        };
+        r.set_bounds("main", b);
+        r.set_bounds("nope", b);
+        assert_eq!(r.get("main").unwrap().bounds, Some(b));
+        assert!(r.get("nope").is_none());
+    }
+
+    #[test]
+    fn snapshot_from_orders_by_focus_then_label_and_keeps_bounds() {
+        let b = Bounds {
+            x: 10.0,
+            y: 20.0,
+            w: 800.0,
+            h: 600.0,
+        };
+        let entries = vec![
+            ("project-3".to_string(), PathBuf::from("/c"), None),
+            ("main".to_string(), PathBuf::from("/a"), Some(b)),
+            ("project-1".to_string(), PathBuf::from("/b"), None),
+            ("project-2".to_string(), PathBuf::from("/d"), None),
+        ];
+        let mru = vec![
+            "project-2".to_string(),
+            "gone".to_string(),
+            "main".to_string(),
+        ];
+        let got = snapshot_from(entries, &mru);
+        let roots: Vec<PathBuf> = got.iter().map(|w| w.root.clone()).collect();
+        assert_eq!(
+            roots,
+            vec![
+                PathBuf::from("/d"),
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/c"),
+            ]
+        );
+        assert_eq!(got[1].bounds, Some(b));
+        assert_eq!(got[0].bounds, None);
     }
 
     #[test]

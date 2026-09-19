@@ -51,6 +51,20 @@ pub struct AppState {
     pub main_placeholder: AtomicBool,
 }
 
+/// Marks the app as quitting and saves the window snapshot. An empty snapshot
+/// (the last window already destroyed) must not overwrite the one
+/// `on_destroyed` saved for it.
+fn save_on_exit(handle: &tauri::AppHandle) {
+    handle
+        .state::<AppState>()
+        .quitting
+        .store(true, Ordering::SeqCst);
+    let snap = windows::snapshot(handle);
+    if !snap.is_empty() {
+        recent::save_windows(handle, &snap);
+    }
+}
+
 /// Run the `--claude-hook` PostToolUse handler and return (never launches the GUI).
 pub fn run_claude_hook() {
     claude_hook::run_hook();
@@ -160,6 +174,7 @@ pub fn run(startup: Startup) {
                 }
                 let _ = window.show();
             }
+            windows::record_bounds(&handle, "main");
             let main_canonical = state.windows.lock().unwrap().root("main").ok();
             for w in saved.iter().skip(usize::from(from_saved)) {
                 if Some(&w.root) != main_canonical.as_ref() {
@@ -191,6 +206,18 @@ pub fn run(startup: Startup) {
                         state.focus.lock().unwrap().touch(&label);
                     }
                 }
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    let is_project = app
+                        .state::<AppState>()
+                        .windows
+                        .lock()
+                        .unwrap()
+                        .get(&label)
+                        .is_some();
+                    if is_project {
+                        windows::record_bounds(app, &label);
+                    }
+                }
                 tauri::WindowEvent::Destroyed => windows::on_destroyed(app, &label),
                 _ => {}
             }
@@ -199,17 +226,9 @@ pub fn run(startup: Startup) {
         .expect("error while building mdviewer");
 
     app.run(move |handle, event| match event {
-        tauri::RunEvent::ExitRequested { .. } => {
-            // ⌘Q destroys windows only after this, so the snapshot sees them all.
-            // Closing the last window also lands here, after it is gone: an
-            // empty snapshot must not overwrite the one on_destroyed just saved.
-            let state = handle.state::<AppState>();
-            state.quitting.store(true, Ordering::SeqCst);
-            let snap = windows::snapshot(handle);
-            if !snap.is_empty() {
-                recent::save_windows(handle, &snap);
-            }
-        }
+        // macOS ⌘Q (terminate:) reaches us only as Exit; closing the last
+        // window and app.exit() go through ExitRequested. Both save here.
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => save_on_exit(handle),
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls } => open_files::handle_opened(handle, urls),
         _ => {}
