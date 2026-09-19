@@ -82,7 +82,7 @@ fn hardened_git(dir: &Path) -> Command {
 
 /// Resolve `dir`'s git working-tree root. `None` means "not inside a repo"
 /// (or git is unavailable) — caller treats it the same way.
-fn git_toplevel(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn git_toplevel(dir: &Path) -> Option<PathBuf> {
     let output = hardened_git(dir)
         .args(["rev-parse", "--show-toplevel"])
         .output()
