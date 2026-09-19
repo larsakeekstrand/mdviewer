@@ -14,14 +14,11 @@
 //! assertions below are written around that: window "main" is asked via
 //! `cwd: <abs a>`, the new window is asked via `cwd: <repo toplevel>`.
 //!
-//! Data-dir note: Tauri's `app_data_dir()` is derived from the bundle
-//! identifier and OS conventions; there is no environment override in this
-//! codebase to point it at a temp directory for a test run. So this test
-//! *also* restores whatever windows/sessions are saved in the developer's own
-//! `recent.json` (see `lib.rs`'s setup hook — restored windows are opened
-//! regardless of an explicit argv root). That's harmless for the assertions
-//! below, which only ever look at the window containing `fixtures/multi/a`
-//! and the window containing `fixtures/multi/b/b.md`'s repo toplevel, by cwd.
+//! Data-dir note: Tauri derives `app_data_dir()` from `$HOME`, so the child is
+//! launched with `HOME` pointed at a fresh temp directory. That keeps the
+//! developer's own `recent.json` out of the run — otherwise setup would
+//! restore their saved windows, whose roots can contain these fixtures and
+//! would then claim the routed files — and leaves their settings untouched.
 #![cfg(target_os = "macos")]
 
 use std::io::{BufRead, BufReader, Write};
@@ -52,17 +49,23 @@ fn two_roots_route_to_independent_windows() {
 
     let inner = inner_binary(&app).expect("bundle has an executable in Contents/MacOS");
     let root_a = fixture_dir("a");
+    let file_a = root_a.join("a.md");
     let file_b = fixture_dir("b").join("b.md");
-    assert!(root_a.join("a.md").is_file(), "fixture a/a.md missing");
+    let home = temp_home();
+    assert!(file_a.is_file(), "fixture a/a.md missing");
     assert!(file_b.is_file(), "fixture b/b.md missing");
 
     let sock = test_socket_id();
     std::env::set_var("MDVIEWER_MCP_SOCKET", &sock);
     let _ = std::fs::remove_file(&sock);
 
+    // Launch with the FILE: its parent becomes "main"'s root and the file
+    // opens as the active tab (step 1). A bare folder argument would open no
+    // document at all.
     let mut child = Command::new(&inner)
-        .arg(&root_a)
+        .arg(&file_a)
         .env("MDVIEWER_MCP_SOCKET", &sock)
+        .env("HOME", &home)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -146,6 +149,7 @@ fn two_roots_route_to_independent_windows() {
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_file(&sock);
+    let _ = std::fs::remove_dir_all(&home);
 
     outcome.expect("multi-window smoke test failed");
 }
@@ -243,6 +247,15 @@ fn fixture_dir(leaf: &str) -> PathBuf {
         .join(leaf)
         .canonicalize()
         .expect("fixture directory exists")
+}
+
+/// A private `$HOME` for the child, so it gets an empty `recent.json` instead
+/// of the developer's saved windows and sessions.
+fn temp_home() -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("mdviewer-multi-smoke-home-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp HOME");
+    dir
 }
 
 fn test_socket_id() -> String {

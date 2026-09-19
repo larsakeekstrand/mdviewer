@@ -34,6 +34,7 @@ fn launches_and_reports_open_document() {
 
     let inner = inner_binary(&app).expect("bundle has an executable in Contents/MacOS");
     let fixture = fixture_path();
+    let home = temp_home();
     let sock = test_socket_id();
     std::env::set_var("MDVIEWER_MCP_SOCKET", &sock);
     let _ = std::fs::remove_file(&sock);
@@ -41,6 +42,9 @@ fn launches_and_reports_open_document() {
     let mut child = Command::new(&inner)
         .arg(&fixture)
         .env("MDVIEWER_MCP_SOCKET", &sock)
+        // Private $HOME: Tauri derives app_data_dir() from it, so the run
+        // neither restores nor rewrites the developer's own recent.json.
+        .env("HOME", &home)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -56,6 +60,7 @@ fn launches_and_reports_open_document() {
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_file(&sock);
+    let _ = std::fs::remove_dir_all(&home);
 
     match outcome {
         Ok(Ok(())) => {}
@@ -134,6 +139,12 @@ fn fixture_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(FIXTURE)
+}
+
+fn temp_home() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("mdviewer-smoke-home-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp HOME");
+    dir
 }
 
 fn test_socket_id() -> String {
