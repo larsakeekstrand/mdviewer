@@ -42,7 +42,7 @@ Today the app is single-window by construction:
 | Menu target | **Front of the MRU focus list.** |
 | `get_viewer_state` | Routed by the **MCP proxy's cwd**, falling back to MRU. |
 | Second launches | **`tauri-plugin-single-instance`** forwards argv to the running process on both platforms. |
-| Delivery | **Four phases**, each independently mergeable (see below). |
+| Delivery | **Three phases**, each independently mergeable (see below). |
 
 ## Architecture
 
@@ -80,9 +80,10 @@ look up `windows[window.label()]`. The label comes from Tauri, not from a
 frontend argument, so a page cannot claim to be another window. Affected:
 `get_initial_state`, `open_file`, `watch_tree`, `frontend_ready`,
 `remember_folder`, `save_session`, `create_file`, `create_folder`,
-`rename_path`, `duplicate_file`, `delete_to_trash`, `toggle_task`, `save_file`,
-`export_pdf` (webview target), `mcp_respond`, `mcp_review_result`.
-`git_status` and `search_in_folder` take an explicit path argument and are not
+`rename_path`, `duplicate_file`, `delete_to_trash`, `install_claude_hook`,
+`install_mcp_server`, `integration_status`, `mcp_respond`, `mcp_review_result`.
+`export_pdf` already prints the calling window's webview. `toggle_task`,
+`save_file`, `git_status` and `search_in_folder` take explicit paths and are not
 root-confined today; they stay as they are (out of scope here).
 
 A missing entry (command from a helper window, or a race with close) is an
@@ -135,9 +136,10 @@ The watcher closures capture their window's label when `open_file` /
 - The proxy (`mcp.rs::run_proxy`) adds `"cwd": <proxy cwd>` to every
   `GuiRequest`. Paths are already absolutized against it.
 - `open_document`, `request_review`, `generate_pdf` route by their `path`
-  argument; a `NewWindow` route creates the window and waits for it (the
-  request is queued in the new window's `pending` MCP handoff until
-  `frontend_ready`). `get_viewer_state` routes by `cwd` (`route(cwd, …)`,
+  argument; a `NewWindow` route validates first, creates the window, and
+  answers `STARTING_ERR`. The proxy already retries that for up to 15 s, and
+  the retry routes into the new window once it is ready, so no new queue is
+  needed. `get_viewer_state` routes by `cwd` (`route(cwd, …)`,
   but a `NewWindow` result falls back to `focus.front()` instead — asking for
   state must not open a window).
 - `validate` receives the **routed window's** root; `generate_pdf`'s
@@ -146,8 +148,9 @@ The watcher closures capture their window's label when `open_file` /
   `mcp_respond` / `mcp_review_result` reject an answer whose calling window
   label doesn't match.
 - `request_review` focuses the routed window, not `main`.
-- The "one review at a time" gate (`reviewBusy`) becomes per window. Two
-  Claude sessions in two repos can each have a review open.
+- The "one review at a time" gate (`reviewBusy`) is already per window,
+  because each window has its own `app.js`. Two Claude sessions in two repos
+  can each have a review open.
 - `WindowEvent::Destroyed` resolves that window's pending entries: a review →
   `{"declined": true}` (a success, as for tab close today); others → error
   `"MDViewer window closed"`.
@@ -178,9 +181,9 @@ Changes:
 
 - `get_initial_state` returns this window's root and that root's restored
   tabs, and any `initial_file` routed to it.
-- **Window title** `"<root folder name> — MDViewer"` (pure helper
-  `windowTitle(root)` in a new `ui/windows.js`, unit-tested), set on init and
-  on every root change.
+- **Window title** `"<root folder name> — MDViewer"` (pure
+  `windows::window_title`, unit-tested), set from Rust on window creation and
+  on every root change, so no extra window permission is needed.
 - **Open Folder / Open Recent** in the focused window: save the outgoing
   root's session, then set the new root. If another window already has that
   root, the backend focuses it and the current window is left unchanged
@@ -189,22 +192,24 @@ Changes:
 - **Close guard:** `onCloseRequested` → if any tab is dirty, the existing
   discard prompt; cancel → `event.preventDefault()`. Before closing, save the
   session.
-- **Helper windows carry an owner.** `open_pdf_export_window` and
-  `open_integration_window` take the calling project window's label, and the
-  helper URL gets `?owner=<label>`. `pdf-export.js` switches its `emit` calls to
+- **Helper windows carry an owner, recorded in the backend.** Opening
+  `pdf-export` or `claude-integration` records `helper label → project label`
+  in the registry (menu: the MRU front window; nudge: the calling window). The
+  frontend never supplies the owner. Integration commands resolve the root via
+  that record; `pdf-export.js` asks `helper_owner` for the label and uses
   `emitTo(owner, …)`, and `app.js` replies with `emitTo("pdf-export", …)`.
-  The integration window's `integration_status` / `install_*` commands take
-  `owner` and resolve that window's root. The backend checks that `owner`
-  names an existing project window.
+- **Listeners are window-scoped.** In Tauri 2 the JS `event.listen()` defaults
+  to target *Any* and would receive `emit_to` events aimed at other windows, so
+  `app.js` and `pdf-export.js` listen via `getCurrentWebviewWindow().listen`.
 
 ## Window lifecycle
 
 - **New Window (⌘⇧N)**, `menu.rs`: folder picker → `window::create(app, root,
   bounds: None)`. If a window already has that exact root, focus it.
-- **`window::create`**: build the `WebviewWindow` with label `project-<n>`,
-  cascade 24 px from the focused window (or saved bounds), then insert its
-  `WindowState`. Insert only after a successful build, so a failed build
-  leaves no state.
+- **`windows::create_project_window`**: insert the `WindowState` for label
+  `project-<n>`, then build the `WebviewWindow` (cascade 24 px from the focused
+  window, or saved bounds). Inserting first means the new webview's first
+  `get_initial_state` always finds its entry; a failed build removes it again.
 - **`Destroyed`**: stop watchers (drop the slots), resolve pending MCP entries,
   remove from `windows` and `focus`. If it was the last project window, write
   the `windows` snapshot first (see Persistence) and let the app exit as it
@@ -262,7 +267,7 @@ Changes:
 |---|---|
 | Routed window not ready yet | Buffer in its `pending_files` / pending MCP handoff; drained by its `frontend_ready` under the same lock that sets `ready`. |
 | Target window closes mid-MCP-call | `Destroyed` resolves pending: review → `{"declined": true}`; others → error. |
-| Window creation fails (root vanished) | Error to the caller (MCP error; hook stays silent as today); no state inserted. |
+| Window creation fails (root vanished) | Error to the caller (MCP error; hook stays silent as today); the pre-inserted state is removed. |
 | Command from a label with no `WindowState` | `Err("no project window")`; never borrows another window's root. |
 | Saved window root missing at launch | Dropped from the restore list. |
 | Single-instance argv before setup | Queued in `startup_queue`, drained at end of `setup`. |
@@ -280,16 +285,14 @@ Changes:
   `["main", "project-*", "preferences", "claude-integration", "pdf-export"]`.
   `project-*` gets exactly what `main` has; helper windows stay explicitly
   named.
-- **Helper-window `owner`** is checked to be an existing project window before
-  it is used, and the backend never trusts it as a *root*, only as a lookup
-  key.
+- **Helper-window owner** is recorded by the backend when the helper opens and
+  never accepted from the frontend.
 - **Single-instance argv** is untrusted input: it is canonicalized and
   stat-checked exactly like a cold launch.
-- **New IPC surface:** `new_window` (menu-driven; may be a menu-only Rust path
-  rather than a command) and the `owner` parameter on `integration_status`,
-  `install_claude_hook`, `install_mcp_server`. Every per-window command
+- **New IPC surface:** one command, `helper_owner` (returns the caller's owner
+  label; no arguments). New Window is menu-only Rust. Every per-window command
   gains an implicit `WebviewWindow` argument; none gains a path-bearing
-  argument.
+  argument. `core:window:allow-destroy` is added for the close guard.
 - A `security-reviewer` pass is required before merging phase 1 (label →
   state scoping, capability glob) and phase 3 (routing, single-instance argv,
   MCP cwd).
@@ -312,7 +315,7 @@ Changes:
   `cfg`), `FocusOrder`, `open_folder_target`, `resolve_launch_path`,
   `recent` migration, sessions LRU cap, `restore_windows` filtering,
   `McpPending` label mismatch rejection and resolve-on-destroy.
-- **JS `node --test`:** `windowTitle`, owner parsing from the helper-window URL.
+- **JS `node --test`:** `anyDirty`, `themeFromStorageEvent` (`ui/windowscope.js`).
 - **Smoke:** extend `scripts/smoke-test.sh` to open two roots and verify over
   the MCP socket that `open_document` for a file in root B, and
   `get_viewer_state` with cwd B, answer from B's window.
@@ -327,17 +330,20 @@ Changes:
 
 ## Delivery phases
 
-Each phase is mergeable on its own and leaves the app shippable.
+Each phase is mergeable on its own and leaves the app shippable. Per-root
+sessions come before a second window can exist, so two windows never overwrite
+one shared session.
 
-1. **Per-window state, no behavior change.** `WindowState` map, label-scoped
-   commands, `emit_to` everywhere, owner-addressed helper windows, per-window
-   `McpPending` labels. Acceptance: with one window, behavior is identical to
-   today. Carries most of the regression risk.
-2. **New Window, MRU menu routing, titles, close guard, cross-window theme
-   sync.**
-3. **Path routing.** `routing.rs`, Finder/hook/MCP routing, proxy `cwd`,
-   single-instance plugin, per-window `reviewBusy`.
-4. **Persistence.** Per-root sessions, restore all windows, migration.
+1. **Per-window state, no behavior change.** `WindowState` registry,
+   label-scoped commands and watchers, `emit_to` + window-scoped listeners,
+   backend-recorded helper owners, per-window `McpPending` entries.
+   Acceptance: with one window, behavior is identical to today. Carries most
+   of the regression risk.
+2. **Multiple windows.** Per-root sessions + migration, window lifecycle + New
+   Window + MRU menu routing, close guard + theme sync, Open Folder focus-or-
+   adopt, restore all windows.
+3. **Routing.** `routing::route`, Finder / Open File routing, single-instance
+   plugin, MCP routing by path and cwd, two-root smoke test, docs.
 
 ## Out of scope
 
