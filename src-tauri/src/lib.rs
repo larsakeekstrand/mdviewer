@@ -13,10 +13,12 @@ mod open_files;
 #[cfg(target_os = "macos")]
 mod pdf_postprocess;
 mod recent;
+mod routing;
 mod search;
 mod tasklist;
 mod tree;
 mod watcher;
+mod windows;
 pub mod xlsx;
 
 use std::path::PathBuf;
