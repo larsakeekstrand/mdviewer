@@ -22,6 +22,7 @@ mod windows;
 pub mod xlsx;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -42,6 +43,12 @@ pub struct AppState {
     /// Serializes task-list write-backs. Held only for the read-verify-write
     /// critical section so two rapid clicks can't interleave reads.
     pub tasklist_lock: Mutex<()>,
+    /// Set on ExitRequested so the per-window teardown that follows ⌘Q can't
+    /// overwrite the quit-time window snapshot.
+    pub quitting: AtomicBool,
+    /// True when main's root is the bare-cwd fallback (no argv root, no saved
+    /// window, no usable last_folder), i.e. a placeholder a file open may repoint.
+    pub main_placeholder: AtomicBool,
 }
 
 /// Run the `--claude-hook` PostToolUse handler and return (never launches the GUI).
@@ -63,6 +70,8 @@ pub fn run(startup: Startup) {
         focus: Mutex::new(routing::FocusOrder::default()),
         early_opens: Mutex::new(Some(Vec::new())),
         tasklist_lock: Mutex::new(()),
+        quitting: AtomicBool::new(false),
+        main_placeholder: AtomicBool::new(false),
     };
 
     let app = tauri::Builder::default()
@@ -122,7 +131,17 @@ pub fn run(startup: Startup) {
             if let Some(root) = &state.tree_root {
                 recent::push(&handle, root);
             }
-            let root = commands::resolve_initial_root(&handle, state.tree_root.as_deref());
+            let saved = recent::restore_windows(recent::load_windows(&handle), |p| p.is_dir());
+            let from_saved = state.tree_root.is_none() && !saved.is_empty();
+            let placeholder = state.tree_root.is_none()
+                && saved.is_empty()
+                && !recent::load_last(&handle).is_some_and(|p| p.is_dir());
+            state.main_placeholder.store(placeholder, Ordering::SeqCst);
+            let root = if from_saved {
+                saved[0].root.clone()
+            } else {
+                commands::resolve_initial_root(&handle, state.tree_root.as_deref())
+            };
             state.windows.lock().unwrap().insert("main", root.clone());
             // AppKit can deliver a cold launch-to-open before setup runs. Those
             // files wait for main's frontend_ready drain like any other early open.
@@ -135,7 +154,27 @@ pub fn run(startup: Startup) {
             state.focus.lock().unwrap().touch("main");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&windows::window_title(&root));
+                if let Some(b) = saved.first().filter(|_| from_saved).and_then(|w| w.bounds) {
+                    let _ = window.set_position(tauri::LogicalPosition::new(b.x, b.y));
+                    let _ = window.set_size(tauri::LogicalSize::new(b.w, b.h));
+                }
                 let _ = window.show();
+            }
+            let main_canonical = state.windows.lock().unwrap().root("main").ok();
+            for w in saved.iter().skip(usize::from(from_saved)) {
+                if Some(&w.root) != main_canonical.as_ref() {
+                    if let Err(e) =
+                        windows::create_project_window(&handle, w.root.clone(), w.bounds)
+                    {
+                        eprintln!("mdviewer: {e}");
+                    }
+                }
+            }
+            if saved.len() > usize::from(from_saved) {
+                // Restored windows are built after main; keep the most recent in front.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_focus();
+                }
             }
             menu::install(&handle)?;
             mcp_server::start(handle.clone());
@@ -159,12 +198,20 @@ pub fn run(startup: Startup) {
         .build(tauri::generate_context!())
         .expect("error while building mdviewer");
 
-    app.run(move |_handle, _event| {
-        #[cfg(target_os = "macos")]
-        {
-            if let tauri::RunEvent::Opened { urls } = _event {
-                open_files::handle_opened(_handle, urls);
+    app.run(move |handle, event| match event {
+        tauri::RunEvent::ExitRequested { .. } => {
+            // ⌘Q destroys windows only after this, so the snapshot sees them all.
+            // Closing the last window also lands here, after it is gone: an
+            // empty snapshot must not overwrite the one on_destroyed just saved.
+            let state = handle.state::<AppState>();
+            state.quitting.store(true, Ordering::SeqCst);
+            let snap = windows::snapshot(handle);
+            if !snap.is_empty() {
+                recent::save_windows(handle, &snap);
             }
         }
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Opened { urls } => open_files::handle_opened(handle, urls),
+        _ => {}
     });
 }

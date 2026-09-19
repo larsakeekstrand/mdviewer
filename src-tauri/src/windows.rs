@@ -264,6 +264,13 @@ pub fn open_folder_in_new_window(app: &tauri::AppHandle, root: PathBuf) {
 pub fn on_destroyed(app: &tauri::AppHandle, label: &str) {
     use tauri::Manager;
     let state = app.state::<crate::AppState>();
+    let is_last = {
+        let reg = state.windows.lock().unwrap();
+        reg.get(label).is_some() && reg.labels().len() == 1
+    };
+    if is_last && !state.quitting.load(std::sync::atomic::Ordering::SeqCst) {
+        crate::recent::save_windows(app, &snapshot(app));
+    }
     let removed = state.windows.lock().unwrap().remove(label);
     if removed.is_none() {
         return;
@@ -272,6 +279,39 @@ pub fn on_destroyed(app: &tauri::AppHandle, label: &str) {
     app.state::<crate::mcp_server::McpPending>()
         .abandon_window(label);
     drop(removed);
+}
+
+/// The open project windows, most recently focused first, so the front window
+/// becomes `main` on relaunch. Locks the registry then focus, never nested.
+pub fn snapshot(app: &tauri::AppHandle) -> Vec<crate::recent::SavedWindow> {
+    use tauri::Manager;
+    let state = app.state::<crate::AppState>();
+    let roots: HashMap<String, PathBuf> =
+        state.windows.lock().unwrap().roots().into_iter().collect();
+    let mut order: Vec<String> = state.focus.lock().unwrap().as_slice().to_vec();
+    for l in roots.keys() {
+        if !order.contains(l) {
+            order.push(l.clone());
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|l| {
+            let root = roots.get(&l)?.clone();
+            let bounds = app.get_webview_window(&l).and_then(|w| {
+                let s = w.scale_factor().ok()?;
+                let p = w.outer_position().ok()?.to_logical::<f64>(s);
+                let z = w.inner_size().ok()?.to_logical::<f64>(s);
+                Some(Bounds {
+                    x: p.x,
+                    y: p.y,
+                    w: z.width,
+                    h: z.height,
+                })
+            });
+            Some(crate::recent::SavedWindow { root, bounds })
+        })
+        .collect()
 }
 
 pub fn window_title(root: &Path) -> String {

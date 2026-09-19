@@ -70,6 +70,13 @@ pub struct Session {
     pub touched: u64,
 }
 
+/// A project window open at quit time: its (canonical) root and logical bounds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedWindow {
+    pub root: PathBuf,
+    pub bounds: Option<crate::windows::Bounds>,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Store {
     folders: Vec<PathBuf>,
@@ -88,6 +95,9 @@ struct Store {
     pdf_export: PdfSettings,
     #[serde(default)]
     sessions: BTreeMap<PathBuf, Session>,
+    /// Project windows open at the last quit, most recently focused first.
+    #[serde(default)]
+    windows: Vec<SavedWindow>,
 }
 
 impl Store {
@@ -251,6 +261,30 @@ pub fn save_pdf_settings(app: &AppHandle, settings: &PdfSettings) {
     write_store(app, &store);
 }
 
+pub fn load_windows(app: &AppHandle) -> Vec<SavedWindow> {
+    load_store(app).windows
+}
+
+/// Persists the open-window snapshot, preserving every other field.
+pub fn save_windows(app: &AppHandle, windows: &[SavedWindow]) {
+    let mut store = load_store(app);
+    store.windows = windows.to_vec();
+    write_store(app, &store);
+}
+
+/// Keeps saved windows whose root is still a directory, dropping later
+/// duplicates of the same root. Order is preserved. Pure.
+pub fn restore_windows(
+    saved: Vec<SavedWindow>,
+    is_dir: impl Fn(&Path) -> bool,
+) -> Vec<SavedWindow> {
+    let mut seen = std::collections::HashSet::new();
+    saved
+        .into_iter()
+        .filter(|w| is_dir(&w.root) && seen.insert(w.root.clone()))
+        .collect()
+}
+
 /// Filters `tabs` to the paths satisfying `exists` (order preserved) and remaps
 /// `active` by tracking the active path: the result's active index is that
 /// path's position in the filtered list, or `None` if the active file is gone
@@ -280,6 +314,24 @@ pub fn display(p: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_windows_drops_missing_roots_and_dedupes() {
+        let w = |r: &str| SavedWindow {
+            root: PathBuf::from(r),
+            bounds: None,
+        };
+        let kept = restore_windows(vec![w("/a"), w("/gone"), w("/b"), w("/a")], |p| {
+            p != Path::new("/gone")
+        });
+        assert_eq!(kept, vec![w("/a"), w("/b")]);
+    }
+
+    #[test]
+    fn store_without_windows_field_loads() {
+        let s: Store = serde_json::from_str(r#"{"folders":[]}"#).unwrap();
+        assert!(s.windows.is_empty());
+    }
 
     #[test]
     fn push_folder_dedups_and_moves_to_front() {
