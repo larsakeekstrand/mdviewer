@@ -110,6 +110,38 @@ fn dispatch_launch(app: &tauri::AppHandle, target: launch::LaunchTarget) {
     }
 }
 
+/// The single-instance plugin's macOS socket. Must match the plugin's
+/// `/tmp/<identifier with . and - → _>_si.sock` naming (2.4.x, no `semver`
+/// feature) for bundle id `com.mdviewer.app`.
+#[cfg(target_os = "macos")]
+const SINGLE_INSTANCE_SOCKET: &str = "/tmp/com_mdviewer_app_si.sock";
+
+/// A socket at the shared /tmp path that another user created would capture
+/// every launch (and its argv/cwd); sticky /tmp stops us from removing it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn socket_owned_by_other(socket_uid: Option<u32>, my_uid: u32) -> bool {
+    socket_uid.is_some_and(|u| u != my_uid)
+}
+
+#[cfg(target_os = "macos")]
+fn single_instance_allowed() -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // macOS's $TMPDIR is a per-user 0700 directory owned by the current user,
+    // which gives us our uid without a libc dependency.
+    let Ok(me) = std::fs::metadata(std::env::temp_dir()) else {
+        return true;
+    };
+    let socket_uid = std::fs::symlink_metadata(SINGLE_INSTANCE_SOCKET)
+        .ok()
+        .map(|m| m.uid());
+    !socket_owned_by_other(socket_uid, me.uid())
+}
+
+#[cfg(windows)]
+fn single_instance_allowed() -> bool {
+    true
+}
+
 pub fn run(startup: Startup) {
     let state = AppState {
         tree_root: startup.tree_root,
@@ -125,9 +157,14 @@ pub fn run(startup: Startup) {
 
     let builder = tauri::Builder::default();
     #[cfg(any(target_os = "macos", windows))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-        single_instance_open(app, argv, cwd);
-    }));
+    let builder = if single_instance_allowed() {
+        builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            single_instance_open(app, argv, cwd);
+        }))
+    } else {
+        eprintln!("mdviewer: single-instance socket owned by another user; running without single-instance");
+        builder
+    };
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -280,4 +317,16 @@ pub fn run(startup: Startup) {
         tauri::RunEvent::Opened { urls } => open_files::handle_opened(handle, urls),
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_instance_socket_ownership() {
+        assert!(!socket_owned_by_other(None, 501));
+        assert!(!socket_owned_by_other(Some(501), 501));
+        assert!(socket_owned_by_other(Some(502), 501));
+    }
 }

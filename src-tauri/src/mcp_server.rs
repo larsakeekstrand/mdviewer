@@ -251,7 +251,12 @@ pub enum Target {
     Window(String),
     NewWindow(PathBuf),
     NoWindow,
+    /// Refused outright (never opens or retargets a window).
+    Refuse(String),
 }
+
+pub const PDF_OUTSIDE_WORKSPACE: &str =
+    "source is outside every open workspace; open its folder in MDViewer first";
 
 /// Pure routing for one tool call. Path tools go to the window whose root
 /// contains the path (or a new window at the path's parent — the IO caller
@@ -320,6 +325,11 @@ fn path_target(req: &GuiRequest, roots: &[(String, PathBuf)], mru: &[String]) ->
     };
     match route(Path::new(p), roots, mru, parent_of) {
         Route::Window(l) => Target::Window(l),
+        // generate_pdf writes a file, so its containment root must be one the
+        // user opened; a root derived from the caller's own path is no boundary.
+        Route::NewWindow(_) if req.tool == "generate_pdf" => {
+            Target::Refuse(PDF_OUTSIDE_WORKSPACE.to_string())
+        }
         Route::NewWindow(r) => Target::NewWindow(r),
     }
 }
@@ -361,6 +371,7 @@ fn prepare_request(
         state.main_placeholder.load(Ordering::SeqCst) && roots.iter().any(|(l, _)| l == "main");
     let label = match pick_target_for(req, &roots, &mru, placeholder) {
         Target::Window(l) => l,
+        Target::Refuse(e) => return Err(e),
         Target::NoWindow => {
             // A path tool lands here only without a usable path: report that
             // instead of "starting", which the proxy would retry for 15 s.
@@ -624,6 +635,60 @@ mod tests {
                 true
             ),
             Target::Window("main".into())
+        );
+    }
+
+    fn pdf_req(path: &str) -> GuiRequest {
+        GuiRequest {
+            id: 1,
+            tool: "generate_pdf".into(),
+            args: serde_json::json!({"path": path, "output": "/x/out.pdf"}),
+            cwd: None,
+        }
+    }
+
+    #[test]
+    fn generate_pdf_outside_every_root_is_refused() {
+        assert_eq!(
+            pick_target_for(&pdf_req("/c/p.md"), &r2(), &[], false),
+            Target::Refuse(PDF_OUTSIDE_WORKSPACE.to_string())
+        );
+        assert_eq!(
+            pick_target(&pdf_req("/c/p.md"), &r2(), &[]),
+            Target::Refuse(PDF_OUTSIDE_WORKSPACE.to_string())
+        );
+    }
+
+    #[test]
+    fn generate_pdf_never_retargets_a_placeholder_main() {
+        let roots = vec![
+            ("main".to_string(), std::path::PathBuf::from("/")),
+            ("project-1".to_string(), std::path::PathBuf::from("/b")),
+        ];
+        assert_eq!(
+            pick_target_for(&pdf_req("/z/y/x.md"), &roots, &["main".into()], true),
+            Target::Refuse(PDF_OUTSIDE_WORKSPACE.to_string())
+        );
+    }
+
+    #[test]
+    fn generate_pdf_inside_an_open_root_routes_to_that_window() {
+        assert_eq!(
+            pick_target_for(&pdf_req("/b/x.md"), &r2(), &[], false),
+            Target::Window("project-1".into())
+        );
+    }
+
+    #[test]
+    fn open_document_outside_every_root_still_opens_a_window() {
+        assert_eq!(
+            pick_target_for(
+                &req("open_document", Some("/c/p.md"), None),
+                &r2(),
+                &[],
+                false
+            ),
+            Target::NewWindow("/c".into())
         );
     }
 
