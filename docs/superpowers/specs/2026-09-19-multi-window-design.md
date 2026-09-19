@@ -1,0 +1,350 @@
+# Multi-window: one project per window
+
+**Date:** 2026-09-19
+**Status:** Approved (brainstorming) — pending implementation plan
+
+## Goal
+
+Let MDViewer show several projects at once, one project (tree root) per window,
+the way VS Code and JetBrains do.
+
+The driving use case is running several Claude Code sessions in different repos
+in parallel. Each session's plans, `open_document` calls and review requests
+should land in *that repo's* window, not in whichever window happens to be in
+front, and never in a window whose tree can't show the file.
+
+Today the app is single-window by construction:
+
+- `AppState` holds one `current_root`, one active-file `WatcherSlot`, one
+  `TreeWatcherSlot`, and one `PendingOpens` ready flag.
+- Every backend → frontend event is a broadcast `app.emit(...)` (`watcher.rs`,
+  `menu.rs`, `mcp_server.rs`, `open_files.rs`). A second window would react to
+  the first window's `file-changed`, menu actions and MCP calls.
+- The PDF-export window talks to "the" preview window via frontend broadcast
+  `emit(...)` (`pdf-export-request-preview` / `-run` / `-done`).
+- `recent.json` stores one `last_folder` and one tab session.
+- Windows has no single-instance handling: a second launch (CLI, or the Claude
+  hook's re-spawn) is a second process that loses the MCP socket race. On macOS
+  the CLI symlink runs the binary directly, so `mdviewer file.md` from a
+  terminal also starts a second GUI process today.
+
+## Decisions (locked during brainstorming)
+
+| Question | Decision |
+|---|---|
+| Model | **One process, many webview windows**, per-window state keyed by window label. Not one process per window (the MCP socket and updater must stay single; cross-process routing would need a second IPC layer). |
+| Routing an incoming file | **Longest containing root wins**; ties (same root in two windows) → most-recently-focused. |
+| File with no containing window | **New window** rooted at the file's git repo root, else its parent folder. |
+| Open Folder / Open Recent | **Replaces the focused window's root** (VS Code default). If another window already shows that root, focus it instead. |
+| New window | **File ▸ New Window (⌘⇧N)** → folder picker; no window if cancelled. No rootless windows. |
+| Relaunch | **Restore all windows** open at quit (root + bounds), each with its root's tabs. |
+| Tab memory | **Per root**, not per window, so a root swap or window close keeps the project's tabs. |
+| Menu target | **Front of the MRU focus list.** |
+| `get_viewer_state` | Routed by the **MCP proxy's cwd**, falling back to MRU. |
+| Second launches | **`tauri-plugin-single-instance`** forwards argv to the running process on both platforms. |
+| Delivery | **Four phases**, each independently mergeable (see below). |
+
+## Architecture
+
+### Backend state
+
+```rust
+pub struct WindowState {
+    pub root: PathBuf,                 // canonical; every project window has one
+    pub watcher: WatcherSlot,          // active-file watcher
+    pub tree_watcher: TreeWatcherSlot,
+    pub ready: bool,                   // frontend_ready called
+    pub pending_files: Vec<PathBuf>,   // opens routed here before ready
+}
+
+pub struct AppState {
+    pub windows: Mutex<HashMap<String, WindowState>>, // key = window label
+    pub focus: Mutex<FocusOrder>,                      // MRU of project-window labels
+    pub startup_queue: Mutex<Vec<Vec<String>>>,        // single-instance argv before setup completes
+    pub tasklist_lock: Mutex<()>,                      // unchanged, process-wide
+    // tree_root / initial_file stay as launch inputs only
+}
+```
+
+`current_root`, `watcher`, `tree_watcher` and `opens` leave `AppState`; their
+per-window equivalents live in `WindowState`.
+
+Project window labels: `main` (the `tauri.conf.json` window) and `project-<n>`
+(monotonic counter). Helper windows (`preferences`, `pdf-export`,
+`claude-integration`) are never entered in `windows` or `focus`.
+
+### Commands learn their window from Tauri
+
+Commands that act on per-window state take `window: tauri::WebviewWindow` and
+look up `windows[window.label()]`. The label comes from Tauri, not from a
+frontend argument, so a page cannot claim to be another window. Affected:
+`get_initial_state`, `open_file`, `watch_tree`, `frontend_ready`,
+`remember_folder`, `save_session`, `create_file`, `create_folder`,
+`rename_path`, `duplicate_file`, `delete_to_trash`, `toggle_task`, `save_file`,
+`export_pdf` (webview target), `mcp_respond`, `mcp_review_result`.
+`git_status` and `search_in_folder` take an explicit path argument and are not
+root-confined today; they stay as they are (out of scope here).
+
+A missing entry (command from a helper window, or a race with close) is an
+`Err("no project window")`, never a fallback to another window's root.
+
+### Routing (`src-tauri/src/routing.rs`, pure, unit-tested)
+
+```rust
+pub enum Route { Window(String), NewWindow(PathBuf) }
+
+pub fn route(
+    path: &Path,
+    roots: &[(String, PathBuf)],   // (label, canonical root)
+    mru: &[String],
+    fallback_root: impl Fn(&Path) -> PathBuf, // git root or parent
+) -> Route
+```
+
+- Candidates are windows whose root contains `path` (component-wise
+  `starts_with` on canonical paths, same semantics as `fs_ops::within_root`).
+- The longest root wins, so `/repo/docs` beats `/repo`.
+- Equal roots: earliest in `mru` wins; a label absent from `mru` ranks last.
+- No candidate → `NewWindow(fallback_root(path))`. The git-root lookup is the
+  IO wrapper around the pure core; the pure function takes it as a closure.
+
+`FocusOrder` (same module): `touch(label)`, `remove(label)`, `front()`.
+Updated from `WindowEvent::Focused(true)` and `Destroyed`.
+
+A single IO entry point, `routing::deliver(app, path, line: Option<u32>)`,
+resolves the route, creates the window if needed, and either emits
+`open-file` via `emit_to(label, …)` (if `ready`) or pushes onto that window's
+`pending_files`. Finder opens, single-instance argv and the hook all use it.
+MCP uses `route` directly, because it needs the label for `McpPending`.
+
+### Events
+
+| Event | Today | After |
+|---|---|---|
+| `file-changed`, `tree-changed` | broadcast | `emit_to(label)` of the watcher's window |
+| menu `edit-action`, `export`, `open-file`, `open-folder`, `menu-install-cli` | broadcast | `emit_to(focus.front())` |
+| `mcp-*` | broadcast | `emit_to(routed label)` |
+| `open-file` (Finder / single-instance / hook) | broadcast | `routing::deliver` |
+| `menu-check-updates`, `channel-changed`, `integration-changed` | broadcast | unchanged (app-wide) |
+
+The watcher closures capture their window's label when `open_file` /
+`watch_tree` install them.
+
+### MCP
+
+- The proxy (`mcp.rs::run_proxy`) adds `"cwd": <proxy cwd>` to every
+  `GuiRequest`. Paths are already absolutized against it.
+- `open_document`, `request_review`, `generate_pdf` route by their `path`
+  argument; a `NewWindow` route creates the window and waits for it (the
+  request is queued in the new window's `pending` MCP handoff until
+  `frontend_ready`). `get_viewer_state` routes by `cwd` (`route(cwd, …)`,
+  but a `NewWindow` result falls back to `focus.front()` instead — asking for
+  state must not open a window).
+- `validate` receives the **routed window's** root; `generate_pdf`'s
+  source/output containment is checked against it.
+- `McpPending` stays global but each entry records its target label.
+  `mcp_respond` / `mcp_review_result` reject an answer whose calling window
+  label doesn't match.
+- `request_review` focuses the routed window, not `main`.
+- The "one review at a time" gate (`reviewBusy`) becomes per window. Two
+  Claude sessions in two repos can each have a review open.
+- `WindowEvent::Destroyed` resolves that window's pending entries: a review →
+  `{"declined": true}` (a success, as for tab close today); others → error
+  `"MDViewer window closed"`.
+
+### Single instance
+
+`tauri-plugin-single-instance` is registered first in the builder. Its callback
+receives `(argv, cwd)`. Argv goes through the same resolution as `main.rs`'s
+`resolve_args` (factored into a shared pure-ish `resolve_launch_path(raw, cwd)`),
+then:
+
+- a directory → focus the window with that exact root, else a new window;
+- a file → `routing::deliver`.
+
+`--claude-hook` / `--mcp` invocations never reach the plugin: `main.rs`
+dispatches them before `mdviewer_lib::run`. Argv that arrives before `setup`
+completes waits in `startup_queue` and is drained at the end of `setup`.
+
+With the plugin in place, `claude_hook::open_in_mdviewer` keeps its current
+launch commands (`open -a` on macOS, exe re-spawn on Windows); the re-spawned
+process forwards and exits.
+
+## Frontend
+
+Each window loads its own `index.html` / `app.js`, so the tab model,
+`renderCache`, `domCache`, review state and editor are already per window.
+Changes:
+
+- `get_initial_state` returns this window's root and that root's restored
+  tabs, and any `initial_file` routed to it.
+- **Window title** `"<root folder name> — MDViewer"` (pure helper
+  `windowTitle(root)` in a new `ui/windows.js`, unit-tested), set on init and
+  on every root change.
+- **Open Folder / Open Recent** in the focused window: save the outgoing
+  root's session, then set the new root. If another window already has that
+  root, the backend focuses it and the current window is left unchanged
+  (`remember_folder` returns `{focused: label}` instead of adopting the root; decision in pure
+  `routing::open_folder_target`).
+- **Close guard:** `onCloseRequested` → if any tab is dirty, the existing
+  discard prompt; cancel → `event.preventDefault()`. Before closing, save the
+  session.
+- **Helper windows carry an owner.** `open_pdf_export_window` and
+  `open_integration_window` take the calling project window's label, and the
+  helper URL gets `?owner=<label>`. `pdf-export.js` switches its `emit` calls to
+  `emitTo(owner, …)`, and `app.js` replies with `emitTo("pdf-export", …)`.
+  The integration window's `integration_status` / `install_*` commands take
+  `owner` and resolve that window's root. The backend checks that `owner`
+  names an existing project window.
+
+## Window lifecycle
+
+- **New Window (⌘⇧N)**, `menu.rs`: folder picker → `window::create(app, root,
+  bounds: None)`. If a window already has that exact root, focus it.
+- **`window::create`**: build the `WebviewWindow` with label `project-<n>`,
+  cascade 24 px from the focused window (or saved bounds), then insert its
+  `WindowState`. Insert only after a successful build, so a failed build
+  leaves no state.
+- **`Destroyed`**: stop watchers (drop the slots), resolve pending MCP entries,
+  remove from `windows` and `focus`. If it was the last project window, write
+  the `windows` snapshot first (see Persistence) and let the app exit as it
+  does today.
+- **macOS app reactivation with no windows** isn't reachable today (closing
+  the last window quits). That stays as it is.
+
+## Menu
+
+- The app-global menu's `on_menu_event` sends window-scoped actions to
+  `focus.front()`. On Windows, each window's menu bar gets the same handler;
+  clicking a menu focuses its window first, so MRU is correct there too.
+- New item **File ▸ New Window ⌘⇧N**.
+- The macOS **Window** submenu (predefined items) lists open windows
+  automatically once titles are set.
+- **Actions** keeps its name (macOS `Edit`-submenu auto-insert trap).
+
+## Persistence (`recent.json`)
+
+```jsonc
+{
+  "folders": ["..."],                           // Open Recent — unchanged
+  "sessions": {                                 // per root, LRU-capped at 30
+    "/abs/root": { "tabs": ["..."], "active": 1, "touched": 1758290000 }
+  },
+  "windows": [                                  // snapshot at quit
+    { "root": "/abs/root", "bounds": { "x": 0, "y": 0, "w": 1200, "h": 800 } }
+  ],
+  "last_folder": "/abs/root",                   // kept: argv-less fallback
+  "channel": "stable", "pdf": { }               // unchanged
+}
+```
+
+- `save_session` writes into `sessions[window root]`. Root swap, window close
+  and quit all save first.
+- `windows` is written on `RunEvent::ExitRequested` (⌘Q: snapshot every
+  project window) and on the last project window's `Destroyed`. Closing a
+  non-last window does not rewrite it, so relaunch restores what was open at
+  quit.
+- **Restore on launch** (`recent::restore_windows`, pure): drop entries whose
+  root is no longer a directory; the first survivor reuses `main`, the rest
+  become `project-*`; bounds are clamped onscreen by Tauri. If none survive,
+  fall back to today's argv → `last_folder` → cwd.
+- **Argv plus saved windows:** restore the saved windows, then deliver the argv
+  path through routing (so `mdviewer ~/repoB/plan.md` with repoB already
+  restored lands in repoB's window).
+- **Migration:** a legacy store with `last_folder` + top-level `tabs`/`active`
+  becomes `sessions[last_folder]` + `windows: [{root: last_folder}]`. Serde
+  defaults keep old files loading; covered by `deserializes_legacy_store_*`
+  style tests.
+
+## Error handling
+
+| Situation | Behavior |
+|---|---|
+| Routed window not ready yet | Buffer in its `pending_files` / pending MCP handoff; drained by its `frontend_ready` under the same lock that sets `ready`. |
+| Target window closes mid-MCP-call | `Destroyed` resolves pending: review → `{"declined": true}`; others → error. |
+| Window creation fails (root vanished) | Error to the caller (MCP error; hook stays silent as today); no state inserted. |
+| Command from a label with no `WindowState` | `Err("no project window")`; never borrows another window's root. |
+| Saved window root missing at launch | Dropped from the restore list. |
+| Single-instance argv before setup | Queued in `startup_queue`, drained at end of `setup`. |
+
+## Security
+
+- **Containment is per window.** `within_root` checks against the calling
+  window's root, identified by Tauri's label. Project A's document cannot use
+  file ops, task toggles, `generate_pdf` output or the hook/MCP install to
+  reach project B's tree.
+- **Routing doesn't widen trust.** Auto-creating a window rooted at a file's
+  git root / parent is equivalent to the user opening that folder. `open_path`,
+  `UNSAFE_OPEN_EXTS` and the exec-bit refusal are unchanged.
+- **Capabilities:** `default.json` `windows` becomes
+  `["main", "project-*", "preferences", "claude-integration", "pdf-export"]`.
+  `project-*` gets exactly what `main` has; helper windows stay explicitly
+  named.
+- **Helper-window `owner`** is checked to be an existing project window before
+  it is used, and the backend never trusts it as a *root*, only as a lookup
+  key.
+- **Single-instance argv** is untrusted input: it is canonicalized and
+  stat-checked exactly like a cold launch.
+- **New IPC surface:** `new_window` (menu-driven; may be a menu-only Rust path
+  rather than a command) and the `owner` parameter on `integration_status`,
+  `install_claude_hook`, `install_mcp_server`. Every per-window command
+  gains an implicit `WebviewWindow` argument; none gains a path-bearing
+  argument.
+- A `security-reviewer` pass is required before merging phase 1 (label →
+  state scoping, capability glob) and phase 3 (routing, single-instance argv,
+  MCP cwd).
+
+## Cross-platform
+
+- **macOS:** Finder opens (`RunEvent::Opened`) go through `routing::deliver`
+  instead of broadcast. The CLI symlink path now forwards to the running
+  instance via single-instance.
+- **Windows:** single-instance fixes the multi-process behavior; argv opens
+  and the hook's re-spawn forward to the running process. Per-window menu bars
+  use the MRU rule.
+- PDF export remains macOS-only; `export_pdf` targets the calling window's
+  webview instead of `main`.
+
+## Testing
+
+- **Rust unit (pure):** `routing::route` (longest match, nested roots, tie →
+  MRU, label missing from MRU, no match → fallback, Windows-style paths behind
+  `cfg`), `FocusOrder`, `open_folder_target`, `resolve_launch_path`,
+  `recent` migration, sessions LRU cap, `restore_windows` filtering,
+  `McpPending` label mismatch rejection and resolve-on-destroy.
+- **JS `node --test`:** `windowTitle`, owner parsing from the helper-window URL.
+- **Smoke:** extend `scripts/smoke-test.sh` to open two roots and verify over
+  the MCP socket that `open_document` for a file in root B, and
+  `get_viewer_state` with cwd B, answer from B's window.
+- **Manual GUI check before merge** (visual regressions escape automated
+  tests): two windows side by side; a menu action hits only the focused
+  window; live reload in A doesn't touch B; PDF export from B previews B's
+  document; ⌘Q + relaunch restores both windows with their tabs and bounds;
+  dark mode in both.
+- **Gate per task:** `cargo fmt --check`, `cargo clippy --all-targets -- -D
+  warnings`, `cargo test`, `node --test ui/`; `cargo build` after any `ui/*`
+  change (Tauri bundles `frontendDist` at compile time).
+
+## Delivery phases
+
+Each phase is mergeable on its own and leaves the app shippable.
+
+1. **Per-window state, no behavior change.** `WindowState` map, label-scoped
+   commands, `emit_to` everywhere, owner-addressed helper windows, per-window
+   `McpPending` labels. Acceptance: with one window, behavior is identical to
+   today. Carries most of the regression risk.
+2. **New Window, MRU menu routing, titles, close guard, cross-window theme
+   sync.**
+3. **Path routing.** `routing.rs`, Finder/hook/MCP routing, proxy `cwd`,
+   single-instance plugin, per-window `reviewBusy`.
+4. **Persistence.** Per-root sessions, restore all windows, migration.
+
+## Out of scope
+
+- Multi-root workspaces (several roots in one window).
+- Dragging tabs between windows.
+- Per-window theme. Theme stays one global localStorage preference. Nothing
+  listens for cross-window changes today, so phase 2 adds a `storage` event
+  listener in `app.js`: toggling ☾/☀ in one window calls `applyTheme` in the
+  others (drops their theme-dependent caches exactly like a local toggle).
+- A rootless "empty" window.
