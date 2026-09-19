@@ -797,6 +797,7 @@ function rememberFolder(path) {
 
 async function setTreeRoot(path) {
   if (isSearchModeOpen()) exitSearchMode();
+  persistSession();
   treeRoot = path;
   treeTitle.textContent = basename(path) || path;
   treeTitle.title = path;

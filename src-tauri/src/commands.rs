@@ -107,7 +107,7 @@ pub fn get_initial_state(
     } else {
         None
     };
-    let (saved_tabs, saved_active) = recent::load_session(&app);
+    let (saved_tabs, saved_active) = recent::load_session(&app, &tree_root);
     let (tabs, active_tab) = recent::restore_session(saved_tabs, saved_active, |p| p.is_file());
     InitialState {
         tree_root: tree_root.to_string_lossy().into_owned(),
@@ -764,9 +764,17 @@ pub fn remember_folder(
 }
 
 #[tauri::command]
-pub fn save_session(app: AppHandle, tabs: Vec<String>, active: Option<usize>) {
+pub fn save_session(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    tabs: Vec<String>,
+    active: Option<usize>,
+) -> Result<(), String> {
+    let root = window_root(&state, &window)?;
     let paths: Vec<PathBuf> = tabs.into_iter().map(PathBuf::from).collect();
-    recent::save_session(&app, &paths, active);
+    recent::save_session(&app, &root, &paths, active);
+    Ok(())
 }
 
 /// Where the CLI symlink lives. `/usr/local/bin` is the first entry in macOS's

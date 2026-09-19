@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 const MAX_RECENT: usize = 10;
+const MAX_SESSIONS: usize = 30;
 const FILE_NAME: &str = "recent.json";
 
 /// Which release stream the auto-updater follows. Persisted in `recent.json`;
@@ -57,19 +59,35 @@ impl Default for PdfSettings {
     }
 }
 
+/// A single window's tab session for a project root. `touched` is a Unix
+/// timestamp (seconds) used only to pick eviction order when the number of
+/// stored sessions exceeds `MAX_SESSIONS`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Session {
+    pub tabs: Vec<PathBuf>,
+    pub active: Option<usize>,
+    #[serde(default)]
+    pub touched: u64,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Store {
     folders: Vec<PathBuf>,
     #[serde(default)]
     last_folder: Option<PathBuf>,
-    #[serde(default)]
+    /// Legacy pre-multi-window session (single tab list next to `last_folder`).
+    /// Read-only: `migrate_legacy` folds it into `sessions` on load and it is
+    /// never written again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     open_tabs: Vec<PathBuf>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     active_tab: Option<usize>,
     #[serde(default)]
     channel: UpdateChannel,
     #[serde(default)]
     pdf_export: PdfSettings,
+    #[serde(default)]
+    sessions: BTreeMap<PathBuf, Session>,
 }
 
 impl Store {
@@ -79,6 +97,38 @@ impl Store {
         self.folders.retain(|p| p != &canonical);
         self.folders.insert(0, canonical);
         self.folders.truncate(MAX_RECENT);
+    }
+
+    /// Pre-multi-window stores kept one tab session next to last_folder.
+    fn migrate_legacy(&mut self) {
+        let tabs = std::mem::take(&mut self.open_tabs);
+        let active = self.active_tab.take();
+        if tabs.is_empty() {
+            return;
+        }
+        if let Some(root) = self.last_folder.clone() {
+            self.sessions.entry(root).or_insert(Session {
+                tabs,
+                active,
+                touched: 0,
+            });
+        }
+    }
+}
+
+/// Evicts the least-recently-touched sessions until `map.len() <= max`.
+fn cap_sessions(map: &mut BTreeMap<PathBuf, Session>, max: usize) {
+    while map.len() > max {
+        let oldest = map
+            .iter()
+            .min_by_key(|(_, s)| s.touched)
+            .map(|(k, _)| k.clone());
+        match oldest {
+            Some(k) => {
+                map.remove(&k);
+            }
+            None => break,
+        }
     }
 }
 
@@ -99,7 +149,9 @@ fn load_store(app: &AppHandle) -> Store {
     let Ok(bytes) = std::fs::read(&path) else {
         return Store::default();
     };
-    serde_json::from_slice(&bytes).unwrap_or_default()
+    let mut store: Store = serde_json::from_slice(&bytes).unwrap_or_default();
+    store.migrate_legacy();
+    store
 }
 
 fn write_store(app: &AppHandle, store: &Store) {
@@ -145,19 +197,36 @@ pub fn save_last(app: &AppHandle, folder: &Path) {
     write_store(app, &store);
 }
 
-/// Returns the persisted open-tab paths and the active index, unfiltered.
-pub fn load_session(app: &AppHandle) -> (Vec<PathBuf>, Option<usize>) {
+/// Returns the persisted open-tab paths and the active index for `root`,
+/// unfiltered. `root` is canonicalized before lookup so it matches however
+/// `save_session` stored it.
+pub fn load_session(app: &AppHandle, root: &Path) -> (Vec<PathBuf>, Option<usize>) {
     let store = load_store(app);
-    (store.open_tabs, store.active_tab)
+    store
+        .sessions
+        .get(&canonical_or_keep(root))
+        .map(|s| (s.tabs.clone(), s.active))
+        .unwrap_or_default()
 }
 
-/// Persists the open-tab paths and active index, preserving `folders` and
-/// `last_folder`. Paths are stored as-is (NOT canonicalized) so they keep
-/// string-identity with the frontend's live tab model.
-pub fn save_session(app: &AppHandle, tabs: &[PathBuf], active: Option<usize>) {
+/// Persists the open-tab paths and active index for `root`, preserving every
+/// other root's session and every other store field. Evicts the
+/// least-recently-touched sessions beyond `MAX_SESSIONS`.
+pub fn save_session(app: &AppHandle, root: &Path, tabs: &[PathBuf], active: Option<usize>) {
     let mut store = load_store(app);
-    store.open_tabs = tabs.to_vec();
-    store.active_tab = active;
+    let touched = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    store.sessions.insert(
+        canonical_or_keep(root),
+        Session {
+            tabs: tabs.to_vec(),
+            active,
+            touched,
+        },
+    );
+    cap_sessions(&mut store.sessions, MAX_SESSIONS);
     write_store(app, &store);
 }
 
@@ -261,18 +330,25 @@ mod tests {
 
     #[test]
     fn store_round_trips_session_fields() {
+        let mut sessions = BTreeMap::new();
+        sessions.insert(
+            PathBuf::from("/p"),
+            Session {
+                tabs: vec![PathBuf::from("/a"), PathBuf::from("/b")],
+                active: Some(1),
+                touched: 42,
+            },
+        );
         let s = Store {
-            open_tabs: vec![PathBuf::from("/a"), PathBuf::from("/b")],
-            active_tab: Some(1),
+            sessions,
             ..Default::default()
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Store = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            back.open_tabs,
-            vec![PathBuf::from("/a"), PathBuf::from("/b")]
-        );
-        assert_eq!(back.active_tab, Some(1));
+        let session = &back.sessions[Path::new("/p")];
+        assert_eq!(session.tabs, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(session.active, Some(1));
+        assert_eq!(session.touched, 42);
     }
 
     #[test]
@@ -280,6 +356,57 @@ mod tests {
         let back: Store = serde_json::from_str(r#"{"folders":["/a"],"last_folder":"/x"}"#).unwrap();
         assert!(back.open_tabs.is_empty());
         assert_eq!(back.active_tab, None);
+        assert!(back.sessions.is_empty());
+    }
+
+    #[test]
+    fn legacy_session_migrates_under_last_folder() {
+        let mut s: Store = serde_json::from_str(
+            r#"{"folders":[],"last_folder":"/p","open_tabs":["/p/a.md"],"active_tab":0}"#,
+        )
+        .unwrap();
+        s.migrate_legacy();
+        assert_eq!(
+            s.sessions[Path::new("/p")].tabs,
+            vec![PathBuf::from("/p/a.md")]
+        );
+        assert_eq!(s.sessions[Path::new("/p")].active, Some(0));
+        assert!(s.open_tabs.is_empty());
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("open_tabs"));
+    }
+
+    #[test]
+    fn legacy_session_without_last_folder_is_dropped() {
+        let mut s: Store = serde_json::from_str(r#"{"folders":[],"open_tabs":["/x.md"]}"#).unwrap();
+        s.migrate_legacy();
+        assert!(s.sessions.is_empty());
+        assert!(s.open_tabs.is_empty());
+    }
+
+    #[test]
+    fn cap_sessions_evicts_least_recently_touched() {
+        let mut m = BTreeMap::new();
+        for i in 0..5u64 {
+            m.insert(
+                PathBuf::from(format!("/r{i}")),
+                Session {
+                    tabs: vec![],
+                    active: None,
+                    touched: i,
+                },
+            );
+        }
+        cap_sessions(&mut m, 3);
+        let keys: Vec<_> = m.keys().cloned().collect();
+        assert_eq!(
+            keys,
+            vec![
+                PathBuf::from("/r2"),
+                PathBuf::from("/r3"),
+                PathBuf::from("/r4")
+            ]
+        );
     }
 
     #[test]
