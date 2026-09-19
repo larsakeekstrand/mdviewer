@@ -1056,13 +1056,14 @@ fn read_json_file(path: &Path) -> Option<serde_json::Value> {
 /// the pending map knows — the webview can't fabricate responses.
 #[tauri::command]
 pub fn mcp_respond(
+    window: tauri::WebviewWindow,
     pending: State<'_, crate::mcp_server::McpPending>,
     request_id: u64,
     text: String,
     is_error: bool,
 ) -> Result<(), String> {
     let reply = if is_error { Err(text) } else { Ok(text) };
-    pending.resolve(request_id, reply)
+    pending.resolve(request_id, window.label(), reply)
 }
 
 /// Finish or decline an MCP-requested review. `review: None` means declined —
@@ -1071,11 +1072,16 @@ pub fn mcp_respond(
 /// clipboard fallback.
 #[tauri::command]
 pub fn mcp_review_result(
+    window: tauri::WebviewWindow,
     pending: State<'_, crate::mcp_server::McpPending>,
     request_id: u64,
     review: Option<String>,
 ) -> Result<(), String> {
-    pending.resolve(request_id, Ok(crate::mcp::review_reply_text(review)))
+    pending.resolve(
+        request_id,
+        window.label(),
+        Ok(crate::mcp::review_reply_text(review)),
+    )
 }
 
 #[tauri::command]

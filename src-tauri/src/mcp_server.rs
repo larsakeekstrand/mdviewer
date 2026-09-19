@@ -21,22 +21,45 @@ pub type Reply = Result<String, String>;
 /// Reply plus an ack channel the connection thread reports its write on.
 type Handoff = (Reply, mpsc::Sender<std::io::Result<()>>);
 
+/// How long `resolve` waits for the connection thread's socket-write ack
+/// before reporting "did not acknowledge". Shortened under test so the
+/// rejection-path tests (which never spawn an ack thread) stay fast.
+#[cfg(not(test))]
+const ACK_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const ACK_TIMEOUT: Duration = Duration::from_millis(200);
+
+struct Entry {
+    label: String,
+    tool: String,
+    tx: mpsc::Sender<Handoff>,
+}
+
 /// In-flight MCP requests, keyed by a GUI-generated id (NOT the proxy's
 /// JSON-RPC id, which can collide across connections). Managed Tauri state.
 #[derive(Default)]
 pub struct McpPending {
     next_id: AtomicU64,
-    waiting: Mutex<HashMap<u64, mpsc::Sender<Handoff>>>,
+    waiting: Mutex<HashMap<u64, Entry>>,
 }
 
 // Used by the socket listener (Task 6) and commands (Task 7).
 impl McpPending {
-    /// Register a new in-flight request. The connection thread blocks on the
-    /// returned receiver until a command resolves it.
-    pub fn register(&self) -> (u64, mpsc::Receiver<Handoff>) {
+    /// Register a new in-flight request, tagged with the window it was sent
+    /// to and the tool it's for (the latter drives `abandon_window`'s
+    /// review-vs-error split). The connection thread blocks on the returned
+    /// receiver until a command resolves it.
+    pub fn register(&self, label: &str, tool: &str) -> (u64, mpsc::Receiver<Handoff>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = mpsc::channel();
-        self.waiting.lock().unwrap().insert(id, tx);
+        self.waiting.lock().unwrap().insert(
+            id,
+            Entry {
+                label: label.to_string(),
+                tool: tool.to_string(),
+                tx,
+            },
+        );
         (id, rx)
     }
 
@@ -44,18 +67,24 @@ impl McpPending {
     /// so callers (e.g. mcp_review_result) know synchronously whether the
     /// proxy received it — the trigger for the frontend's clipboard fallback.
     /// Errors on an unknown id (already resolved, or fabricated by the
-    /// webview) and on a dead or failing connection.
-    pub fn resolve(&self, id: u64, reply: Reply) -> Result<(), String> {
-        let tx = self
-            .waiting
-            .lock()
-            .unwrap()
-            .remove(&id)
-            .ok_or_else(|| format!("unknown MCP request id {id}"))?;
+    /// webview), on an id that belongs to a different window than `caller`
+    /// (leaving the entry in place for its rightful window), and on a dead
+    /// or failing connection.
+    pub fn resolve(&self, id: u64, caller: &str, reply: Reply) -> Result<(), String> {
+        let tx = {
+            let mut waiting = self.waiting.lock().unwrap();
+            match waiting.get(&id) {
+                None => return Err(format!("unknown MCP request id {id}")),
+                Some(e) if e.label != caller => {
+                    return Err(format!("MCP request {id} belongs to another window"))
+                }
+                Some(_) => waiting.remove(&id).unwrap().tx,
+            }
+        };
         let (ack_tx, ack_rx) = mpsc::channel();
         tx.send((reply, ack_tx))
             .map_err(|_| "the MCP connection is gone".to_string())?;
-        match ack_rx.recv_timeout(Duration::from_secs(5)) {
+        match ack_rx.recv_timeout(ACK_TIMEOUT) {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => Err(format!("socket write failed: {e}")),
             Err(_) => Err("the MCP connection did not acknowledge".to_string()),
@@ -65,6 +94,34 @@ impl McpPending {
     /// Drop a request without replying (failed emit, app teardown).
     pub fn forget(&self, id: u64) {
         self.waiting.lock().unwrap().remove(&id);
+    }
+
+    /// A window closed: answer everything it owed instead of leaving the
+    /// proxy blocked forever. A pending review counts as declined (a
+    /// success, so Claude proceeds gracefully — same outcome as the user
+    /// closing the review tab); every other tool gets an error.
+    #[allow(dead_code)] // called from windows::on_destroyed in Task 6
+    pub fn abandon_window(&self, label: &str) {
+        let gone: Vec<Entry> = {
+            let mut waiting = self.waiting.lock().unwrap();
+            let ids: Vec<u64> = waiting
+                .iter()
+                .filter(|(_, e)| e.label == label)
+                .map(|(id, _)| *id)
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| waiting.remove(&id))
+                .collect()
+        };
+        for e in gone {
+            let reply = if e.tool == "request_review" {
+                Ok(crate::mcp::review_reply_text(None))
+            } else {
+                Err("MDViewer window closed".to_string())
+            };
+            let (ack_tx, _ack_rx) = mpsc::channel();
+            let _ = e.tx.send((reply, ack_tx));
+        }
     }
 }
 
@@ -209,7 +266,7 @@ fn prepare_request(
     let event = mcp::event_name(&req.tool).ok_or_else(|| format!("unknown tool '{}'", req.tool))?;
 
     let pending = app.state::<McpPending>();
-    let (gui_id, rx) = pending.register();
+    let (gui_id, rx) = pending.register(label, &req.tool);
     let mut payload = mcp::event_payload(gui_id, req);
     if req.tool == "generate_pdf" {
         // Send the resolved output path the GUI side validated, so the frontend
@@ -299,43 +356,43 @@ mod tests {
     #[test]
     fn register_assigns_unique_ids() {
         let p = McpPending::default();
-        let (a, _rx_a) = p.register();
-        let (b, _rx_b) = p.register();
+        let (a, _rx_a) = p.register("main", "open_document");
+        let (b, _rx_b) = p.register("main", "open_document");
         assert_ne!(a, b);
     }
 
     #[test]
     fn resolve_round_trips_through_connection_thread() {
         let p = std::sync::Arc::new(McpPending::default());
-        let (id, rx) = p.register();
+        let (id, rx) = p.register("main", "open_document");
         // Fake connection thread: receive the reply, "write" it, ack success.
         let t = std::thread::spawn(move || {
             let (reply, ack) = rx.recv().unwrap();
             assert_eq!(reply, Ok("hello".to_string()));
             ack.send(Ok(())).unwrap();
         });
-        assert!(p.resolve(id, Ok("hello".to_string())).is_ok());
+        assert!(p.resolve(id, "main", Ok("hello".to_string())).is_ok());
         t.join().unwrap();
     }
 
     #[test]
     fn resolve_unknown_id_errors_without_blocking() {
         let p = McpPending::default();
-        assert!(p.resolve(999, Ok("x".to_string())).is_err());
+        assert!(p.resolve(999, "main", Ok("x".to_string())).is_err());
     }
 
     #[test]
     fn resolve_reports_a_dead_connection() {
         let p = McpPending::default();
-        let (id, rx) = p.register();
+        let (id, rx) = p.register("main", "open_document");
         drop(rx); // connection thread is gone (proxy died)
-        assert!(p.resolve(id, Ok("x".to_string())).is_err());
+        assert!(p.resolve(id, "main", Ok("x".to_string())).is_err());
     }
 
     #[test]
     fn resolve_surfaces_write_failure() {
         let p = std::sync::Arc::new(McpPending::default());
-        let (id, rx) = p.register();
+        let (id, rx) = p.register("main", "open_document");
         let t = std::thread::spawn(move || {
             let (_reply, ack) = rx.recv().unwrap();
             ack.send(Err(std::io::Error::new(
@@ -344,7 +401,7 @@ mod tests {
             )))
             .unwrap();
         });
-        let err = p.resolve(id, Ok("x".to_string())).unwrap_err();
+        let err = p.resolve(id, "main", Ok("x".to_string())).unwrap_err();
         assert!(err.contains("pipe closed"), "got: {err}");
         t.join().unwrap();
     }
@@ -352,8 +409,36 @@ mod tests {
     #[test]
     fn forget_removes_the_entry() {
         let p = McpPending::default();
-        let (id, _rx) = p.register();
+        let (id, _rx) = p.register("main", "open_document");
         p.forget(id);
-        assert!(p.resolve(id, Ok("x".to_string())).is_err());
+        assert!(p.resolve(id, "main", Ok("x".to_string())).is_err());
+    }
+
+    #[test]
+    fn resolve_from_another_window_is_rejected_and_keeps_entry() {
+        let p = McpPending::default();
+        let (id, _rx) = p.register("main", "open_document");
+        let err = p.resolve(id, "project-1", Ok("x".into())).unwrap_err();
+        assert!(err.contains("another window"), "got: {err}");
+        // Still resolvable by its own window (rx alive, but no ack thread → times out
+        // as "did not acknowledge", which proves the entry was not removed).
+        assert!(p
+            .resolve(id, "main", Ok("x".into()))
+            .unwrap_err()
+            .contains("acknowledge"));
+    }
+
+    #[test]
+    fn abandon_window_declines_reviews_and_errors_others() {
+        let p = McpPending::default();
+        let (_r, review_rx) = p.register("main", "request_review");
+        let (_o, open_rx) = p.register("main", "open_document");
+        let (_k, keep_rx) = p.register("project-1", "open_document");
+        p.abandon_window("main");
+        let (reply, _ack) = review_rx.recv().unwrap();
+        assert_eq!(reply, Ok(crate::mcp::review_reply_text(None)));
+        let (reply, _ack) = open_rx.recv().unwrap();
+        assert_eq!(reply, Err("MDViewer window closed".to_string()));
+        assert!(keep_rx.try_recv().is_err());
     }
 }
