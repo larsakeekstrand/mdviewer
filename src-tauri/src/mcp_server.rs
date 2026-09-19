@@ -382,8 +382,10 @@ fn prepare_request(
         }
         Target::NewWindow(_) => {
             // Validate against the would-be root BEFORE touching any window,
-            // so a bad path never opens one. That root is also generate_pdf's
-            // containment boundary.
+            // so a bad path never opens one. generate_pdf never reaches this
+            // arm (path_target refuses it earlier as PDF_OUTSIDE_WORKSPACE) —
+            // this root only ever becomes an open_document/request_review
+            // window's containment boundary.
             let p = req.args["path"].as_str().unwrap_or("");
             let root = crate::routing::fallback_root(Path::new(p));
             validate(req, Some(&root))?;

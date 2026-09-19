@@ -18,3 +18,6 @@ fi
 
 echo "Running the launch smoke test..."
 ( cd src-tauri && cargo test --test launch_smoke -- --ignored --nocapture )
+
+echo "Running the multi-window smoke test..."
+( cd src-tauri && cargo test --test multi_window_smoke -- --ignored --nocapture )

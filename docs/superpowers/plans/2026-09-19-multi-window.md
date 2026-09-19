@@ -21,7 +21,7 @@
 - Per-root session LRU cap: `30`. Cascade offset for new windows: `24` px. New-window default size `1200×800`, min `600×400` (matches `tauri.conf.json`).
 - Window title format: `"<root folder name> — MDViewer"` (em dash, U+2014).
 - Commit messages: imperative subject, **no `Co-Authored-By` trailer** (project convention in CLAUDE.md).
-- Gate for every task (run from `src-tauri/`): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and from the repo root `node --test ui/`. Any `ui/*` change needs `cargo build` before a manual check, because Tauri bundles `frontendDist` at compile time.
+- Gate for every task (run from `src-tauri/`): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and from the repo root `node --test ui/*.test.js`. Any `ui/*` change needs `cargo build` before a manual check, because Tauri bundles `frontendDist` at compile time.
 - **Dev gotcha (from Task 12 on):** single-instance keys on the bundle identifier `com.mdviewer.app`. Quit any installed MDViewer before `cargo run` or the smoke tests, or the dev process forwards its argv to the installed app and exits.
 
 ## File map

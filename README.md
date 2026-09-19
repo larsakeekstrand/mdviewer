@@ -30,7 +30,8 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
 - **PDF and spreadsheet preview** — open `.pdf` files in the built-in viewer, and `.xlsx` / `.xlsm` / `.xlsb` / `.xls` / `.ods` workbooks as browsable data tables (cell values and cached formula results — the data, not the original document's appearance)
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
-- File menu with **Open File…**, **Open Folder…**, and **Open Recent** (persisted)
+- **Multiple windows** — open several projects side by side, one per window (**File ▸ New Window**, ⌘⇧N, or **Open Folder…** on a folder that isn't already open in another window). Each window has its own tree, tabs, editor buffers, and Review Mode. Files opened from Finder, the command line, or a Claude Code session (the hook and the MCP tools) land in the window whose project already contains them, opening a new window when none does. Quitting (⌘Q) and relaunching restores every window, with its tabs and screen position.
+- File menu with **Open File…**, **Open Folder…**, **New Window**, and **Open Recent** (persisted)
 - Custom right-click context menu — in the preview (Copy / Copy Source / Show Raw·Rendered) and on tree rows (Copy Relative / Absolute Path)
 - **Light / dark theme toggle** — a toolbar button (next to **Raw**) switches the whole app between light and dark; the app follows the macOS appearance until you choose, then remembers your choice across launches
 - CLI: `mdviewer [file-or-directory]`
@@ -46,8 +47,10 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
   take as long as you need; if a review runs into a client-side tool timeout,
   raise `MCP_TOOL_TIMEOUT` in the Claude Code environment. `generate_pdf`
   renders a markdown file to a PDF (using your saved PDF export settings —
-  preset, font size, paper, margins, and page numbers) and writes it inside
-  the open folder — both the source and the output must be within that folder.
+  preset, font size, paper, margins, and page numbers) and writes it next to
+  its source — both the source and the output must be within a folder that's
+  already open in some window; unlike `open_document`, `generate_pdf` never
+  opens a new one.
 - **Claude Code Integration panel** — **MDViewer ▸ Claude Code Integration…**
   opens a window showing, for the current project, whether the hook and MCP
   server are installed, with one-click **Install**/**Update** buttons and a
@@ -190,8 +193,9 @@ Switch between light and dark with the **☾ / ☀** button at the top-right of 
 
   Both require a folder to be open, and re-running updates the MDViewer path in place (no duplicate).
 - **File ▸ Open File…** (⌘O) — opens any markdown file. The tree stays where it is; the file opens as a sticky tab.
-- **File ▸ Open Folder…** (⇧⌘O) — re-roots the tree at any folder.
-- **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches). The bottom **Clear Recent** entry wipes the list.
+- **File ▸ Open Folder…** (⇧⌘O) — re-roots the *focused* window's tree at the chosen folder, unless another window already has that folder open, in which case that window is focused instead of opening a duplicate.
+- **File ▸ New Window** (⇧⌘N) — opens a folder picker and creates a new window rooted at the chosen folder.
+- **File ▸ Open Recent** — the last 10 folders you've opened (persisted across launches, shared by every window). The bottom **Clear Recent** entry wipes the list.
 - **File ▸ Export as HTML…** — exports the active tab's rendered document as a fully self-contained HTML file (CSS, fonts, and local images inlined; always light-themed).
 - **File ▸ Export as PDF…** *(macOS only)* — opens the **Export to PDF** window where you can choose a preset (Clean / Report / Compact), adjust the base font size, paper size (A4 / Letter / Legal), margins (Narrow / Normal / Wide), page numbers (None / Bottom center / Bottom right), table style (Editorial / Grid / Minimal), wide-table handling (Wrap text / Scale to fit), and orientation (Portrait / Landscape). The **live preview** on the left updates as you change settings; switch to **Exact PDF** to render the actual file — with real page breaks, margins, footers, and repeating table headers — before saving. Table style also applies when exporting as HTML. Your settings are saved as the global default and are also applied when the MCP `generate_pdf` tool generates a PDF.
 - **Actions** — Cut (⌘X), Copy (⌘C), Paste (⌘V), Select All (⌘A), Find… (⌘F), Search Files… (⇧⌘F), Copy Source, Toggle Raw, Toggle Edit, Save (⌘S).

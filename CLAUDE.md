@@ -34,16 +34,27 @@ Repo: https://github.com/larsakeekstrand/mdviewer
 ```
 src-tauri/
   src/
-    main.rs       — CLI parse (argv[1] → tree root / initial file)
-    lib.rs        — Tauri builder, AppState, command registration, setup hook;
-                    app.run handles macOS RunEvent::Opened (files from Finder)
+    main.rs       — CLI parse (argv[1] → tree root / initial file) via launch.rs
+    lib.rs        — Tauri builder, AppState, command registration, setup hook
+                    (registers "main", restores saved windows, delivers early
+                    opens); app.run handles macOS RunEvent::Opened, Exit,
+                    ExitRequested, and window Destroyed/Moved/Resized
     commands.rs   — #[tauri::command]: list_dir, render_file, render_preview,
                     open_file, read_source, save_file, open_url, open_path,
-                    frontend_ready (drains the Finder-open buffer),
+                    frontend_ready (drains a window's buffered opens),
                     create_file, create_folder, rename_path, duplicate_file,
-                    delete_to_trash
+                    delete_to_trash — all scoped to the calling window's root
+    windows.rs    — Registry (label → WindowState: root, bounds, ready,
+                    watchers), FocusOrder-backed lifecycle (create_project_window,
+                    on_destroyed, retarget_placeholder_main), deliver_path/
+                    deliver_files, snapshot (for session save)
+    routing.rs    — path-to-window routing: route (longest containing root,
+                    MRU tie-break), fallback_root (git toplevel), plan_delivery,
+                    open_folder_target, FocusOrder; pure, unit-tested
+    launch.rs     — resolve_launch_path (argv/forwarded-path → folder or file),
+                    shared by main.rs and the single-instance handler
     open_files.rs — file:// URL → markdown path; RunEvent::Opened handler:
-                    emit open-file + focus window, or buffer until ready
+                    routes to the owning window (or buffers until ready)
     claude_hook.rs— Claude Code hook: pure is_plan_file / extract_file_path /
                     merge_hook / hook_command (unit-tested) + run_hook runtime
                     for `--claude-hook` (stdin JSON → open plan in MDViewer)
@@ -88,6 +99,9 @@ ui/
                     viewerState for the MCP review loop (unit-tested)
   integration.js  — pure helpers: statusButtonLabel, statusLabel, shouldNudge
                     for the Claude Code Integration window + nudge (unit-tested)
+  windowscope.js  — pure helpers for per-window behavior: anyDirty (close
+                    guard on unsaved edits) + themeFromStorageEvent (cross-
+                    window theme sync via the `storage` event); unit-tested
   claude-integration.html/.js — the integration window (mirrors preferences.*)
   styles.css      — grid layout, CSS variables for light/dark, pre.mermaid
   github-markdown.css, morphdom-umd.min.js, mermaid.min.js  — vendored
@@ -107,6 +121,36 @@ icon.svg          — source for icon regeneration
   double-click promotes to sticky. Each tab tracks its own raw/rendered state
   and its own in-progress editor buffer (`editBuffer`), so switching tabs
   preserves unsaved edits.
+- **Multi-window**: one project (root folder) per OS window. Windows are keyed
+  by Tauri label in `windows::Registry` — `"main"` for the first window, then
+  `project-1`, `project-2`, … — each entry holding its root, screen bounds, a
+  `ready` flag (set once `frontend_ready` fires), and its own file watchers.
+  Every Tauri command that touches the filesystem takes the injected
+  `WebviewWindow` parameter and resolves its root via `commands::window_root`
+  (`state.windows.get(window.label())`); an unregistered label (a helper
+  window with no owner) errors `windows::NO_PROJECT_WINDOW`. Frontend event
+  listeners must be window-scoped (`getCurrentWebviewWindow().listen`, see the
+  `event.listen()` note below) since JS has no per-window event filtering of
+  its own. **Routing** (`routing.rs`, pure/unit-tested): an incoming path —
+  from Finder, a second CLI launch, or an MCP tool call — goes to the
+  *longest* registered root that contains it (`route`), ties broken by most-
+  recently-focused (`FocusOrder`); no containing root opens a **new** window
+  at the path's git toplevel (`fallback_root`) or, if `"main"`'s root is still
+  the bare-cwd placeholder from a rootless launch, repoints `"main"` there
+  instead of adding a second window (`retarget_placeholder_main`) — a first-
+  ever Finder launch would otherwise show a useless window at "/" alongside
+  the file's window. **Open Folder** either adopts the
+  folder into the calling window or focuses the window that already has it
+  open (`open_folder_target`); **File ▸ New Window** (⌘⇧N) always creates one.
+  **Sessions**: `recent.json` gained a per-root `sessions` map (tabs + active
+  index, LRU-capped at 30) alongside a `windows` snapshot (root + bounds per
+  label, built from the registry, never by querying live windows — see the
+  Destroyed-ordering note below); both restore on launch and save on
+  `RunEvent::Exit`, `ExitRequested`, and when the last window closes. Helper
+  windows (PDF-export, Claude Code Integration) aren't project windows
+  themselves — `windows::Registry::project_label_for` resolves the owning
+  project window recorded when the helper was opened, so its commands (and its
+  `helper_owner` query) act on the right root.
 - **Watcher**: rewires on tab switch (`setActiveTab` → `open_file`). Watches the
   **parent directory** with `RecursiveMode::NonRecursive` because editors like
   VS Code and IntelliJ do atomic-save rename, which orphans path-level
@@ -394,11 +438,16 @@ icon.svg          — source for icon regeneration
   rejects on the fly. Open tabs are retargeted on rename (descendants too) and
   closed on delete.
 - **Security containment for file ops**: all five file-op commands resolve paths
-  against `AppState.current_root` via `fs_ops::within_root` (canonicalizes the
-  nearest existing ancestor, component-wise `starts_with`). `current_root` is a
-  `Mutex<Option<PathBuf>>` on `AppState`, seeded from `Startup.tree_root` in
-  `get_initial_state` and updated by the `remember_folder` command whenever the
-  frontend changes the sidebar root.
+  against the *calling window's own root* via `fs_ops::within_root` (canonicalizes
+  the nearest existing ancestor, component-wise `starts_with`). There is no
+  single `AppState.current_root` any more — `commands::window_root` looks up
+  `state.windows` (the `Registry`, keyed by label) using the Tauri-injected
+  `WebviewWindow` parameter's own `label()`, so one window's root can never leak
+  into another window's file operations. Root is seeded per window at creation
+  (`windows::Registry::insert`) and updated by `remember_folder`, which resolves
+  `crate::routing::open_folder_target` for the calling window: adopt the folder
+  if no other window already has it open, else focus that other window instead
+  of retargeting the caller.
 - **Review Mode**: a frontend-only feature (no Rust, no IPC). The **💬 Review**
   toolbar toggle (`#toggle-review`, gated like Raw/Edit — hidden for raw/edit/
   image tabs) is the whole lifecycle: clicking it enters review (`reviewMode`
@@ -471,19 +520,36 @@ icon.svg          — source for icon regeneration
   `notifications/progress` every 10 s to hold client timeouts open and exits
   when stdin or stdout closes. Validation is GUI-side (`mcp_server::validate`):
   extension allowlist (markdown+images+PDF+spreadsheets for opening; markdown only for reviews;
-  markdown-in/`.pdf`-out for `generate_pdf`) + existence. `generate_pdf` also
-  confines **both** source and output to the open workspace (`fs_ops::within_root`,
-  needs a folder open) since it writes a file, and the resolved output
-  (`mcp::pdf_output_path`, default = source with `.pdf`) is computed GUI-side
-  and sent in the event so the frontend never recomputes it. The proxy
-  absolutizes relative paths against its cwd (= Claude's
-  project root). One review at a time (`reviewBusy` + a post-await re-check —
-  the review tab is resolved by path, not focus); `generate_pdf` is likewise
-  gated on `exportInProgress`/`reviewBusy`. Stale socket on startup:
-  probe, back off if a live instance answers, else reclaim. The blocking
-  request_review call returns through `McpPending::resolve`, which waits for
-  the connection thread's socket-write ack — so "Review sent" is only shown
-  when the proxy actually received it.
+  markdown-in/`.pdf`-out for `generate_pdf`) + existence. The proxy absolutizes a
+  relative `path` argument against its own cwd (`absolutize_path_arg` — Claude
+  spawns the proxy with cwd = the project root) before forwarding. **Routing**
+  (multi-window): `mcp_server::prepare_request` picks a target window per tool.
+  A path tool (`open_document`, `request_review`, `generate_pdf`) routes by
+  `routing::route` against the canonicalized `path` argument — longest
+  containing root wins, MRU breaks ties. `get_viewer_state` has no path, so it
+  routes the same way by `GuiRequest.cwd` (sent on every call, used only to pick
+  a window — never trusted as a containment boundary), falling back to the
+  front (or lowest-label) window when `cwd` matches nothing. When no open
+  window contains the path, `open_document`/`request_review` open a **new**
+  window at `routing::fallback_root` (the path's git toplevel, or its parent)
+  — or repoint a still-placeholder "main" instead of adding a second window —
+  and the proxy's STARTING_ERR retry loop (`forward_call`, 30 × 500 ms) lands
+  the follow-up call in that window once it's ready. `generate_pdf` takes the
+  opposite branch on that same `Route::NewWindow`: it **refuses**
+  (`"source is outside every open workspace"`) rather than opening or
+  retargeting anything, because writing a file must never widen trust to a
+  root the caller merely named (see SEC-1 in the phase-3 security review).
+  `generate_pdf` also confines **both** source and output to the *routed* window's
+  root (`fs_ops::within_root`, needs a folder open) since it writes a file, and
+  the resolved output (`mcp::pdf_output_path`, default = source with `.pdf`) is
+  computed GUI-side and sent in the event so the frontend never recomputes it.
+  One review at a time (`reviewBusy` + a post-await re-check — the review tab is
+  resolved by path, not focus); `generate_pdf` is likewise gated on
+  `exportInProgress`/`reviewBusy`. Stale socket on startup: probe, back off if a
+  live instance answers, else reclaim. The blocking request_review call returns
+  through `McpPending::resolve`, which waits for the connection thread's
+  socket-write ack — so "Review sent" is only shown when the proxy actually
+  received it.
 - **Hook vs. MCP `open_document` (why both exist, deliberately not merged)**:
   the hook is *passive and deterministic* — the Claude Code harness fires it on
   every matching `Write`, so plans appear without Claude's involvement or any
@@ -588,6 +654,34 @@ Windows-specific gotchas:
 
 ## Things that took hours and shouldn't again
 
+- **JS `event.listen()` is target-Any in Tauri 2**: a listener registered with
+  the global `window.__TAURI__.event.listen()` fires for `emit_to` events aimed
+  at ANY window, not just the one running that script — there is no automatic
+  per-window filtering. In a multi-window app every frontend listener must go
+  through `getCurrentWebviewWindow().listen(...)` instead (`app.js` aliases
+  this as `listen` at the top of the module), or window A's code reacts to
+  events meant for window B.
+- **macOS predefined Quit fires only `RunEvent::Exit`** — no
+  `ExitRequested`, no per-window `Destroyed`. ⌘Q (or Dock → Quit) goes through
+  `NSApplication.terminate:`, which the Tauri runtime surfaces as a single
+  process-wide `Exit`, not the window-close teardown path. Anything that must
+  happen on quit (saving the window snapshot) has to hook `Exit` explicitly —
+  hooking only `ExitRequested`/`on_window_event(Destroyed)` misses ⌘Q entirely.
+  `save_on_exit` is wired to both `RunEvent::ExitRequested` and `RunEvent::Exit`
+  for this reason.
+- **Tauri removes a window from its internal set BEFORE `Destroyed` listeners
+  run**, so `app.get_webview_window(label)` inside an `on_window_event(..,
+  Destroyed)` handler already returns `None` — there's no live window left to
+  query bounds/position from. `windows::record_bounds` instead captures bounds
+  on `Moved`/`Resized` into the registry as they happen, and `windows::snapshot`
+  (used for session save) reads that stored state, never `get_webview_window`.
+- **Single-instance dev gotcha**: `tauri-plugin-single-instance` keys its lock
+  on the bundle identifier, which is the same for a `cargo tauri build` install
+  and a `cargo run` dev binary. Quit any installed MDViewer.app before
+  `cargo run`, or the plugin detects the installed instance's lock, silently
+  forwards your dev launch's argv to it, and exits — no new window ever opens
+  for the dev binary, which looks like the app "not starting" for no visible
+  reason.
 - **`viewKind`, not a pile of `isXPath` checks**: the gates in `app.js` ask
   several different questions (editable? split preview? raw toggle?
   retainable? exportable? …), which `isImagePath`/`isCodeView` used to

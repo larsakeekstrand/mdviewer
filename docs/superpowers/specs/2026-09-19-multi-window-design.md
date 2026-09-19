@@ -112,11 +112,28 @@ pub fn route(
 `FocusOrder` (same module): `touch(label)`, `remove(label)`, `front()`.
 Updated from `WindowEvent::Focused(true)` and `Destroyed`.
 
-A single IO entry point, `routing::deliver(app, path, line: Option<u32>)`,
-resolves the route, creates the window if needed, and either emits
-`open-file` via `emit_to(label, …)` (if `ready`) or pushes onto that window's
-`pending_files`. Finder opens, single-instance argv and the hook all use it.
-MCP uses `route` directly, because it needs the label for `McpPending`.
+Revised during implementation (Ruling R2 in the SDD progress ledger): a
+first-ever Finder launch with no argv and no saved session roots `"main"` at a
+bare-cwd fallback ("placeholder main"), which contains every path and would
+otherwise swallow all routing. `routing.rs` adds `Delivery`
+(`Existing(label)` / `RetargetMain(root)` / `NewWindow(root)`) and
+`plan_delivery(path, roots, mru, placeholder_main, fallback_root)`, which
+excludes a placeholder `"main"` from the routing candidates and, when nothing
+else claims the path, returns `RetargetMain` instead of `NewWindow` — so the
+first Finder open repoints `"main"` at the file's root rather than opening a
+second, useless window at "/". The IO entry points are `windows::deliver_path`
+(a single file: resolves `plan_delivery`, retargets/creates the window via
+`windows::retarget_placeholder_main` / `create_project_window`, then hands the
+file to `deliver_files`) and `windows::deliver_files` (emits `open-file` via
+`emit_to(label, …)` if the target's `ready`, else buffers into its
+`pending_files` under the same lock as the ready check). Finder opens,
+single-instance argv and the hook all use `deliver_path`. MCP needs the label
+for `McpPending`, so it doesn't call `plan_delivery` — `mcp_server.rs` reimplements
+the same placeholder-exclusion + retarget-or-create shape locally
+(`pick_target_for` filters a placeholder `"main"` out of the routing
+candidates; `prepare_request`'s `Target::NewWindow` arm retargets it, or
+creates a window, the same way `deliver_path` does) — see the MCP section
+above.
 
 ### Events
 
@@ -136,14 +153,24 @@ The watcher closures capture their window's label when `open_file` /
 - The proxy (`mcp.rs::run_proxy`) adds `"cwd": <proxy cwd>` to every
   `GuiRequest`. Paths are already absolutized against it.
 - `open_document`, `request_review`, `generate_pdf` route by their `path`
-  argument; a `NewWindow` route validates first, creates the window, and
-  answers `STARTING_ERR`. The proxy already retries that for up to 15 s, and
-  the retry routes into the new window once it is ready, so no new queue is
-  needed. `get_viewer_state` routes by `cwd` (`route(cwd, …)`,
-  but a `NewWindow` result falls back to `focus.front()` instead — asking for
-  state must not open a window).
+  argument. For `open_document`/`request_review`, a `NewWindow` route validates
+  first, then creates the window (or repoints a still-placeholder `"main"`)
+  and answers `STARTING_ERR`. The proxy already retries that for up to 15 s,
+  and the retry routes into the new window once it is ready, so no new queue
+  is needed. `get_viewer_state` routes by `cwd` (`route(cwd, …)`, but a
+  `NewWindow` result falls back to `focus.front()` (or the lowest label)
+  instead — asking for state must not open a window).
+- **`generate_pdf` never opens or retargets a window.** Revised from the
+  original design during implementation (phase-3 security review, SEC-1):
+  writing a file must not widen trust to a root the caller merely named in
+  `path`. `generate_pdf`'s `path_target` maps its own `Route::NewWindow` result
+  straight to a refusal (`"source is outside every open workspace"`) instead of
+  the create/retarget branch above — the source must already be inside a root
+  some open window owns. `open_document`/`request_review` are unaffected and
+  still auto-open.
 - `validate` receives the **routed window's** root; `generate_pdf`'s
-  source/output containment is checked against it.
+  source/output containment is checked against it (only ever an *existing*
+  window's root, per the point above).
 - `McpPending` stays global but each entry records its target label.
   `mcp_respond` / `mcp_review_result` reject an answer whose calling window
   label doesn't match.
@@ -279,7 +306,12 @@ Changes:
   file ops, task toggles, `generate_pdf` output or the hook/MCP install to
   reach project B's tree.
 - **Routing doesn't widen trust.** Auto-creating a window rooted at a file's
-  git root / parent is equivalent to the user opening that folder. `open_path`,
+  git root / parent is equivalent to the user opening that folder — true for
+  `open_document`/`request_review`, which only ever read/display. `generate_pdf`
+  writes a file, so it does NOT get this auto-open: its `path_target` refuses
+  a `NewWindow` route outright (see the MCP section above and SEC-1 in the
+  phase-3 security review) rather than treat a path the caller merely named as
+  license to create a window and confine an output to it. `open_path`,
   `UNSAFE_OPEN_EXTS` and the exec-bit refusal are unchanged.
 - **Capabilities:** `default.json` `windows` becomes
   `["main", "project-*", "preferences", "claude-integration", "pdf-export"]`.
@@ -325,8 +357,8 @@ Changes:
   document; ⌘Q + relaunch restores both windows with their tabs and bounds;
   dark mode in both.
 - **Gate per task:** `cargo fmt --check`, `cargo clippy --all-targets -- -D
-  warnings`, `cargo test`, `node --test ui/`; `cargo build` after any `ui/*`
-  change (Tauri bundles `frontendDist` at compile time).
+  warnings`, `cargo test`, `node --test ui/*.test.js`; `cargo build` after any
+  `ui/*` change (Tauri bundles `frontendDist` at compile time).
 
 ## Delivery phases
 
