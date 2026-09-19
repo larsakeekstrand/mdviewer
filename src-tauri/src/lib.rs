@@ -4,6 +4,7 @@ mod commands;
 mod export;
 mod fs_ops;
 mod git;
+pub mod launch;
 mod markdown;
 pub mod mcp;
 mod mcp_server;
@@ -49,6 +50,9 @@ pub struct AppState {
     /// True when main's root is the bare-cwd fallback (no argv root, no saved
     /// window, no usable last_folder), i.e. a placeholder a file open may repoint.
     pub main_placeholder: AtomicBool,
+    /// Paths forwarded by a second launch before setup finished; dispatched at
+    /// the end of setup. None once drained.
+    pub startup_queue: Mutex<Option<Vec<launch::LaunchTarget>>>,
 }
 
 /// Marks the app as quitting and saves the window snapshot. An empty snapshot
@@ -76,6 +80,36 @@ pub fn run_mcp_proxy() {
     mcp::run_proxy();
 }
 
+/// A second launch's argv, forwarded by the single-instance plugin. `argv[1]`
+/// is untrusted and resolves exactly like a cold launch's.
+#[cfg(any(target_os = "macos", windows))]
+fn single_instance_open(app: &tauri::AppHandle, argv: Vec<String>, cwd: String) {
+    let Some(raw) = argv.get(1) else {
+        // Bare relaunch: bring the most recent window forward.
+        if let Some(w) = windows::front_label(app).and_then(|l| app.get_webview_window(&l)) {
+            let _ = w.set_focus();
+        }
+        return;
+    };
+    let Ok(target) = launch::resolve_launch_path(raw, std::path::Path::new(&cwd)) else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    if let Some(queue) = state.startup_queue.lock().unwrap().as_mut() {
+        queue.push(target);
+        return;
+    }
+    dispatch_launch(app, target);
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn dispatch_launch(app: &tauri::AppHandle, target: launch::LaunchTarget) {
+    match target {
+        launch::LaunchTarget::Folder(root) => windows::open_folder_in_new_window(app, root),
+        launch::LaunchTarget::File(f) => windows::deliver_path(app, f),
+    }
+}
+
 pub fn run(startup: Startup) {
     let state = AppState {
         tree_root: startup.tree_root,
@@ -86,9 +120,15 @@ pub fn run(startup: Startup) {
         tasklist_lock: Mutex::new(()),
         quitting: AtomicBool::new(false),
         main_placeholder: AtomicBool::new(false),
+        startup_queue: Mutex::new(Some(Vec::new())),
     };
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", windows))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        single_instance_open(app, argv, cwd);
+    }));
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
@@ -193,6 +233,13 @@ pub fn run(startup: Startup) {
             }
             menu::install(&handle)?;
             mcp_server::start(handle.clone());
+            #[cfg(any(target_os = "macos", windows))]
+            {
+                let queued = state.startup_queue.lock().unwrap().take();
+                for t in queued.unwrap_or_default() {
+                    dispatch_launch(&handle, t);
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

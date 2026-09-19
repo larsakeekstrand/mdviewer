@@ -4,6 +4,8 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use mdviewer_lib::launch::LaunchTarget;
+
 fn usage() {
     let prog = env::args().next().unwrap_or_else(|| "mdviewer".to_string());
     let prog = std::path::Path::new(&prog)
@@ -22,36 +24,22 @@ fn resolve_args() -> Result<mdviewer_lib::Startup, String> {
             tree_root: None,
             initial_file: None,
         }),
-        Some(raw) => {
-            let path = PathBuf::from(&raw);
-            let absolute = if path.is_absolute() {
-                path
-            } else {
-                cwd.join(path)
-            };
-            let canonical = absolute
-                .canonicalize()
-                .map_err(|e| format!("cannot open '{raw}': {e}"))?;
-
-            let meta =
-                std::fs::metadata(&canonical).map_err(|e| format!("cannot stat '{raw}': {e}"))?;
-
-            if meta.is_dir() {
-                Ok(mdviewer_lib::Startup {
-                    tree_root: Some(canonical),
-                    initial_file: None,
-                })
-            } else {
-                let parent = canonical
+        Some(raw) => match mdviewer_lib::launch::resolve_launch_path(&raw, &cwd)? {
+            LaunchTarget::Folder(root) => Ok(mdviewer_lib::Startup {
+                tree_root: Some(root),
+                initial_file: None,
+            }),
+            LaunchTarget::File(file) => {
+                let parent = file
                     .parent()
                     .map(PathBuf::from)
                     .unwrap_or_else(|| cwd.clone());
                 Ok(mdviewer_lib::Startup {
                     tree_root: Some(parent),
-                    initial_file: Some(canonical),
+                    initial_file: Some(file),
                 })
             }
-        }
+        },
     }
 }
 
