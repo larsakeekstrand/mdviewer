@@ -3,6 +3,41 @@
 User-facing notes for each release. The release workflow extracts the section
 matching the tag into the GitHub release page and the in-app "What's new" modal.
 
+## [1.25.0] - 2026-10-16
+
+Open several projects at once, one per window, and view 3D-printing models
+(STL, 3MF, OBJ) in a rotatable 3D view.
+
+### Added
+- **View 3D models.** STL, 3MF and OBJ files open in a tab you can rotate
+  (drag), zoom (scroll/pinch) and pan (right-drag or Shift-drag), with a Reset
+  view button and the model's size in millimetres. When the file changes on
+  disk (for example when Claude regenerates a part), the model reloads in
+  place and keeps your view. Bambu Studio project files aren't supported; open
+  plain exported 3MFs instead.
+- **Multiple windows, one project each.** **File ▸ New Window** (⌘⇧N) opens a
+  folder picker and gives that project its own window, with its own tree, tabs,
+  editor buffers, search and Review Mode. **Open Folder…** still re-roots the
+  window you are in; if the folder is already open elsewhere, that window comes
+  to the front instead of opening a duplicate.
+- **Files land in the right window.** A file opened from Finder, the command
+  line, the Claude Code hook or the MCP tools goes to the window whose project
+  contains it — and opens a new window rooted at that file's project when no
+  open window does. Menu actions apply to the window you are working in.
+- **Every window comes back.** Quitting and relaunching restores each window
+  with its size, position and tabs. Tabs are remembered per project folder, so
+  switching a window to another folder and back brings its tabs with it.
+- **Closing a window with unsaved edits asks first**, and switching light/dark
+  in one window switches all of them.
+
+### Changed
+- **A second launch reaches the running app.** `mdviewer <file-or-folder>` from
+  a terminal, and the file-open path Claude Code uses, now hand the path to the
+  already-running MDViewer instead of starting a second copy.
+- **Claude Code's `generate_pdf` only works inside a project you have open.**
+  It no longer opens a window for a file from somewhere else, so a document that
+  steers Claude cannot make it write a PDF outside your workspace.
+
 ## [1.25.0-rc.1] - 2026-09-19
 
 Beta: open several projects at once, one per window — and files open in the
