@@ -382,9 +382,9 @@ icon.svg          — source for icon regeneration
   from model files reaches the DOM only via `textContent`. Controls: left-drag
   rotate, scroll/pinch zoom, right-drag or Shift-drag pan, **Reset view** /
   double-click. Each tab keeps an ephemeral `modelCamera` (never in session
-  restore); `keepCamera` decides whether a reload/theme change keeps the live
-  camera. Theme toggle calls `modelViewer.applyTheme()` — no `read_model`, no
-  camera change. A non-reload render first clears `#preview` to a "Loading
+  restore); `keepCamera` decides whether a reload keeps the live camera; a
+  theme change recolors in place. Theme toggle calls
+  `modelViewer.applyTheme()` — no `read_model`, no camera change. A non-reload render first clears `#preview` to a "Loading
   model…" placeholder and resets `modelShownPath`, so nothing stale can be
   reattached during the await (tab-repointing invariant); renaming the active
   model tab re-runs `renderActive`. Model tabs are not retained in the DOM

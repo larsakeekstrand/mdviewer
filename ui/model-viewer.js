@@ -80,6 +80,9 @@ export function createModelViewer({ getTheme }) {
   renderer.setPixelRatio(window.devicePixelRatio || 1);
 
   const stage = document.createElement("div");
+  // The id keys it for morphdom, which would otherwise pair it with any
+  // unkeyed div in the next document painted into #preview.
+  stage.id = "model-stage";
   stage.className = "model-stage";
   const dims = document.createElement("div");
   dims.className = "model-dims";
@@ -243,15 +246,25 @@ export function createModelViewer({ getTheme }) {
     }
     // Measured before the rotation, so X/Y/Z are the file's (the slicer's)
     // axes rather than three's Y-up world.
-    dims.textContent = formatDimensions(fileBox.min, fileBox.max);
+    const dimensions = formatDimensions(fileBox.min, fileBox.max);
     object.rotation.x = -Math.PI / 2;
     object.updateMatrixWorld(true);
+    const worldBox = new THREE.Box3().setFromObject(object);
+    const worldSphere = worldBox.getBoundingSphere(new THREE.Sphere());
+    // NaN vertices in a corrupt file propagate into the bounds; framing from
+    // them would leave a NaN camera and a blank canvas.
+    const coords = [...worldBox.min.toArray(), ...worldBox.max.toArray(), worldSphere.radius];
+    if (!coords.every(Number.isFinite)) {
+      object.traverse((node) => node.geometry && node.geometry.dispose());
+      throw new Error("the file contains invalid coordinates");
+    }
+    dims.textContent = dimensions;
 
     clearModel();
     model = object;
     scene.add(model);
-    bounds = new THREE.Box3().setFromObject(model);
-    sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    bounds = worldBox;
+    sphere = worldSphere;
     applyColors();
 
     pending = saved
