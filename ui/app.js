@@ -1001,6 +1001,11 @@ function retargetTabsForRename(from, to) {
     invoke("open_file", { path: tabs[activeIdx].path }).catch((e) =>
       console.warn("rewire watcher after rename failed", e),
     );
+    // An in-flight model load treats the path change as stale and bails, so
+    // nothing else would ever paint the renamed model.
+    if (viewKind(tabs[activeIdx].path) === "model") {
+      void renderActive().catch((e) => console.error("re-render after rename failed", e));
+    }
   }
 }
 
@@ -2141,6 +2146,23 @@ async function renderModel(t, { reason }) {
   const stale = () => seq !== modelLoadSeq || activeTab() !== t || t.path !== path;
   if (findOpen()) closeFind();
   liveRender = null;
+  if (reason !== "reload") {
+    // Paint now, not after read_model: until the bytes arrive the previous
+    // document would otherwise sit under this tab's name, still interactive —
+    // and on preview-tab reuse its listeners close over this repointed tab.
+    // setActiveTab has already stashed the outgoing camera; only a reload
+    // needs modelShownPath.
+    modelShownPath = null;
+    const loading = document.createElement("div");
+    loading.className = "model-loading";
+    loading.textContent = "Loading model…";
+    previewEmpty.hidden = true;
+    preview.hidden = false;
+    preview.className = "model-view";
+    preview.replaceChildren(loading);
+    previewScroll.scrollTop = 0;
+    previewScroll.scrollLeft = 0;
+  }
   try {
     if (!modelViewer) {
       const mod = await import("./model-viewer.js");

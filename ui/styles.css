@@ -571,6 +571,7 @@ body {
   background: var(--sidebar-hover);
 }
 
+.model-view .model-loading,
 .model-view .model-error {
   color: var(--sidebar-muted);
   padding: 20px;
