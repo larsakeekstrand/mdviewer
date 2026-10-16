@@ -301,6 +301,7 @@ fn prompt_open_file(app: AppHandle) {
     app.dialog()
         .file()
         .add_filter("Markdown", &["md", "markdown", "mdown", "mkd", "mkdn"])
+        .add_filter("3D models", &["stl", "3mf", "obj"])
         .add_filter("All files", &["*"])
         .pick_file(move |chosen| {
             if let Some(file_path) = chosen {
