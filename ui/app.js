@@ -41,6 +41,7 @@ import {
   bustsCacheOnChange,
 } from "./filetype.js";
 import { modeForPath } from "./editor-modes.js";
+import { modelFormat, keepCamera } from "./model.js";
 import { classifyFileChange, isDirty } from "./editor.js";
 import { validateName, treeAncestors } from "./treeops.js";
 import { buildDirStatuses } from "./gitstatus.js";
@@ -144,6 +145,14 @@ let validateSeq = 0;
 // Bumped by every paint. postRender yields, so two paints of the SAME tab can
 // overlap; only the newest may claim the finished document.
 let paintSeq = 0;
+
+// The shared 3D viewer (ui/model-viewer.js), created on the first model open so
+// three.js is never loaded for people who don't open one. modelShownPath is the
+// model its canvas last showed in #preview; every other paint clears it, which
+// is what tells a live reload (keep the camera) from a fresh open.
+let modelViewer = null;
+let modelLoadSeq = 0;
+let modelShownPath = null;
 
 /* ---- Git decoration state ---- */
 
@@ -982,6 +991,11 @@ function retargetTabsForRename(from, to) {
       if (i === activeIdx) activeChanged = true;
     }
   }
+  // Keeps a live reload of the renamed model recognisable as a reload.
+  if (modelShownPath === from) modelShownPath = to;
+  else if (modelShownPath && modelShownPath.startsWith(from + "/")) {
+    modelShownPath = to + modelShownPath.slice(from.length);
+  }
   renderTabBar();
   if (activeChanged && activeIdx >= 0) {
     invoke("open_file", { path: tabs[activeIdx].path }).catch((e) =>
@@ -1215,12 +1229,13 @@ async function openPreview(path) {
     tabs[previewIdx].pendingJumpLine = null;
     tabs[previewIdx].scrollTop = 0;
     tabs[previewIdx].scrollLeft = 0;
+    tabs[previewIdx].modelCamera = null;
     // `revalidating` is deliberately NOT reset: a validation for the old path
     // may still be in flight, and it releases its own hold when it returns.
     await setActiveTab(previewIdx, { forceRender: true });
     return;
   }
-  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
+  tabs.push({ path, sticky: false, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0, modelCamera: null });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1231,7 +1246,7 @@ async function openSticky(path) {
     await setActiveTab(existing);
     return;
   }
-  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
+  tabs.push({ path, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0, modelCamera: null });
   await setActiveTab(tabs.length - 1);
 }
 
@@ -1261,7 +1276,7 @@ function persistSession() {
 
 async function restoreSession(paths, active) {
   for (const p of paths) {
-    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0 });
+    tabs.push({ path: p, sticky: true, raw: false, editing: false, dirty: false, savedContent: null, reviewMode: false, reviews: [], generalNote: "", orphanedReviews: [], scrollTop: 0, scrollLeft: 0, revalidating: 0, modelCamera: null });
   }
   if (tabs.length === 0) return;
   const idx =
@@ -1331,6 +1346,7 @@ function restoreTabDom(t) {
   // replaceChildren MOVES the nodes out of the fragment, leaving it empty — the
   // entry is spent, and the nodes are live again until the next stash.
   domCache.delete(t.path);
+  modelShownPath = null;
   liveRender = {
     path: t.path,
     raw: t.raw,
@@ -1419,6 +1435,11 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
     if (outgoing) {
       outgoing.scrollTop = previewScroll.scrollTop;
       outgoing.scrollLeft = previewScroll.scrollLeft;
+      // Only if the canvas is really showing this tab's model: after a failed
+      // load it still holds the previous model's camera.
+      if (modelViewer && modelShownPath === outgoing.path) {
+        outgoing.modelCamera = modelViewer.camera();
+      }
       stashActiveTab(outgoing);
     }
   }
@@ -1465,6 +1486,7 @@ async function setActiveTab(idx, { forceRender = false } = {}) {
       await renderActive({
         scrollLock: same && !forceRender,
         scrollTo: same ? 0 : t.scrollTop || 0,
+        modelReason: same ? null : "switch",
       });
     }
   }
@@ -1853,7 +1875,11 @@ async function applyTheme(theme) {
   updateThemeButton();
   const t = activeTab();
   if (t) {
-    if (t.editing && hasSplitPreview(viewKind(t.path))) {
+    if (viewKind(t.path) === "model") {
+      // Recolor in place: re-reading the file would be wasted work, and
+      // re-showing it could move the camera.
+      if (modelViewer) modelViewer.applyTheme();
+    } else if (t.editing && hasSplitPreview(viewKind(t.path))) {
       await renderFromEditor(t, { scrollLock: false, forceMermaid: true });
     } else {
       await renderActive({ scrollLock: false, forceMermaid: true });
@@ -1884,15 +1910,24 @@ function showEmptyState() {
   preview.classList.remove("raw-body");
   if (findOpen()) closeFind();
   liveRender = null;
+  modelShownPath = null;
 }
 
-async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo = 0 } = {}) {
+/** `modelReason` is set by setActiveTab for a tab switch; otherwise a model
+ *  render is a live reload when its canvas already shows that file. */
+async function renderActive({ scrollLock = true, forceMermaid = false, scrollTo = 0, modelReason = null } = {}) {
   const t = activeTab();
   if (!t) {
     showEmptyState();
     return;
   }
   const kind = viewKind(t.path);
+  if (kind === "model") {
+    await renderModel(t, {
+      reason: modelReason || (modelShownPath === t.path ? "reload" : "open"),
+    });
+    return;
+  }
   if (rendersFromDisk(kind)) {
     if (kind === "image") renderImage(t, { scrollLock });
     else renderPdf(t);
@@ -1946,6 +1981,7 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
   const gen = ++paintSeq;
   previewEmpty.hidden = true;
   preview.hidden = false;
+  modelShownPath = null;
   const kind = viewKind(t.path);
   preview.classList.toggle("raw-body", raw && kind === "markdown");
 
@@ -2027,6 +2063,7 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
 function renderImage(t, { scrollLock = true } = {}) {
   previewEmpty.hidden = true;
   preview.hidden = false;
+  modelShownPath = null;
   if (findOpen()) closeFind();
 
   const base = convertFileSrc(t.path);
@@ -2063,6 +2100,7 @@ function renderImage(t, { scrollLock = true } = {}) {
 function renderPdf(t) {
   previewEmpty.hidden = true;
   preview.hidden = false;
+  modelShownPath = null;
   if (findOpen()) closeFind();
 
   preview.className = "pdf-view";
@@ -2076,6 +2114,71 @@ function renderPdf(t) {
   previewScroll.scrollTop = 0;
   previewScroll.scrollLeft = 0;
   liveRender = null;
+}
+
+/** read_model answers with raw bytes, which arrive as an ArrayBuffer over
+ *  Tauri's custom-protocol IPC but as a plain array of numbers when Tauri has
+ *  fallen back to postMessage — which it does here, because the CSP has no
+ *  `connect-src ipc:`. Accept both. */
+function modelBytes(data) {
+  if (data instanceof ArrayBuffer) return data;
+  if (ArrayBuffer.isView(data)) {
+    return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  }
+  if (Array.isArray(data)) return Uint8Array.from(data).buffer;
+  throw new Error("unexpected response from read_model");
+}
+
+/** Show an STL / 3MF / OBJ file in the shared 3D viewer. `reason` is "reload"
+ *  (live reload: keep the current camera), "switch" (restore the tab's own
+ *  camera) or "open" (frame fresh). Bytes come over IPC because the CSP blocks
+ *  fetching the asset URL. Every await can be overtaken by a newer load, a tab
+ *  switch, or the tab being repointed at another file, so each is followed by
+ *  a staleness check before #preview is touched. */
+async function renderModel(t, { reason }) {
+  const seq = ++modelLoadSeq;
+  const path = t.path;
+  const stale = () => seq !== modelLoadSeq || activeTab() !== t || t.path !== path;
+  if (findOpen()) closeFind();
+  liveRender = null;
+  try {
+    if (!modelViewer) {
+      const mod = await import("./model-viewer.js");
+      // Two first opens can race the import; only one viewer (and so one
+      // WebGL context) may ever exist.
+      if (!modelViewer) {
+        modelViewer = mod.createModelViewer({ getTheme: () => currentTheme });
+      }
+      if (stale()) return;
+    }
+    const bytes = modelBytes(await invoke("read_model", { path }));
+    if (stale()) return;
+    const camera = keepCamera(modelShownPath, path, reason)
+      ? modelViewer.camera()
+      : reason === "switch"
+        ? t.modelCamera
+        : null;
+    previewEmpty.hidden = true;
+    preview.hidden = false;
+    preview.className = "model-view";
+    preview.replaceChildren();
+    previewScroll.scrollTop = 0;
+    previewScroll.scrollLeft = 0;
+    modelViewer.show(preview, bytes, modelFormat(path), { camera });
+    modelShownPath = path;
+  } catch (e) {
+    if (stale()) return;
+    console.error("renderModel failed", e);
+    // modelShownPath is left alone: a half-written file fails to parse, and the
+    // reload that follows should still keep the camera.
+    const err = document.createElement("div");
+    err.className = "model-error";
+    err.textContent = "Can't display this model: " + (e instanceof Error ? e.message : String(e));
+    previewEmpty.hidden = true;
+    preview.hidden = false;
+    preview.className = "model-view";
+    preview.replaceChildren(err);
+  }
 }
 
 /* ---- Post-render hooks ---- */
@@ -3462,6 +3565,7 @@ preview.addEventListener("click", async (ev) => {
 function showError(msg) {
   preview.hidden = false;
   previewEmpty.hidden = true;
+  modelShownPath = null;
   preview.replaceChildren();
   const div = document.createElement("div");
   div.style.color = "#cf222e";
@@ -3534,7 +3638,7 @@ async function actionCopySource() {
 async function runEditAction(name) {
   const t = activeTab();
   const kind = t ? viewKind(t.path) : "code";
-  const labels = { image: "images", pdf: "PDFs", sheet: "spreadsheets" };
+  const labels = { image: "images", pdf: "PDFs", sheet: "spreadsheets", model: "3D models" };
   if (
     t &&
     !isEditable(kind) &&
@@ -3941,6 +4045,10 @@ function openFind() {
   if (!t) return;
   if (viewKind(t.path) === "pdf") {
     showTransientError("Use the PDF viewer's own search for PDF files.");
+    return;
+  }
+  if (viewKind(t.path) === "model") {
+    showTransientError("Find isn't available for 3D models.");
     return;
   }
   const sel = selectedText();
