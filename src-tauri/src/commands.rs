@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{fs_ops, git, markdown, recent, search, tasklist, tree, AppState};
+use crate::{fs_ops, git, markdown, model, recent, search, tasklist, tree, AppState};
 
 /// Updater manifest endpoints. `STABLE_UPDATE_URL` mirrors the endpoint baked
 /// into `tauri.conf.json`; `BETA_UPDATE_URL` is the rolling pre-release channel.
@@ -1860,4 +1860,9 @@ mod tests {
 #[tauri::command]
 pub fn show_integration_window(app: AppHandle, window: tauri::WebviewWindow) {
     crate::menu::open_integration_window(&app, window.label());
+}
+
+#[tauri::command]
+pub fn read_model(path: String) -> Result<tauri::ipc::Response, String> {
+    model::read_model_bytes(Path::new(&path)).map(tauri::ipc::Response::new)
 }

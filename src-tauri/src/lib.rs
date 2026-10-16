@@ -9,6 +9,7 @@ mod markdown;
 pub mod mcp;
 mod mcp_server;
 mod menu;
+mod model;
 #[cfg(target_os = "macos")]
 mod open_files;
 #[cfg(target_os = "macos")]
@@ -189,6 +190,7 @@ pub fn run(startup: Startup) {
             commands::git_status,
             commands::watch_tree,
             commands::render_file,
+            commands::read_model,
             commands::render_preview,
             commands::render_notes,
             commands::open_file,
