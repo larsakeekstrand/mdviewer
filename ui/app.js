@@ -1529,9 +1529,21 @@ function closeTab(idx) {
   if (displayed) {
     displayed.scrollTop = previewScroll.scrollTop;
     displayed.scrollLeft = previewScroll.scrollLeft;
+    if (modelViewer && modelShownPath === displayed.path) {
+      displayed.modelCamera = modelViewer.camera();
+    }
   }
   domCache.delete(t.path);
   tabs.splice(idx, 1);
+  if (displayed && displayed !== t && modelShownPath === displayed.path) {
+    // A background tab closed while a model is on screen: the canvas already
+    // shows the surviving active tab, so re-activating it would only flash
+    // the loading placeholder and re-read the file.
+    activeIdx = tabs.indexOf(displayed);
+    renderTabBar();
+    persistSession();
+    return;
+  }
   if (tabs.length === 0) {
     activeIdx = -1;
     renderTabBar();
@@ -1987,6 +1999,9 @@ async function paintHtml(t, html, raw, { scrollLock = true, forceMermaid = false
   previewEmpty.hidden = true;
   preview.hidden = false;
   modelShownPath = null;
+  // Never let morphdom diff against the 3D viewer's stage: it would morph the
+  // viewer's own (reused) element into this document's first div.
+  if (preview.classList.contains("model-view")) preview.replaceChildren();
   const kind = viewKind(t.path);
   preview.classList.toggle("raw-body", raw && kind === "markdown");
 
