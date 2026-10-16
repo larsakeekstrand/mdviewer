@@ -5,6 +5,7 @@ export const MARKDOWN_EXT = /\.(md|markdown|mdown|mkd|mkdn)$/i;
 
 export const PDF_EXT = /\.pdf$/i;
 export const SHEET_EXT = /\.(xlsx|xlsm|xlsb|xls|ods)$/i;
+export const MODEL_EXT = /\.(stl|3mf|obj)$/i;
 
 /** How a file is shown. `code` is the fallback on purpose: an extension we
  *  don't recognize degrades to source view instead of failing to open. */
@@ -14,6 +15,7 @@ export function viewKind(path) {
   if (IMAGE_EXT.test(p)) return "image";
   if (PDF_EXT.test(p)) return "pdf";
   if (SHEET_EXT.test(p)) return "sheet";
+  if (MODEL_EXT.test(p)) return "model";
   return "code";
 }
 
@@ -39,6 +41,10 @@ const CAPABILITIES = {
   sheet: {
     editable: false, splitPreview: false, rawToggle: false, annotatable: false,
     retainable: true, exportable: true, ownRenderPath: false, cacheBust: false,
+  },
+  model: {
+    editable: false, splitPreview: false, rawToggle: false, annotatable: false,
+    retainable: false, exportable: false, ownRenderPath: true, cacheBust: false,
   },
 };
 
