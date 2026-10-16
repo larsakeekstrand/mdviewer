@@ -1,7 +1,8 @@
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::Path;
 
-pub const MAX_MODEL_BYTES: u64 = 200 * 1024 * 1024;
+// Bytes cross IPC as a JSON number array until the CSP gains `connect-src ipc:`, so keep this small.
+pub const MAX_MODEL_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_3MF_DECLARED_BYTES: u64 = 512 * 1024 * 1024;
 
 const BAMBU_REFUSAL: &str =
@@ -58,13 +59,27 @@ pub fn check_3mf(bytes: &[u8], max_declared: u64) -> Result<(), String> {
     Ok(())
 }
 
+fn read_capped(reader: impl Read, max: u64) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    reader
+        .take(max + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("cannot read model: {e}"))?;
+    check_size(buf.len() as u64, max)?;
+    Ok(buf)
+}
+
 pub fn read_model_bytes(p: &Path) -> Result<Vec<u8>, String> {
     if !is_model_path(p) {
         return Err(format!("not a 3D model file: {}", p.display()));
     }
     let meta = std::fs::metadata(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+    if !meta.is_file() {
+        return Err(format!("not a regular file: {}", p.display()));
+    }
     check_size(meta.len(), MAX_MODEL_BYTES)?;
-    let bytes = std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+    let file = std::fs::File::open(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+    let bytes = read_capped(file, MAX_MODEL_BYTES)?;
     if extension(p).as_deref() == Some("3mf") {
         check_3mf(&bytes, MAX_3MF_DECLARED_BYTES)?;
     }
@@ -162,6 +177,27 @@ mod tests {
         assert!(read_model_bytes(&p)
             .unwrap_err()
             .starts_with("not a 3D model file"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_model_bytes_refuses_non_regular_file() {
+        let d = std::env::temp_dir().join(format!("mdv-model-link-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let link = d.join("x.stl");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink("/dev/null", &link).unwrap();
+        assert!(read_model_bytes(&link)
+            .unwrap_err()
+            .starts_with("not a regular file"));
+    }
+
+    #[test]
+    fn read_capped_rejects_over_cap_content() {
+        assert!(read_capped(Cursor::new(vec![0u8; 10]), 10).is_ok());
+        assert!(read_capped(Cursor::new(vec![0u8; 11]), 10)
+            .unwrap_err()
+            .contains("too large"));
     }
 
     #[test]

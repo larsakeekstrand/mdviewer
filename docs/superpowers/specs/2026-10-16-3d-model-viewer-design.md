@@ -98,7 +98,7 @@ CSP, add one Rust command:
   1. refuses any path whose extension isn't `stl`/`3mf`/`obj`
      (`model::is_model_path`, case-insensitive), so it can't be used as a
      general binary-read primitive;
-  2. refuses files larger than `MAX_MODEL_BYTES` (proposed **200 MB**) by
+  2. refuses files larger than `MAX_MODEL_BYTES` (proposed **64 MB**, since bytes cross IPC as a JSON array until the CSP gains `connect-src ipc:`) by
      checking metadata before reading;
   3. for `.3mf` (a zip), sums the declared uncompressed sizes from the zip
      central directory **without inflating** (same `by_index_raw` technique as
@@ -268,5 +268,5 @@ build yet.
 - Exact three.js version, light intensities, colors, grid size/spacing.
 - Whether double-click-to-reset is worth keeping if it conflicts with
   OrbitControls.
-- Exact cap values (200 MB / 512 MB are proposals).
+- Exact cap values (64 MB / 512 MB are proposals).
 - Overlay styling, within the existing CSS variable palette.

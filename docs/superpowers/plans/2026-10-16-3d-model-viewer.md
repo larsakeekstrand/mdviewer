@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Formats: `stl`, `3mf`, `obj`, case-insensitive. Nothing else.
-- `MAX_MODEL_BYTES = 200 * 1024 * 1024`; `MAX_3MF_DECLARED_BYTES = 512 * 1024 * 1024`.
+- `MAX_MODEL_BYTES = 64 * 1024 * 1024`; `MAX_3MF_DECLARED_BYTES = 512 * 1024 * 1024`.
 - Bambu refusal copy, verbatim: `This looks like a Bambu Studio project file; only plain 3MF models are supported`.
 - No CSP change. No `'unsafe-eval'`, no inline scripts, no import maps.
 - three.js is loaded only via dynamic `import()` on first model open — never from `index.html`.

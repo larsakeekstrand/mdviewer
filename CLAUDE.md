@@ -369,7 +369,7 @@ icon.svg          — source for icon regeneration
   decompression).
 - **3D models**: `.stl`/`.3mf`/`.obj` (`viewKind` → `model`, `ownRenderPath` so
   `renderActive` calls `renderModel` before `render_file`). The `read_model`
-  command (`model.rs`) returns raw bytes after an extension allowlist, a 200 MB
+  command (`model.rs`) returns raw bytes after an extension allowlist, a 64 MB (bytes cross IPC as a JSON array until the CSP gains `connect-src ipc:`)
   size cap, and for 3MF a zip precheck (512 MB summed declared size via
   `by_index_raw`; Bambu Studio project archives are refused with "This looks
   like a Bambu Studio project file; only plain 3MF models are supported").
