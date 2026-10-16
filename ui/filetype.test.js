@@ -80,6 +80,7 @@ test("capability table: exact rows for all five kinds", () => {
     image: [false, false, false, false, false, false, true, true],
     pdf: [false, false, false, false, false, false, true, true],
     sheet: [false, false, false, false, true, true, false, false],
+    model: [false, false, false, false, false, false, true, false],
   };
   const fns = [
     isEditable,
@@ -102,4 +103,11 @@ test("predicates treat an unknown kind as code, not as a crash", () => {
   assert.equal(isEditable("nonsense"), true);
   assert.equal(isExportable("nonsense"), false);
   assert.equal(rendersFromDisk(undefined), false);
+});
+
+test("viewKind classifies 3D model files case-insensitively", () => {
+  for (const p of ["a.stl", "A.STL", "b.3mf", "c.obj"]) {
+    assert.equal(viewKind(p), "model", p);
+  }
+  assert.equal(viewKind("p.scad"), "code");
 });
