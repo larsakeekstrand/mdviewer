@@ -523,6 +523,59 @@ body {
   border: 0;
 }
 
+/* 3D models: the shared three.js canvas fills the pane. The stage is absolutely
+   positioned so the canvas's own size can never feed back into the pane's. */
+.model-view {
+  position: relative;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+.model-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.model-stage canvas {
+  display: block;
+}
+
+.model-dims,
+.model-reset {
+  position: absolute;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--sidebar-bg);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 6px;
+}
+
+.model-dims {
+  left: 12px;
+  bottom: 12px;
+  padding: 3px 8px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+.model-reset {
+  top: 12px;
+  right: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.model-reset:hover {
+  background: var(--sidebar-hover);
+}
+
+.model-view .model-error {
+  color: var(--sidebar-muted);
+  padding: 20px;
+}
+
 /* Standalone code/text files: full-width monospace with a CSS-counter gutter.
    Background uses the theme canvas so the syntect token colors (tuned for
    InspiredGitHub / base16-ocean.dark) read correctly in both themes. */
