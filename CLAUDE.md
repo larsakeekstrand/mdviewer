@@ -5,7 +5,7 @@ preview, GitHub-flavored markdown rendering, Mermaid diagrams, KaTeX math,
 copy-button on code blocks, git status decoration in the tree, live reload,
 an Open Recent menu, an in-app update check against GitHub Releases, a custom
 right-click context menu, a default-app file association for markdown files,
-in-app source editing with live preview, file management from the tree, and a
+in-app source editing with live preview, a rotatable 3D viewer for STL/3MF/OBJ models, file management from the tree, and a
 Review Mode that annotates rendered blocks and copies a structured review to the
 clipboard for pasting into an AI coding assistant, and a one-click installer for
 a Claude Code hook that auto-opens the plan/spec files Claude writes, and an MCP server that lets Claude Code open documents in the viewer and request in-app reviews.
@@ -67,6 +67,8 @@ src-tauri/
                     mermaid fences → <pre class="mermaid"> (codefence renderer)
     tree.rs       — std::fs::read_dir depth-1, unfiltered (shows all files)
     watcher.rs    — notify-debouncer-full, 200 ms debounce, watches PARENT dir
+    model.rs      — read_model backend: extension allowlist, size cap, 3MF zip
+                    precheck (declared-bytes cap, Bambu refusal); unit-tested
     xlsx.rs       — calamine workbook → HTML tables; pure Cell/Sheet types,
                     Excel serial-date conversion, row/cell/byte caps (unit-tested)
     menu.rs       — native menu bar; on_menu_event handler emits JS events
@@ -83,8 +85,14 @@ ui/
                     mermaid render (renderMermaid) + live-reload preservation;
                     CodeMirror editor wiring (enter/exit edit, save, conflict)
   editor.js       — pure helpers: isDirty, classifyFileChange (unit-tested)
-  filetype.js     — viewKind(path) → markdown|image|pdf|sheet|code + the
+  filetype.js     — viewKind(path) → markdown|image|pdf|sheet|model|code + the
                     capability table (isEditable, hasRawToggle, …); unit-tested
+  model.js        — pure helpers: modelFormat, formatDimensions, frameCamera,
+                    keepCamera for the 3D viewer (unit-tested)
+  model-viewer.js — three.js scene/camera/controls/loaders; dynamic-imported on
+                    first model open, one shared WebGLRenderer per window
+  three/          — vendored three.js r170 + OrbitControls/STL/3MF/OBJ loaders +
+                    fflate, import specifiers rewritten (see three/README.md)
   treeops.js      — pure helpers: validateName (inline-rename) + treeAncestors
                     (folders to expand to reveal a file); unit-tested
   rendercache.js  — RenderCache: LRU (byte-bounded) of rendered HTML per
@@ -306,7 +314,7 @@ icon.svg          — source for icon regeneration
   cache-bust. The Raw button is hidden and Copy Source / Export are guarded for
   image tabs.
 - **View dispatch (`viewKind`)**: `ui/filetype.js` classifies a path into one
-  of `markdown | image | pdf | sheet | code` and a capability table
+  of `markdown | image | pdf | sheet | model | code` and a capability table
   (`isEditable`, `hasSplitPreview`, `hasRawToggle`, `isAnnotatable`,
   `isRetainable`, `isExportable`, `rendersFromDisk`, `bustsCacheOnChange`)
   answers the gates that used to be scattered `isImagePath`/`isCodeView`
@@ -359,6 +367,28 @@ icon.svg          — source for icon regeneration
   declared-bytes precheck is cheap defense-in-depth, not a complete bound —
   it under-reports shared-string amplification, which inflates only after
   decompression).
+- **3D models**: `.stl`/`.3mf`/`.obj` (`viewKind` → `model`, `ownRenderPath` so
+  `renderActive` calls `renderModel` before `render_file`). The `read_model`
+  command (`model.rs`) returns raw bytes after an extension allowlist, a 200 MB
+  size cap, and for 3MF a zip precheck (512 MB summed declared size via
+  `by_index_raw`; Bambu Studio project archives are refused with "This looks
+  like a Bambu Studio project file; only plain 3MF models are supported").
+  Bytes go over IPC, not `fetch`/asset protocol, because the CSP and
+  `connect-src` aren't opened for it. `ui/model-viewer.js` is loaded by dynamic
+  `import()` on first open (never from `index.html`), owns ONE `WebGLRenderer`
+  reused by every model tab, and rotates all formats Z-up → Y-up. Dimensions
+  are labelled mm; three r170's `ThreeMFLoader` ignores `<model unit>`, so the
+  viewer reads the unit itself and scales 3MF to mm (STL/OBJ unscaled). Text
+  from model files reaches the DOM only via `textContent`. Controls: left-drag
+  rotate, scroll/pinch zoom, right-drag or Shift-drag pan, **Reset view** /
+  double-click. Each tab keeps an ephemeral `modelCamera` (never in session
+  restore); `keepCamera` decides whether a reload/theme change keeps the live
+  camera. Theme toggle calls `modelViewer.applyTheme()` — no `read_model`, no
+  camera change. A non-reload render first clears `#preview` to a "Loading
+  model…" placeholder and resets `modelShownPath`, so nothing stale can be
+  reattached during the await (tab-repointing invariant); renaming the active
+  model tab re-runs `renderActive`. Model tabs are not retained in the DOM
+  cache, and find, edit, raw, review and export are refused.
 - **Menu actions** fire as Tauri events into the frontend:
   `edit-action` (copy / copy-source / toggle-raw / toggle-edit / save),
   `open-file`, `open-folder`, `menu-check-updates`.
@@ -532,7 +562,7 @@ icon.svg          — source for icon regeneration
   the menu export), returns the written path. The proxy emits
   `notifications/progress` every 10 s to hold client timeouts open and exits
   when stdin or stdout closes. Validation is GUI-side (`mcp_server::validate`):
-  extension allowlist (markdown+images+PDF+spreadsheets for opening; markdown only for reviews;
+  extension allowlist (markdown+images+PDF+spreadsheets+3D models for opening; markdown only for reviews;
   markdown-in/`.pdf`-out for `generate_pdf`) + existence. The proxy absolutizes a
   relative `path` argument against its own cwd (`absolutize_path_arg` — Claude
   spawns the proxy with cwd = the project root) before forwarding. **Routing**
@@ -704,6 +734,17 @@ Windows-specific gotchas:
 - **The xlsx arm must precede `is_binary`** in `commands::render_file`. xlsx
   is a zip archive; put the check after and every workbook renders "Can't
   preview this file type".
+- **three.js vendoring needs an import rewrite**: the addons import the bare
+  specifier `'three'` (and `'../libs/fflate.module.js'`), which needs an import
+  map, and CSP `script-src 'self'` blocks import maps. `ui/three/` therefore
+  rewrites those specifiers to sibling relative paths. Re-vendoring must repeat
+  it; the check is in `ui/three/README.md`.
+- **`read_model` arrives as a number array, not an ArrayBuffer**: it returns
+  `tauri::ipc::Response`, but the CSP has no `connect-src ipc: http://ipc.localhost`,
+  so Tauri's custom-protocol IPC falls back to postMessage (JSON) and JS gets a
+  plain array. `modelBytes()` in `app.js` accepts both forms. The CSP was left
+  alone on purpose; the cost is slow transfer of large models. Adding that
+  `connect-src` is the known fix if it ever matters.
 - **Spreadsheet caps must be enforced in the read loop, not only in the
   render step**: calamine 0.36's `worksheet_range` has no early-stop hook —
   it fully materializes a sheet before anything downstream can truncate it.

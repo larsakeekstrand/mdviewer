@@ -28,6 +28,7 @@ A markdown viewer and editor for macOS and Windows with a VS Code–style file t
 - **Session restore** — the last folder you opened and your open tabs are reopened on the next launch
 - Per-tab raw / rendered toggle
 - **Image files** — click an image (`png`, `jpg`, `gif`, `webp`, `avif`, `bmp`, `ico`, `svg`) to view it at actual size, with live reload when it changes on disk
+- **3D model viewing** — open `.stl`, `.3mf`, and `.obj` files in a rotatable 3D view with a grid and the model's dimensions in mm (plain 3MF models only; Bambu Studio project files are not supported)
 - **PDF and spreadsheet preview** — open `.pdf` files in the built-in viewer, and `.xlsx` / `.xlsm` / `.xlsb` / `.xls` / `.ods` workbooks as browsable data tables (cell values and cached formula results — the data, not the original document's appearance)
 - **Open from Finder** — set MDViewer as the default app for `.md` files and double-click to open them
 - **Multiple windows** — open several projects side by side, one per window (**File ▸ New Window**, ⌘⇧N; **Open Folder…** re-roots the focused window instead). Each window has its own tree, tabs, editor buffers, and Review Mode. Files opened from Finder, the command line, or a Claude Code session (the hook and the MCP tools) land in the window whose project already contains them, opening a new window when none does. Quitting (⌘Q) and relaunching restores every window, with its tabs and screen position.
@@ -136,7 +137,7 @@ that case.
 - The **active tab's file is revealed in the tree** — its folders expand, its row scrolls into view, and it's highlighted with an accent bar — so you always know which file you're looking at. (Files opened from outside the current folder simply aren't highlighted.)
 - Every file on disk is shown — including dotfiles, entries matched by `.gitignore`, and `node_modules` / `target`.
 - The tree updates live: files added, removed, or renamed by other apps in the root or any expanded folder appear without reopening the folder, and git badges refresh with them.
-- Markdown files render as a preview; image files open as images; PDFs open in the built-in PDF viewer; spreadsheets (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`) render as data tables; code and other text files are shown with syntax highlighting and a line-number gutter (binary files show a "can't preview" notice).
+- Markdown files render as a preview; image files open as images; PDFs open in the built-in PDF viewer; spreadsheets (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`) render as data tables; 3D models (`.stl`, `.3mf`, `.obj`) open in a rotatable 3D view; code and other text files are shown with syntax highlighting and a line-number gutter (binary files show a "can't preview" notice).
 
 ### Tabs
 
@@ -168,6 +169,10 @@ PDFs render in the same built-in viewer your browser uses, so search inside a PD
 
 Spreadsheets can be exported. **Export as PDF** reproduces the table as you see it on screen, scaling a wide sheet down so no columns are lost off the page edge. **Export as HTML** writes a standard document-style table — readable and correctly structured, but without the denser spreadsheet styling the app uses on screen. PDF tabs cannot be exported at all: the document is rendered by the system's PDF viewer, which MDViewer cannot read back.
 
+### 3D models
+
+`.stl`, `.3mf`, and `.obj` files open in a 3D view. Drag to rotate, scroll or pinch to zoom, right-drag (or Shift-drag) to pan, and click **Reset view** or double-click to re-frame the model. The camera is kept across live reloads and theme changes. Bambu Studio project 3MFs are not supported — export a plain 3MF instead. Models can't be searched, edited, reviewed, or exported.
+
 ### Review Mode
 
 Click **💬 Review** at the top-right of the tab bar to turn the rendered document into a review surface — useful when you're reading a plan, spec, or report produced by an AI coding assistant and want to send back precise feedback. A hint at the top of the document explains the flow.
@@ -177,7 +182,7 @@ Click **💬 Review** at the top-right of the tab bar to turn the rendered docum
 - When you're done, click the toggle again — now **✓ Finish & Copy** — to assemble everything into one markdown block (the file's path, the general note, and each annotated block quoted with its comment in document order), copy it to the clipboard, clear the annotations, exit review mode, and confirm with a toast. Paste it straight into your assistant. (Finishing with nothing to send just exits.)
 - Comments are anchored to block text, so they survive live reloads and follow their block when the document is rewritten above them; a comment whose block text changed is surfaced separately with a "⚠ this block changed" tag. Annotations live only for the session — they aren't written to disk, and they're excluded from exports.
 
-Review Mode is available on rendered markdown only (hidden in Raw view, Edit mode, and on image, PDF, and spreadsheet tabs).
+Review Mode is available on rendered markdown only (hidden in Raw view, Edit mode, and on image, PDF, spreadsheet, and 3D model tabs).
 
 ### Theme
 
